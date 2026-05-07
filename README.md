@@ -93,6 +93,8 @@ app/nemoflix_amd/          # API service and workflow builders
 scripts/                   # optional deployment/setup helpers
 research/                  # research notes
 training/                  # local training data and outputs, gitignored
+  datasets/                # prepared training datasets per run
+  output/                  # LoRA / model training outputs
 outputs/                   # generated outputs, gitignored
 ```
 

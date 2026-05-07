@@ -7,29 +7,25 @@ trap 'echo "ERROR: setup failed at line $LINENO"' ERR
 
 APT_GET="apt-get -o DPkg::Lock::Timeout=300"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
-APP_REPO_URL="https://github.com/ortegarod/nemoflix.git"
-APP_DIR="/root/nemoflix"
+APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/nemoflix.git}"
+APP_DIR="${APP_DIR:-/root/nemoflix}"
+NEMOFLIX_OUTPUT_DIR="${NEMOFLIX_OUTPUT_DIR:-/root/ComfyUI/output}"
+COMFY_URL="${COMFY_URL:-http://127.0.0.1:8188}"
 
-echo "=== AMD MI300X ROCm 7.2 ComfyUI Setup Starting ==="
+export DEBIAN_FRONTEND=noninteractive
+# DigitalOcean/Ubuntu images can auto-restart services during apt operations.
+# Keep restarts list-only so SSH/network services do not bounce mid-bootstrap.
+export NEEDRESTART_MODE=l
+
+echo "=== AMD MI300X ROCm 7.2 ComfyUI Worker Setup Starting ==="
 
 # Refresh package metadata before installing dependencies.
 $APT_GET update -y
 
-# Git is required to clone ComfyUI and ComfyUI-Manager.
-$APT_GET install -y git
+# Base utilities and Python tooling.
+$APT_GET install -y git git-lfs python3-pip python3.12-venv wget htop curl ca-certificates
 
-# Python tooling for an isolated host virtual environment.
-$APT_GET install -y python3-pip
-$APT_GET install -y python3.12-venv
-
-# wget is required by optional stack install scripts.
-$APT_GET install -y wget
-
-# htop is optional, but useful for manual droplet debugging.
-$APT_GET install -y htop
-
-# curl is useful for local API health checks.
-$APT_GET install -y curl
+git lfs install --system || true
 
 # Verify host GPU and ROCm visibility.
 echo "=== Host GPU Check ==="
@@ -39,11 +35,13 @@ head -20 /tmp/rocminfo.txt
 
 # Create virtual environment on the host.
 echo "=== Creating Python venv ==="
-python3 -m venv /root/comfyui-venv
+if [ ! -d /root/comfyui-venv ]; then
+    python3 -m venv /root/comfyui-venv
+fi
 "$PYTHON_BIN" -m pip install --upgrade pip setuptools wheel
 
 # Install PyTorch for ROCm inside venv.
-# This is the slower path, but it is explicit and avoids DigitalOcean's Jupyter/Docker appliance behavior.
+# This is explicit and avoids DigitalOcean's Jupyter/Docker appliance behavior.
 echo "=== Installing PyTorch for ROCm ==="
 "$PYTHON_BIN" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm7.2 || \
 "$PYTHON_BIN" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm7.0 || \
@@ -53,7 +51,9 @@ echo "=== Installing PyTorch for ROCm ==="
 echo "=== PyTorch GPU Check ==="
 "$PYTHON_BIN" -c "import torch; print('PyTorch:', torch.__version__); print('ROCm available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None')"
 
-# Clone or update the project repo. This is the application layer that owns the agent-native API wrapper.
+# Clone or update the project repo. The droplet uses this repo only for worker
+# install scripts/workflow assets. The durable API, database, Studio UI, and
+# control plane live on the VPS.
 echo "=== Cloning/updating Nemoflix repo ==="
 if [ -d "$APP_DIR/.git" ]; then
     git -C "$APP_DIR" fetch --depth 1 origin main
@@ -62,19 +62,22 @@ else
     git clone --depth 1 "$APP_REPO_URL" "$APP_DIR"
 fi
 
-# Install the agent-native API wrapper. This service talks to ComfyUI's native
-# HTTP API and keeps humans out of the ComfyUI browser UI.
-if [ -f "$APP_DIR/requirements.txt" ]; then
-    "$PYTHON_BIN" -m pip install -r "$APP_DIR/requirements.txt"
-fi
+# NOTE: Studio frontend and Nemoflix AMD API are hosted on the VPS, not on the
+# droplet. This droplet is disposable and runs ComfyUI only.
 
 # Install ComfyUI.
 echo "=== Installing ComfyUI ==="
 cd /root
-git clone https://github.com/comfyanonymous/ComfyUI.git
+if [ ! -d /root/ComfyUI/.git ]; then
+    git clone https://github.com/comfyanonymous/ComfyUI.git
+else
+    git -C /root/ComfyUI pull --ff-only || true
+fi
 
 # Install ComfyUI-Manager.
-git clone https://github.com/ltdrdata/ComfyUI-Manager.git /root/ComfyUI/custom_nodes/ComfyUI-Manager
+if [ ! -d /root/ComfyUI/custom_nodes/ComfyUI-Manager/.git ]; then
+    git clone https://github.com/ltdrdata/ComfyUI-Manager.git /root/ComfyUI/custom_nodes/ComfyUI-Manager
+fi
 cd /root/ComfyUI
 
 # Install ComfyUI requirements inside venv.
@@ -106,37 +109,12 @@ EOF
 
 systemctl daemon-reload
 systemctl enable comfyui.service
-systemctl start comfyui.service
-
-# Create a small product/API layer over ComfyUI's execution API.
-cat > /etc/systemd/system/nemoflix-amd-api.service << EOF
-[Unit]
-Description=Nemoflix AMD Agent API
-After=network-online.target comfyui.service
-Wants=network-online.target comfyui.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$APP_DIR
-Environment="PATH=/root/comfyui-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="PYTHONPATH=$APP_DIR/app"
-Environment="COMFY_URL=http://127.0.0.1:8188"
-ExecStart=$PYTHON_BIN -m uvicorn nemoflix_amd.api:app --host 0.0.0.0 --port 8190
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
+systemctl restart comfyui.service
 
 systemctl daemon-reload
-systemctl enable nemoflix-amd-api.service
-systemctl start nemoflix-amd-api.service
 
 # Show service status in log.
 systemctl --no-pager --full status comfyui.service
-systemctl --no-pager --full status nemoflix-amd-api.service
 
 # Verify API from the host.
 echo "=== Waiting for ComfyUI API ==="
@@ -148,8 +126,11 @@ for i in {1..60}; do
     sleep 5
 done
 curl -sS --max-time 5 http://127.0.0.1:8188/system_stats
-curl -sS --max-time 5 http://127.0.0.1:8190/api/health
 
 echo "=== Setup Complete ==="
+echo "ComfyUI worker: http://<droplet-ip>:8188"
+echo "Studio UI and Nemoflix AMD API are hosted on the VPS."
+echo "On the VPS, set COMFY_URL=http://<droplet-ip>:8188 in nemoflix-amd-api.service and restart it."
+echo "Install FLUX.2 image stack: $APP_DIR/scripts/install-image-stack.sh"
 echo "Install Wan 2.2 video stack: $APP_DIR/scripts/install-video-stack.sh"
 echo "Install AI Toolkit training stack: $APP_DIR/scripts/install-ai-toolkit.sh"

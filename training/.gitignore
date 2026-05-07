@@ -1,6 +1,0 @@
-datasets/
-outputs/
-logs/
-*.safetensors
-*.ckpt
-*.pt

@@ -1,0 +1,12 @@
+node_modules
+studio/node_modules
+studio/dist
+studio/.vite
+*.tsbuildinfo
+studio/*.tsbuildinfo
+.env
+.env.*
+.git
+.gitignore
+__pycache__
+.venv

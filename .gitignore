@@ -34,8 +34,10 @@ venv/
 
 # Internal/private notes and datasets
 internal/
-private_datasets/
-RodrigoFaceDataset.zip
+training/
 
 # OS/editor
 .DS_Store
+
+# Local/generated Hugging Face Space preview artifacts
+outputs/

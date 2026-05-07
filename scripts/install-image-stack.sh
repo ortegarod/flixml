@@ -4,7 +4,9 @@ set -x
 
 COMFY_DIR="${COMFY_DIR:-/root/ComfyUI}"
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:8188}"
-NEMOFLIX_API_URL="${NEMOFLIX_API_URL:-http://127.0.0.1:8190}"
+# Optional VPS control-plane API. On disposable GPU workers this may be unset;
+# this script must still succeed with ComfyUI-only verification.
+NEMOFLIX_API_URL="${NEMOFLIX_API_URL:-}"
 HF_BASE_FLUX2="https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files"
 HF_BASE_Z_IMAGE="https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files"
 RUN_IMAGE_STACK_TEST="${RUN_IMAGE_STACK_TEST:-0}"
@@ -68,9 +70,16 @@ curl -sS --max-time 10 "$COMFY_URL/models/diffusion_models"
 curl -sS --max-time 10 "$COMFY_URL/models/text_encoders"
 curl -sS --max-time 10 "$COMFY_URL/models/vae"
 curl -sS --max-time 10 "$COMFY_URL/models/loras"
-curl -sS --max-time 10 "$NEMOFLIX_API_URL/api/health"
+
+if [ -n "$NEMOFLIX_API_URL" ]; then
+    curl -sS --max-time 10 "$NEMOFLIX_API_URL/api/health"
+fi
 
 if [ "$RUN_IMAGE_STACK_TEST" = "1" ]; then
+    if [ -z "$NEMOFLIX_API_URL" ]; then
+        echo "ERROR: RUN_IMAGE_STACK_TEST=1 requires NEMOFLIX_API_URL pointing at the VPS control-plane API."
+        exit 1
+    fi
     curl -sS -X POST "$NEMOFLIX_API_URL/api/lora-training/generate" \
       -H "Content-Type: application/json" \
       -d "{\"checkpoint\":\"${IMAGE_STACK_TEST_CHECKPOINT}\",\"prompt\":\"${IMAGE_STACK_TEST_PROMPT}\",\"submit\":false}"
