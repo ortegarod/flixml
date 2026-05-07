@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Literal
+from typing import Any, Literal
 
 WAN_NEGATIVE = (
     "bright colors, overexposed, static, blurred details, subtitles, style, artwork, "
@@ -24,7 +24,7 @@ def build_wan22_t2v(
     length: int = 121,
     fps: int = 16,
     seed: int | None = None,
-    filename_prefix: str = "nemoflix-amd/wan-t2v",
+    filename_prefix: str = "videos/generated",
     steps_high: int = 10,
     steps_low: int = 10,
     cfg_high: float = 3.5,
@@ -60,11 +60,12 @@ def build_wan22_t2v(
 def build_flux2_lora_image(
     *,
     prompt: str,
-    lora_name: str,
-    width: int = 1024,
-    height: int = 1024,
+    lora_name: str | None = None,
+    loras: list[dict[str, Any]] | None = None,
+    width: int = 1248,
+    height: int = 832,
     seed: int | None = None,
-    filename_prefix: str = "nemoflix-amd/flux2-lora",
+    filename_prefix: str = "images/generated",
     steps: int = 20,
     cfg: float = 4.0,
     sampler: str = "euler",
@@ -82,14 +83,16 @@ def build_flux2_lora_image(
     """
 
     noise_seed = _seed(seed)
-    return {
+    lora_specs = list(loras or [])
+    if lora_name:
+        lora_specs.insert(0, {"name": lora_name, "strength": lora_strength})
+
+    workflow = {
         "12": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
         "38": {"class_type": "CLIPLoader", "inputs": {"clip_name": clip, "type": "flux2", "device": "default"}},
         "10": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
-        "50": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["12", 0], "lora_name": lora_name, "strength_model": lora_strength}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["38", 0]}},
         "26": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["6", 0], "guidance": guidance}},
-        "22": {"class_type": "BasicGuider", "inputs": {"model": ["50", 0], "conditioning": ["26", 0]}},
         "25": {"class_type": "RandomNoise", "inputs": {"noise_seed": noise_seed}},
         "16": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": sampler}},
         "48": {"class_type": "Flux2Scheduler", "inputs": {"steps": steps, "width": width, "height": height}},
@@ -98,6 +101,21 @@ def build_flux2_lora_image(
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["13", 0], "vae": ["10", 0]}},
         "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": filename_prefix}},
     }
+
+    model_ref = ["12", 0]
+    for index, spec in enumerate(lora_specs, start=1):
+        name = spec.get("name") or spec.get("lora_name")
+        if not name:
+            continue
+        node_id = str(50 + index)
+        workflow[node_id] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {"model": model_ref, "lora_name": name, "strength_model": float(spec.get("strength", lora_strength))},
+        }
+        model_ref = [node_id, 0]
+
+    workflow["22"] = {"class_type": "BasicGuider", "inputs": {"model": model_ref, "conditioning": ["26", 0]}}
+    return workflow
 
 
 
@@ -111,7 +129,7 @@ def build_wan22_i2v(
     length: int = 121,
     fps: int = 16,
     seed: int | None = None,
-    filename_prefix: str = "nemoflix-amd/wan-i2v",
+    filename_prefix: str = "videos/generated",
     steps_high: int = 10,
     steps_low: int = 10,
     cfg_high: float = 3.5,
