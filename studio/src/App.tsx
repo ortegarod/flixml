@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
-import { BrowserRouter, Routes, Route, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet, useMatch, useNavigate, useParams, Link } from "react-router-dom";
 import { Menu, Sparkles, UserCircle } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
@@ -7,6 +7,7 @@ import { ProjectsView } from "./components/ProjectsView";
 import { LoraTrainingPage } from "./components/LoraTrainingPage";
 import { ProjectDetailView } from "./components/ProjectDetailView";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
+import LandingPage from "./LandingPage";
 import type { SidebarTab } from "./components/sidebar/AppSidebar";
 import type { JobItem, LoraCheckpoint, LoraTrainingStatus, MediaItem, Project, Scene, Shot, ProjectPhase, ProjectModeData } from "./types";
 
@@ -60,8 +61,8 @@ export function useApp() {
 function Shell() {
   const ctx = useApp();
   const navigate = useNavigate();
-  const projectMatch = useMatch("/projects/:projectId");
-  const loraMatch = useMatch("/lora-training");
+  const projectMatch = useMatch("/studio/projects/:projectId");
+  const loraMatch = useMatch("/studio/lora-training");
 
   // Load project when entering a project-detail route
   const lastProjectId = useRef<string | undefined>(undefined);
@@ -100,7 +101,7 @@ function Shell() {
           onSelectShot: ctx.setSelectedShotId,
           onBack: () => {
             ctx.setSelectedShotId(null);
-            navigate("/projects");
+            navigate("/studio/projects");
           },
           onRefresh: () => {
             const pid = projectMatch?.params.projectId;
@@ -127,11 +128,11 @@ function Shell() {
           )}
           <button
             onClick={() => {
-              navigate("/");
+              navigate("/studio");
               ctx.setActiveSidebarTab("generate");
             }}
             className="flex items-center gap-3 min-w-0 hover:opacity-80 transition"
-            title="Home"
+            title="Studio home"
           >
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 via-fuchsia-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/20 ring-1 ring-white/10">
               <Sparkles className="w-4 h-4 text-white" />
@@ -141,6 +142,9 @@ function Shell() {
               <p className="text-[10px] text-rose-400/60 tracking-wide">AMD MI300X</p>
             </div>
           </button>
+          <Link to="/" className="hidden sm:inline-flex items-center text-[11px] text-gray-600 hover:text-gray-400 transition ml-1" title="Back to home">
+            ← Home
+          </Link>
         </div>
 
         <div className="flex items-center gap-2 text-[11px]">
@@ -187,16 +191,16 @@ function Shell() {
             activeTab={ctx.activeSidebarTab}
             onTabChange={(tab) => {
               ctx.setActiveSidebarTab(tab);
-              if (tab === "generate") navigate("/");
-              if (tab === "projects") navigate("/projects");
-              if (tab === "characters") navigate("/lora-training");
+              if (tab === "generate") navigate("/studio");
+              if (tab === "projects") navigate("/studio/projects");
+              if (tab === "characters") navigate("/studio/lora-training");
             }}
             onClose={() => ctx.setSidebarOpen(false)}
             checkpoints={ctx.checkpoints}
             onQueued={ctx.load}
             onSelectCharacter={(id) => {
               ctx.setActiveSidebarTab("characters");
-              navigate(`/characters/${id}`);
+              navigate(`/studio/characters/${id}`);
             }}
             projectMode={projectMode}
           />
@@ -237,14 +241,14 @@ function StudioRoute() {
       error={ctx.error}
       onOpen={ctx.setSelected}
       onDelete={ctx.deleteItem}
-      onOpenProjects={() => window.location.href = "/projects"}
+      onOpenProjects={() => window.location.href = "/studio/projects"}
     />
   );
 }
 
 function ProjectsRoute() {
   const navigate = useNavigate();
-  return <ProjectsView onOpenProject={(id) => navigate(`/projects/${id}`)} />;
+  return <ProjectsView onOpenProject={(id) => navigate(`/studio/projects/${id}`)} />;
 }
 
 function ProjectRoute() {
@@ -277,7 +281,7 @@ function ProjectRoute() {
       onRefresh={() => (projectId ? ctx.loadProject(projectId) : Promise.resolve())}
       onBack={() => {
         ctx.setSelectedShotId(null);
-        navigate("/projects");
+        navigate("/studio/projects");
       }}
       onDeleteScene={ctx.deleteScene}
       onDeleteShot={ctx.deleteShot}
@@ -299,7 +303,7 @@ function CharacterRoute() {
       onGenerate={() => {
         setSidebarOpen(true);
         setActiveSidebarTab("generate");
-        navigate(`/?character=${characterId}`);
+        navigate(`/studio?character=${characterId}`);
       }}
     />
   );
@@ -483,7 +487,8 @@ export default function App() {
     <BrowserRouter>
       <AppContext.Provider value={ctxValue}>
         <Routes>
-          <Route element={<Shell />}>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/studio" element={<Shell />}>
             <Route index element={<StudioRoute />} />
             <Route path="projects" element={<ProjectsRoute />} />
             <Route path="projects/:projectId" element={<ProjectRoute />} />
