@@ -6,7 +6,7 @@ job: extension
 config:
   name: "character_wan22_i2v_v1"
   process:
-    - type: "sd_trainer"
+    - type: "ui_trainer"
       training_folder: "/root/nemoflix-training/output"
       device: cuda:0
       trigger_word: "character_trigger"
@@ -53,6 +53,8 @@ config:
         model_kwargs:
           train_high_noise: true
           train_low_noise: true
+      logging:
+        use_ui_logger: true
       sample:
         sampler: "flowmatch"
         sample_every: 250

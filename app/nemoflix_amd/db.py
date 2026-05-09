@@ -157,6 +157,88 @@ async def get_job(prompt_id: str) -> dict[str, Any] | None:
     return _job_row(row) if row else None
 
 
+# -- training_jobs ---------------------------------------------------------------
+
+def _training_job_row(row: asyncpg.Record) -> dict[str, Any]:
+    data = dict(row)
+    if isinstance(data.get("metadata"), str):
+        with contextlib.suppress(json.JSONDecodeError):
+            data["metadata"] = json.loads(data["metadata"])
+    return data
+
+
+async def get_training_job(job_name: str) -> dict[str, Any] | None:
+    row = await get_pool().fetchrow("SELECT * FROM training_jobs WHERE job_name=$1", job_name)
+    return _training_job_row(row) if row else None
+
+
+async def get_latest_training_job() -> dict[str, Any] | None:
+    row = await get_pool().fetchrow("SELECT * FROM training_jobs ORDER BY created_at DESC LIMIT 1")
+    return _training_job_row(row) if row else None
+
+
+async def list_training_jobs() -> list[dict[str, Any]]:
+    rows = await get_pool().fetch("SELECT * FROM training_jobs ORDER BY created_at DESC")
+    return [_training_job_row(row) for row in rows]
+
+
+async def save_training_job(
+    job_name: str,
+    *,
+    status: str = "configured",
+    config_path: str | None = None,
+    log_path: str | None = None,
+    output_dir: str | None = None,
+    dataset: str | None = None,
+    trigger_word: str | None = None,
+    model: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO training_jobs (job_name, status, config_path, log_path, output_dir,
+                                       dataset, trigger_word, model, metadata, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,NOW())
+            ON CONFLICT (job_name) DO UPDATE SET
+                status      = EXCLUDED.status,
+                config_path = COALESCE(EXCLUDED.config_path, training_jobs.config_path),
+                log_path    = COALESCE(EXCLUDED.log_path, training_jobs.log_path),
+                output_dir  = COALESCE(EXCLUDED.output_dir, training_jobs.output_dir),
+                dataset     = COALESCE(EXCLUDED.dataset, training_jobs.dataset),
+                trigger_word= COALESCE(EXCLUDED.trigger_word, training_jobs.trigger_word),
+                model       = COALESCE(EXCLUDED.model, training_jobs.model),
+                metadata    = COALESCE(training_jobs.metadata, '{}'::jsonb) || COALESCE(EXCLUDED.metadata, '{}'::jsonb),
+                updated_at  = NOW()
+            """,
+            job_name, status, config_path, log_path, output_dir,
+            dataset, trigger_word, model, _json(metadata),
+        )
+
+
+async def update_training_job_status(
+    job_name: str,
+    status: str,
+    *,
+    error: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    completed = status in {"completed", "failed"}
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE training_jobs
+            SET status       = $2,
+                error        = $3,
+                metadata     = COALESCE(training_jobs.metadata, '{}'::jsonb) || COALESCE($4::jsonb, '{}'::jsonb),
+                updated_at   = NOW(),
+                completed_at = CASE WHEN $5 THEN NOW() ELSE training_jobs.completed_at END
+            WHERE job_name   = $1
+            """,
+            job_name, status, error, _json(metadata), completed,
+        )
+
+
 def _character_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
     for key in ("source_images", "loras", "defaults", "metadata"):

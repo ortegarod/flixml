@@ -5,7 +5,7 @@ job: extension
 config:
   name: "identity_flux2_lora_v1"
   process:
-    - type: "sd_trainer"
+    - type: "ui_trainer"
       training_folder: "/root/nemoflix-training/output"
       device: cuda:0
       # Replace with the private trigger for the subject, e.g. a short unique token.
@@ -56,6 +56,8 @@ config:
         low_vram: false
         model_kwargs:
           match_target_res: false
+      logging:
+        use_ui_logger: true
       sample:
         sampler: "flowmatch"
         sample_every: 250

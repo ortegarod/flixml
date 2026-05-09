@@ -9,8 +9,9 @@ APT_GET="apt-get -o DPkg::Lock::Timeout=300"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
 APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/nemoflix.git}"
 APP_DIR="${APP_DIR:-/root/nemoflix}"
-NEMOFLIX_OUTPUT_DIR="${NEMOFLIX_OUTPUT_DIR:-/root/ComfyUI/output}"
+
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:8188}"
+
 
 export DEBIAN_FRONTEND=noninteractive
 # DigitalOcean/Ubuntu images can auto-restart services during apt operations.
@@ -139,6 +140,10 @@ echo "ComfyUI worker: http://<droplet-ip>:8188"
 echo "Studio UI and Nemoflix AMD API are hosted on the VPS."
 echo "On the VPS, set COMFY_URL=http://<droplet-ip>:8188 in nemoflix-amd-api.service and restart it."
 echo ""
-echo "!!! REMINDER !!! Transfer the LoRA model to the droplet (and dataset if traning a LoRA):"
-echo "  scp -i ~/.ssh/id_ed25519_amd_hackathon /home/ubuntu/nemoflix-amd-backups/2026-05-06-mycharacter-flux2/loras/mycharacter_flux2_lora_v1_dop.safetensors root@<droplet-ip>:/root/ComfyUI/models/loras/nemoflix-amd/"
+echo "!!! REMINDER !!! Transfer any custom LoRA models to the droplet:"
+echo "  scp -i <ssh-key> <your-lora.safetensors> root@<droplet-ip>:/root/ComfyUI/models/loras/nemoflix-amd/"
+echo ""
+echo "!!! REMINDER !!! For LoRA training, create the ai-toolkit env file with your HF token:"
+echo "  echo 'HF_TOKEN=hf_...' > /root/ai-toolkit/.env"
+echo "  (FLUX.2-dev will be downloaded automatically on the first training job)"
 echo "Then restart ComfyUI: systemctl restart comfyui.service"

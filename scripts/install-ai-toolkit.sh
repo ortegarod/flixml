@@ -13,9 +13,9 @@ TRAINING_DIR="${TRAINING_DIR:-/root/nemoflix-training}"
 ROCM_INDEX_PRIMARY="${ROCM_INDEX_PRIMARY:-https://download.pytorch.org/whl/rocm7.2}"
 ROCM_INDEX_FALLBACK="${ROCM_INDEX_FALLBACK:-https://download.pytorch.org/whl/rocm7.0}"
 AI_TOOLKIT_REF="${AI_TOOLKIT_REF:-main}"
-# CLI training is the default. The UI pulls NodeSource apt repo + nodejs and can
-# trigger service restart/deferred-restart behavior on cloud images; keep it opt-in.
-INSTALL_UI_DEPS="${INSTALL_UI_DEPS:-0}"
+INSTALL_UI_DEPS="${INSTALL_UI_DEPS:-1}"
+AITK_AUTH_TOKEN="${AITK_AUTH_TOKEN:-nemoflix-aitk-secret}"
+AITK_GPU_IDS="${AITK_GPU_IDS:-0}"
 PYTHON_BIN="$TOOLKIT_VENV/bin/python"
 export DEBIAN_FRONTEND=noninteractive
 # Do not let Ubuntu's needrestart apt hook bounce services while we are connected
@@ -143,20 +143,30 @@ chmod +x "$TRAINING_DIR/run-ai-toolkit.sh"
 
 if [ "$INSTALL_UI_DEPS" = "1" ]; then
   if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' 2>/dev/null; then
-    echo "=== Installing Node.js 22 for optional AI Toolkit UI ==="
+    echo "=== Installing Node.js 22 for AI Toolkit UI ==="
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     $APT_GET install -y nodejs
   fi
-  if [ -f "$TOOLKIT_DIR/ui/package.json" ]; then
-    echo "=== Installing AI Toolkit UI dependencies ==="
-    (cd "$TOOLKIT_DIR/ui" && npm install)
-  fi
-fi
+  $APT_GET install -y sqlite3
 
-if [ "$INSTALL_UI_DEPS" = "1" ]; then
+  # The UI worker looks for python at $TOOLKIT_DIR/.venv; our venv lives next to it.
+  ln -sfn "$TOOLKIT_VENV" "$TOOLKIT_DIR/.venv"
+
+  if [ -f "$TOOLKIT_DIR/ui/package.json" ]; then
+    echo "=== Building AI Toolkit UI ==="
+    (cd "$TOOLKIT_DIR/ui" && npm install && npm run update_db && npm run build)
+
+    echo "=== Configuring AI Toolkit settings DB ==="
+    # Write TRAINING_FOLDER into the Prisma settings table so /api/img/ resolves paths correctly.
+    sqlite3 "$TOOLKIT_DIR/aitk_db.db" \
+      "INSERT INTO Settings(key,value) VALUES('TRAINING_FOLDER','$TRAINING_DIR/output') ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+    sqlite3 "$TOOLKIT_DIR/aitk_db.db" \
+      "INSERT INTO Settings(key,value) VALUES('DATASETS_FOLDER','$TRAINING_DIR/datasets') ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+  fi
+
   cat > /etc/systemd/system/ai-toolkit-ui.service <<EOF
 [Unit]
-Description=Ostris AI Toolkit UI
+Description=Ostris AI Toolkit UI (port 8675)
 After=network-online.target
 Wants=network-online.target
 
@@ -165,8 +175,9 @@ Type=simple
 User=root
 WorkingDirectory=$TOOLKIT_DIR/ui
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="AI_TOOLKIT_AUTH=change-me"
-ExecStart=/usr/bin/npm run build_and_start
+Environment="AI_TOOLKIT_AUTH=$AITK_AUTH_TOKEN"
+Environment="AITK_GPU_IDS=$AITK_GPU_IDS"
+ExecStart=/usr/bin/npm run start
 Restart=on-failure
 RestartSec=5
 
@@ -174,6 +185,9 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
+  systemctl enable ai-toolkit-ui.service
+  systemctl restart ai-toolkit-ui.service
+  echo "AI Toolkit UI started on port 8675"
 fi
 
 "$PYTHON_BIN" - <<'PY'
@@ -188,5 +202,10 @@ echo "=== AI Toolkit install complete ==="
 echo "Toolkit:  $TOOLKIT_DIR"
 echo "Venv:     $TOOLKIT_VENV"
 echo "Training: $TRAINING_DIR"
-echo "Run CLI:  $TRAINING_DIR/run-ai-toolkit.sh /root/nemoflix-training/config/job.yaml"
-echo "UI:       optional; rerun with INSTALL_UI_DEPS=1, then set AI_TOOLKIT_AUTH before starting ai-toolkit-ui.service"
+echo "UI API:   http://localhost:8675 (AI_TOOLKIT_AUTH=$AITK_AUTH_TOKEN)"
+echo ""
+echo "=== !!! REMINDER !!! ==="
+echo "FLUX.2-dev is a gated Hugging Face model. The installer cannot download it automatically."
+echo "Create /root/ai-toolkit/.env with your HF token:"
+echo "  echo 'HF_TOKEN=hf_...' > /root/ai-toolkit/.env"
+echo "Then re-run your training job — ai-toolkit will download the Diffusers-format model."

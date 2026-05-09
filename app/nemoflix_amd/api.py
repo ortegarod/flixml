@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
 import websockets
@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_scene, delete_project_shot, get_character, get_job, get_project, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, init_db, list_characters, list_jobs, list_media, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, media_count, next_shot_version_number, save_job, update_job_metadata, update_job_status, upsert_character, upsert_media, upsert_project, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_scene, delete_project_shot, get_character, get_job, get_latest_training_job, get_project, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_characters, list_jobs, list_media, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_shot_version_number, save_job, save_training_job, update_job_metadata, update_job_status, update_training_job_status, upsert_character, upsert_media, upsert_project, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
 from .workflows import WAN_NEGATIVE, build_flux2_lora_image, build_wan22_i2v, build_wan22_t2v
 
 app = FastAPI(
@@ -226,6 +226,8 @@ class LoraTrainingStatus(BaseModel):
     seconds_per_step: float | None = None
     gpu_util: float | None = None
     vram_percent: float | None = None
+    info: str | None = None
+    speed_string: str | None = None
     log_path: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
@@ -251,15 +253,60 @@ class LoraCheckpointsResponse(BaseModel):
 
 
 class LoraTrainingStartRequest(BaseModel):
+    # -- Job ------------------------------------------------------------------
     job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$")
     trigger_word: str = Field(min_length=1)
-    dataset: str = Field(min_length=1, description="Dataset folder name under training/datasets/")
-    model: Literal["flux2_dev", "flux2_klein_4b", "flux2_klein_9b", "wan22_i2v_14b", "wan22_t2v_14b"] = "flux2_dev"
-    steps: int = Field(default=1800, ge=100, le=10000)
-    lora_rank: int = Field(default=32, ge=4, le=128)
-    learning_rate: float = Field(default=1e-4, ge=1e-6, le=1e-2)
-    resolution: int = Field(default=1024, ge=512, le=2048, description="Max resolution bucket")
     base_config: Literal["flux2_identity", "wan22_i2v_character"] = "flux2_identity"
+    dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/nemoflix-training/datasets/")
+
+    # -- Model -----------------------------------------------------------------
+    model: Literal["flux2_dev", "flux2_klein_4b", "flux2_klein_9b", "wan22_i2v_14b", "wan22_t2v_14b"] = "flux2_dev"
+    model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Hugging Face repo id for the base checkpoint")
+    low_vram: bool = Field(default=False, description="Enable Low VRAM mode (Tier A 16-24 GB)")
+    layer_offloading: bool = Field(default=False, description="Stream layers from CPU RAM (Tier A only)")
+    transformer_quantization: Literal["qfloat8", "uint4", "none"] = Field(default="qfloat8")
+    te_quantization: Literal["qfloat8", "uint4", "none"] = Field(default="qfloat8")
+
+    # -- Target (LoRA network) -------------------------------------------------
+    lora_rank: int = Field(default=32, ge=4, le=128)
+
+    # -- Training --------------------------------------------------------------
+    steps: int = Field(default=1800, ge=100, le=10000)
+    learning_rate: float = Field(default=1e-4, ge=1e-6, le=1e-2)
+    batch_size: int = Field(default=1, ge=1, le=8)
+    gradient_accumulation: int = Field(default=1, ge=1, le=16)
+    optimizer: Literal["adamw8bit", "adamw", "sgd"] = Field(default="adamw8bit")
+    weight_decay: float = Field(default=1e-4, ge=0, le=1e-1)
+    timestep_type: Literal["weighted", "sigmoid"] = Field(default="weighted")
+    loss_type: Literal["mse", "l1", "huber"] = Field(default="mse")
+    cache_text_embeddings: bool | None = Field(default=None, description="Auto: true unless DOP enabled. Encode captions once to save VRAM; incompatible with DOP or caption dropout.")
+    unload_text_encoder: bool = Field(default=False, description="Unload TE after caching embeddings (VRAM saver)")
+
+    # -- Dataset ---------------------------------------------------------------
+    resolution: list[int] = Field(default=[768, 896, 1024], description="Resolution buckets for training")
+    caption_dropout_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="Dropout rate for captions; set 0 when cache_text_embeddings is on")
+    cache_latents: bool = Field(default=True, description="Cache VAE latents to disk to save VRAM")
+
+    # -- Regularization --------------------------------------------------------
+    dop_enabled: bool = Field(default=False, description="Differential Output Preservation — keep base model behaviour outside your trigger")
+    preservation_class: str = Field(default="photo", description="Neutral class word for DOP non-trigger path")
+
+    # -- Advanced --------------------------------------------------------------
+    differential_guidance: bool = Field(default=False, description="Exaggerate the gap toward target for faster detail lock-in")
+    differential_guidance_scale: float = Field(default=3.0, ge=1.0, le=10.0)
+
+    # -- Sampling --------------------------------------------------------------
+    sample_every: int = Field(default=250, ge=50, le=5000)
+    sample_steps: int = Field(default=25, ge=10, le=100)
+    sample_width: int = Field(default=1024, ge=512, le=2048)
+    sample_height: int = Field(default=1024, ge=512, le=2048)
+    sample_guidance_scale: float = Field(default=1.0, ge=0.0, le=10.0)
+    sample_seed: int = Field(default=42)
+    sample_prompts: list[str] = Field(default_factory=lambda: [
+        "a person sitting at a cafe, holding a coffee cup, morning light through the window",
+        "a person walking down a busy city street, candid shot, afternoon sun",
+        "a person in a garden, surrounded by flowers, soft natural light, portrait",
+    ])
 
 
 class LoraTrainingStartResponse(BaseModel):
@@ -267,7 +314,6 @@ class LoraTrainingStartResponse(BaseModel):
     job_name: str
     status: str
     config_path: str
-    log_path: str
     output_dir: str
     error: str | None = None
 
@@ -1453,43 +1499,108 @@ import os
 
 import yaml
 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 _OUTPUT_DIR = Path(get_settings().output_dir)
 _ALLOW_EXT = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".gif"}
-_LORA_TRAINING_LOG = Path(os.environ.get("NEMOFLIX_LORA_TRAINING_LOG", "/root/mycharacter-flux2-dop-train.log"))
-_LORA_JOB_NAME = os.environ.get("NEMOFLIX_LORA_JOB_NAME", "mycharacter_flux2_lora_v1_dop")
-_LORA_OUTPUT_DIR = Path(os.environ.get("NEMOFLIX_LORA_OUTPUT_DIR", f"/root/nemoflix-training/output/{_LORA_JOB_NAME}"))
-_COMFY_LORA_DIR = Path(os.environ.get("NEMOFLIX_COMFY_LORA_DIR", "/root/ComfyUI/models/loras/nemoflix-amd"))
-_TRAINING_RUNNER = Path(os.environ.get("NEMOFLIX_TRAINING_RUNNER", "/root/nemoflix-training/run-ai-toolkit.sh"))
-_TRAINING_CONFIG_DIR = Path(os.environ.get("NEMOFLIX_TRAINING_CONFIG_DIR", "/root/nemoflix-training/config"))
-_TRAINING_DIR = Path(os.environ.get("NEMOFLIX_TRAINING_DIR", "/root/nemoflix-training"))
-_ACTIVE_JOB_PATH = Path(os.environ.get("NEMOFLIX_ACTIVE_JOB_PATH", "/tmp/nemoflix-active-training-job.json"))
+_TRAINING_DIR = Path(os.environ.get("NEMOFLIX_TRAINING_DIR", "/home/ubuntu/nemoflix/training"))
+_TRAINING_CONFIG_DIR = _TRAINING_DIR / "config"
+# Droplet paths — these live on the GPU worker, referenced by name only from the VPS.
+_DROPLET_TRAINING_DIR = Path("/root/nemoflix-training")
+_DROPLET_OUTPUT_DIR = _DROPLET_TRAINING_DIR / "output"
+_DROPLET_LOGS_DIR = _DROPLET_TRAINING_DIR / "logs"
+_DROPLET_DATASETS_DIR = _DROPLET_TRAINING_DIR / "datasets"
+_AITK_API_URL = get_settings().aitk_api_url
+_AITK_AUTH_TOKEN = os.environ.get("AITK_API_TOKEN", "")
+_AITK_GPU_IDS = os.environ.get("AITK_GPU_IDS", "0")
 
 
-def _active_job_state() -> dict[str, Any]:
+def _aitk_headers() -> dict[str, str]:
+    if _AITK_AUTH_TOKEN:
+        return {"Authorization": f"Bearer {_AITK_AUTH_TOKEN}"}
+    return {}
+
+
+# Local VPS paths for LoRA checkpoints synced from the droplet.
+_LORA_OUTPUT_DIR = Path(os.environ.get("NEMOFLIX_LORA_OUTPUT_DIR", _OUTPUT_DIR / "loras"))
+_COMFY_LORA_DIR = Path(os.environ.get("NEMOFLIX_COMFY_LORA_DIR", "/home/ubuntu/nemoflix/ComfyUI/models/loras/nemoflix-amd"))
+_TRAINING_SAMPLES_DIR = _OUTPUT_DIR / "samples"
+
+
+async def _fetch_sample_from_droplet(droplet_path: str, vps_dest: Path) -> bool:
+    """Download a single sample image from the droplet to the VPS."""
+    if vps_dest.exists():
+        return True  # already synced
+    encoded = quote(droplet_path, safe="")
     try:
-        return json.loads(_ACTIVE_JOB_PATH.read_text()) if _ACTIVE_JOB_PATH.is_file() else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{_AITK_API_URL}/api/img/{encoded}",
+                headers=_aitk_headers(),
+            )
+            if resp.status_code == 200:
+                vps_dest.parent.mkdir(parents=True, exist_ok=True)
+                vps_dest.write_bytes(resp.content)
+                return True
+    except Exception:
+        pass
+    return False
 
 
-def _write_active_job(state: dict[str, Any]) -> None:
-    _ACTIVE_JOB_PATH.write_text(json.dumps(state))
+async def _sync_training_samples(job_name: str) -> list[str]:
+    """Fetch sample paths from ai-toolkit and sync the images to the VPS.
+
+    Returns the list of VPS-relative paths for successfully synced samples.
+    """
+    aitk_job = await _aitk_job_by_ref(job_name)
+    if not aitk_job:
+        db_job = await get_training_job(job_name)
+        return (db_job.get("metadata") or {}).get("sample_paths", []) if db_job else []
+
+    aitk_id = aitk_job["id"]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{_AITK_API_URL}/api/jobs/{aitk_id}/samples",
+                headers=_aitk_headers(),
+            )
+            if resp.status_code != 200:
+                return []
+            droplet_paths = resp.json().get("samples", [])
+    except Exception:
+        return []
+
+    vps_rel_paths: list[str] = []
+    for dp in droplet_paths:
+        filename = Path(dp).name
+        vps_rel = f"samples/{job_name}/{filename}"
+        vps_abs = _OUTPUT_DIR / vps_rel
+        if await _fetch_sample_from_droplet(dp, vps_abs):
+            vps_rel_paths.append(vps_rel)
+
+    # Cache the VPS-relative paths in DB metadata
+    if vps_rel_paths:
+        await update_training_job_status(
+            job_name, aitk_job.get("status", "running"),
+            metadata={"sample_paths": vps_rel_paths},
+        )
+    return vps_rel_paths
 
 
-def _resolve_job_context(job_name: str | None = None) -> tuple[str, Path, Path]:
-    if job_name:
-        log_path = _TRAINING_DIR / "logs" / f"{job_name}.log"
-        output_dir = _TRAINING_DIR / "output" / job_name
-        return job_name, log_path, output_dir
-    active = _active_job_state()
-    if active:
-        name = active.get("job_name", _LORA_JOB_NAME)
-        log_path = Path(active.get("log_path", str(_LORA_TRAINING_LOG)))
-        output_dir = Path(active.get("output_dir", str(_LORA_OUTPUT_DIR)))
-        return name, log_path, output_dir
-    return _LORA_JOB_NAME, _LORA_TRAINING_LOG, _LORA_OUTPUT_DIR
+async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
+    """Look up an ai-toolkit job by job_ref (our job_name)."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{_AITK_API_URL}/api/jobs",
+                params={"job_ref": job_name},
+                headers=_aitk_headers(),
+            )
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return None
 
 
 _MODEL_MAP: dict[str, dict[str, str]] = {
@@ -1513,35 +1624,92 @@ def _build_training_config(request: LoraTrainingStartRequest) -> tuple[Path, dic
         raise HTTPException(status_code=500, detail=f"Training template not found: {template_name}")
 
     config = yaml.safe_load(template_path.read_text())
-    model_info = _MODEL_MAP[request.model]
-    dataset_path = _TRAINING_DIR / "datasets" / request.dataset
-
-    if not dataset_path.is_dir():
-        raise HTTPException(status_code=400, detail=f"Dataset not found: {request.dataset}")
-
     job_name = request.job_name
     trigger = request.trigger_word
+    process = config["config"]["process"][0]
 
+    # --- Job identity ---------------------------------------------------------
     config["config"]["name"] = job_name
-    config["config"]["process"][0]["trigger_word"] = trigger
-    config["config"]["process"][0]["training_folder"] = str(_TRAINING_DIR / "output")
-    config["config"]["process"][0]["network"]["linear"] = request.lora_rank
-    config["config"]["process"][0]["network"]["linear_alpha"] = request.lora_rank
-    config["config"]["process"][0]["train"]["steps"] = request.steps
-    config["config"]["process"][0]["train"]["lr"] = request.learning_rate
-    config["config"]["process"][0]["model"]["name_or_path"] = model_info["name_or_path"]
+    process["trigger_word"] = trigger
+    process["training_folder"] = str(_DROPLET_OUTPUT_DIR)
 
-    datasets = config["config"]["process"][0].get("datasets", [])
+    # --- Model ----------------------------------------------------------------
+    model_sec = process["model"]
+    model_sec["name_or_path"] = request.model_name_or_path
+    model_sec["low_vram"] = request.low_vram
+    model_sec.setdefault("model_kwargs", {})
+    if request.layer_offloading:
+        model_sec["model_kwargs"]["layer_offloading"] = True
+    model_sec["quantize"] = request.transformer_quantization != "none"
+    if request.transformer_quantization != "none":
+        model_sec["qtype"] = request.transformer_quantization
+    model_sec["quantize_te"] = request.te_quantization != "none"
+    if request.te_quantization != "none":
+        model_sec["qtype_te"] = request.te_quantization
+
+    # --- Target (LoRA) --------------------------------------------------------
+    process["network"]["linear"] = request.lora_rank
+    process["network"]["linear_alpha"] = request.lora_rank
+
+    # --- Training -------------------------------------------------------------
+    train_sec = process["train"]
+    train_sec["steps"] = request.steps
+    train_sec["lr"] = request.learning_rate
+    train_sec["batch_size"] = request.batch_size
+    train_sec["gradient_accumulation_steps"] = request.gradient_accumulation
+    train_sec["optimizer"] = request.optimizer
+    train_sec.setdefault("optimizer_params", {})
+    train_sec["optimizer_params"]["weight_decay"] = request.weight_decay
+    train_sec["timestep_type"] = request.timestep_type
+    # Auto cache_text_embeddings: True unless DOP enabled
+    if request.cache_text_embeddings is None:
+        train_sec["cache_text_embeddings"] = not request.dop_enabled
+    else:
+        train_sec["cache_text_embeddings"] = request.cache_text_embeddings
+    train_sec["unload_text_encoder"] = request.unload_text_encoder
+
+    # --- Dataset --------------------------------------------------------------
+    datasets = process.get("datasets", [])
     if datasets:
-        datasets[0]["folder_path"] = str(dataset_path)
-        # Use the closest standard bucket
-        buckets = [r for r in [512, 768, 896, 1024, 1280, 1536] if r <= request.resolution]
-        chosen = buckets[-1] if buckets else 1024
-        datasets[0]["resolution"] = [chosen]
+        ds = datasets[0]
+        # Dataset lives on the droplet — use droplet path
+        ds["folder_path"] = str(_DROPLET_DATASETS_DIR / request.dataset)
+        ds["resolution"] = request.resolution
+        ds["caption_dropout_rate"] = request.caption_dropout_rate
+        ds["cache_latents_to_disk"] = request.cache_latents
 
+    # --- Regularization (DOP) -------------------------------------------------
+    if request.dop_enabled:
+        process["differential_output_preservation"] = {
+            "enabled": True,
+            "trigger_word": trigger,
+            "preservation_class": request.preservation_class,
+        }
+    elif "differential_output_preservation" in process:
+        del process["differential_output_preservation"]
+
+    # --- Advanced -------------------------------------------------------------
+    process.setdefault("advanced", {})
+    process["advanced"]["differential_guidance"] = request.differential_guidance
+    process["advanced"]["differential_guidance_scale"] = request.differential_guidance_scale
+
+    # --- Logging (always enable UILogger for progress tracking) ---------------
+    process["logging"] = {"use_ui_logger": True}
+
+    # --- Sampling -------------------------------------------------------------
+    sample_sec = process["sample"]
+    sample_sec["sample_every"] = request.sample_every
+    sample_sec["sample_steps"] = request.sample_steps
+    sample_sec["width"] = request.sample_width
+    sample_sec["height"] = request.sample_height
+    sample_sec["guidance_scale"] = request.sample_guidance_scale
+    sample_sec["seed"] = request.sample_seed
+    sample_sec["prompts"] = request.sample_prompts
+
+    # --- Write config ---------------------------------------------------------
     output_path = _TRAINING_CONFIG_DIR / f"{job_name}.yaml"
     _TRAINING_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(yaml.dump(config, default_flow_style=False))
+    output_path.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
     return output_path, config
 
@@ -1569,7 +1737,7 @@ async def _sync_filesystem_media(limit: int | None = None) -> None:
     try:
         iterator = _OUTPUT_DIR.rglob("*")
         for entry in iterator:
-            if entry.is_file() and entry.suffix.lower() in _ALLOW_EXT and ".thumbs" not in entry.parts:
+            if entry.is_file() and entry.suffix.lower() in _ALLOW_EXT and ".thumbs" not in entry.parts and "samples" not in entry.parts and "projects" not in entry.parts:
                 entries.append(entry)
     except (FileNotFoundError, PermissionError):
         return
@@ -1604,198 +1772,162 @@ def _media_item(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _parse_rocm_value(pattern: str, text: str) -> float | None:
-    match = re.search(pattern, text)
-    if not match:
-        return None
-    try:
-        return float(match.group(1))
-    except ValueError:
-        return None
-
-
-def _read_gpu_status() -> tuple[float | None, float | None]:
-    try:
-        result = subprocess.run(
-            ["/opt/rocm/bin/rocm-smi", "--showuse", "--showmemuse"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except Exception:
-        return None, None
-
-    output = result.stdout + result.stderr
-    gpu_util = _parse_rocm_value(r"GPU use \(%\):\s*([0-9.]+)", output)
-    vram_percent = _parse_rocm_value(r"GPU Memory Allocated \(VRAM%\):\s*([0-9.]+)", output)
-    return gpu_util, vram_percent
-
-
-def _latest_lora_progress(log_text: str) -> dict[str, Any] | None:
-    # TQDM writes carriage-return progress lines; search the whole tail chunk.
-    pattern = re.compile(
-        r"(?P<step>\d+)/(?:\s*)?(?P<total>\d+)\s*"
-        r"\[(?P<elapsed>[^\]<]+)<(?P<eta>[^,\]]+),\s*"
-        r"(?P<seconds>[0-9.]+)s/it,\s*lr:\s*(?P<lr>[0-9.eE+-]+)\s*loss:\s*(?P<loss>[0-9.eE+-]+)"
-    )
-    matches = list(pattern.finditer(log_text))
-    if not matches:
-        return None
-    match = matches[-1]
-    step = int(match.group("step"))
-    total = int(match.group("total"))
-    return {
-        "current_step": step,
-        "total_steps": total,
-        "progress_percent": round((step / total) * 100, 2) if total else None,
-        "loss": float(match.group("loss")),
-        "lr": float(match.group("lr")),
-        "elapsed": match.group("elapsed"),
-        "eta": match.group("eta"),
-        "seconds_per_step": float(match.group("seconds")),
-    }
 
 
 @app.post("/api/lora-training/start", response_model=LoraTrainingStartResponse)
 async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingStartResponse:
-    # Build the config from template
-    config_path, _ = _build_training_config(body)
+    """Build the training config locally, then enqueue and start via ai-toolkit UI API."""
+    config_path, config_dict = _build_training_config(body)
 
     job_name = body.job_name
-    log_path = _TRAINING_DIR / "logs" / f"{job_name}.log"
-    output_dir = _TRAINING_DIR / "output" / job_name
+    output_dir = str(_DROPLET_OUTPUT_DIR / job_name)
 
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    await save_training_job(
+        job_name,
+        status="pending",
+        config_path=str(config_path),
+        log_path="",
+        output_dir=output_dir,
+        dataset=body.dataset,
+        trigger_word=body.trigger_word,
+        model=body.model,
+    )
 
-    # Write active job state so status/checkpoints pick up the new job
-    _write_active_job({
-        "job_name": job_name,
-        "log_path": str(log_path),
-        "output_dir": str(output_dir),
-        "config_path": str(config_path),
-        "dataset": body.dataset,
-        "trigger_word": body.trigger_word,
-        "model": body.model,
-        "started_at": datetime.now(UTC).isoformat(),
-    })
-
-    # Spawn ai-toolkit in the background
     try:
-        with open(log_path, "w") as log_file:
-            subprocess.Popen(
-                [_TRAINING_RUNNER, str(config_path)],
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Create job in ai-toolkit queue
+            create_resp = await client.post(
+                f"{_AITK_API_URL}/api/jobs",
+                json={
+                    "name": job_name,
+                    "gpu_ids": _AITK_GPU_IDS,
+                    "job_config": config_dict,
+                    "job_ref": job_name,
+                    "job_type": "train",
+                },
+                headers=_aitk_headers(),
             )
+            if create_resp.status_code == 409:
+                # Already exists — fetch it
+                existing = await client.get(
+                    f"{_AITK_API_URL}/api/jobs",
+                    params={"job_ref": job_name},
+                    headers=_aitk_headers(),
+                )
+                existing.raise_for_status()
+                aitk_job = existing.json()
+            else:
+                create_resp.raise_for_status()
+                aitk_job = create_resp.json()
+
+            aitk_id = aitk_job["id"]
+
+            # Start the job (sets it to "queued")
+            start_resp = await client.get(
+                f"{_AITK_API_URL}/api/jobs/{aitk_id}/start",
+                headers=_aitk_headers(),
+            )
+            start_resp.raise_for_status()
+
+            # Start the queue so the worker actually processes the job
+            queue_resp = await client.get(
+                f"{_AITK_API_URL}/api/queue/{_AITK_GPU_IDS}/start",
+                headers=_aitk_headers(),
+            )
+            queue_resp.raise_for_status()
+
+        await update_training_job_status(job_name, "running")
+        return LoraTrainingStartResponse(
+            ok=True,
+            job_name=job_name,
+            status="running",
+            config_path=str(config_path),
+            output_dir=output_dir,
+        )
     except Exception as exc:
+        await update_training_job_status(job_name, "failed", error=str(exc))
         return LoraTrainingStartResponse(
             ok=False,
             job_name=job_name,
-            status="error",
+            status="failed",
             config_path=str(config_path),
-            log_path=str(log_path),
-            output_dir=str(output_dir),
+            output_dir=output_dir,
             error=str(exc),
         )
-
-    return LoraTrainingStartResponse(
-        ok=True,
-        job_name=job_name,
-        status="started",
-        config_path=str(config_path),
-        log_path=str(log_path),
-        output_dir=str(output_dir),
-    )
 
 
 @app.get("/api/lora-training/status", response_model=LoraTrainingStatus)
 async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatus:
-    resolved_name, log_path, output_dir = _resolve_job_context(job_name)
-    gpu_util, vram_percent = _read_gpu_status()
     updated_at = datetime.now(UTC).isoformat()
 
-    if not log_path.exists():
+    # Resolve job_name from our DB if not provided
+    if not job_name:
+        db_job = await get_latest_training_job()
+        job_name = db_job["job_name"] if db_job else None
+
+    if not job_name:
         return LoraTrainingStatus(
             ok=False,
-            status="missing_log",
-            job_name=resolved_name,
-            gpu_util=gpu_util,
-            vram_percent=vram_percent,
-            log_path=str(log_path),
+            status="no_job",
+            job_name=None,
             updated_at=updated_at,
-            error="Training log not found",
+            error="No training job found",
         )
 
-    try:
-        log_text = log_path.read_text(errors="replace")[-200_000:]
-    except Exception as exc:
-        return LoraTrainingStatus(
-            ok=False,
-            status="error",
-            job_name=resolved_name,
-            gpu_util=gpu_util,
-            vram_percent=vram_percent,
-            log_path=str(log_path),
-            updated_at=updated_at,
-            error=str(exc),
-        )
+    db_job = await get_training_job(job_name) if job_name else await get_latest_training_job()
+    db_status = db_job.get("status", "configured") if db_job else "configured"
+    started_at = (db_job.get("created_at").isoformat() if db_job and db_job.get("created_at") else None)
 
-    progress = _latest_lora_progress(log_text)
-    if not progress:
-        status = "starting" if "Running job" in log_text else "unknown"
+    aitk_job = await _aitk_job_by_ref(job_name)
+    if aitk_job:
+        # Sync any new samples from the droplet to the VPS
+        await _sync_training_samples(job_name)
+
+        step = aitk_job.get("step") or 0
+        # Derive total_steps from job_config
+        try:
+            jc = json.loads(aitk_job.get("job_config") or "{}")
+            total = jc.get("config", {}).get("process", [{}])[0].get("train", {}).get("steps", 0)
+        except Exception:
+            total = 0
+        progress = round((step / total) * 100, 1) if total and step else None
+
+        # Parse ETA from speed_string (format: "Xs/it" or "Xit/s")
+        eta: str | None = None
+        speed_string = aitk_job.get("speed_string")
+        seconds_per_step: float | None = None
+        if speed_string and total and step:
+            m = re.search(r"([\d.]+)\s*s/it", speed_string)
+            if m:
+                sps = float(m.group(1))
+                seconds_per_step = sps
+                remaining = int((total - step) * sps)
+                h, rem = divmod(remaining, 3600)
+                mi, s = divmod(rem, 60)
+                eta = f"{h}:{mi:02d}:{s:02d}" if h else f"{mi}:{s:02d}"
+
+        aitk_status = aitk_job.get("status", db_status)
         return LoraTrainingStatus(
             ok=True,
-            status=status,
-            job_name=resolved_name,
-            gpu_util=gpu_util,
-            vram_percent=vram_percent,
-            log_path=str(log_path),
+            status=aitk_status,
+            job_name=job_name,
+            current_step=step,
+            total_steps=total,
+            progress_percent=progress,
+            info=aitk_job.get("info"),
+            speed_string=speed_string,
+            seconds_per_step=seconds_per_step,
+            eta=eta,
             updated_at=updated_at,
+            started_at=started_at,
         )
-
-    current_step = progress["current_step"]
-    total_steps = progress["total_steps"]
-    final_checkpoint = output_dir / f"{resolved_name}.safetensors"
-
-    completed = current_step >= total_steps
-    completed = completed or final_checkpoint.is_file()
-    completed = completed or "Done training" in log_text or "Training complete" in log_text
-    status = "completed" if completed else "training"
-
-    if completed and final_checkpoint.is_file() and current_step < total_steps:
-        progress = {**progress, "current_step": total_steps, "progress_percent": 100.0, "eta": "00:00"}
-
-    job_state = _active_job_state()
-    started_at = job_state.get("started_at")
-    finished_at = job_state.get("finished_at")
-    total_duration_seconds = job_state.get("total_duration_seconds")
-
-    if completed and not finished_at:
-        finished_at = updated_at
-        if started_at:
-            try:
-                from datetime import datetime as _dt
-                delta = _dt.fromisoformat(finished_at) - _dt.fromisoformat(started_at)
-                total_duration_seconds = round(delta.total_seconds(), 1)
-            except Exception:
-                pass
-        _write_active_job({**job_state, "finished_at": finished_at, "total_duration_seconds": total_duration_seconds})
 
     return LoraTrainingStatus(
         ok=True,
-        status=status,
-        job_name=resolved_name,
-        gpu_util=gpu_util,
-        vram_percent=vram_percent,
-        log_path=str(log_path),
-        started_at=started_at,
-        finished_at=finished_at,
-        total_duration_seconds=total_duration_seconds,
+        status=db_status,
+        job_name=job_name,
         updated_at=updated_at,
-        **progress,
+        started_at=started_at,
     )
 
 
@@ -1906,32 +2038,75 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
 
 @app.get("/api/lora-training/checkpoints", response_model=LoraCheckpointsResponse)
 async def lora_training_checkpoints(job_name: str | None = None) -> LoraCheckpointsResponse:
-    resolved_name, _, output_dir = _resolve_job_context(job_name)
     updated_at = datetime.now(UTC).isoformat()
+    seen: set[str] = set()
     checkpoints: list[LoraCheckpoint] = []
 
-    if output_dir.is_dir():
-        for path in sorted(output_dir.glob("*.safetensors")):
-            stat = path.stat()
-            step_match = re.search(r"_(\d{6,})\.safetensors$", path.name)
-            checkpoints.append(
-                LoraCheckpoint(
-                    name=path.name,
-                    step=int(step_match.group(1)) if step_match else None,
-                    path=str(path),
-                    size_bytes=stat.st_size,
-                    modified_at=datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
-                )
-            )
+    def _add(path: Path) -> None:
+        if path.name in seen:
+            return
+        seen.add(path.name)
+        stat = path.stat()
+        step_match = re.search(r"_(\d{6,})\.safetensors$", path.name)
+        checkpoints.append(LoraCheckpoint(
+            name=path.name,
+            step=int(step_match.group(1)) if step_match else None,
+            path=str(path),
+            size_bytes=stat.st_size,
+            modified_at=datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+        ))
 
-    checkpoints.sort(key=lambda item: item.step if item.step is not None else -1)
+    # 1. Local VPS checkpoints — always available, persisted across droplets.
+    for d in _LORA_OUTPUT_DIR.parent.glob("*"):
+        if not d.is_dir():
+            continue
+        lora_dir = d / "loras"
+        if not lora_dir.is_dir():
+            continue
+        for p in sorted(lora_dir.glob("*.safetensors")):
+            if job_name and not p.stem.startswith(job_name):
+                continue
+            _add(p)
+    if _LORA_OUTPUT_DIR.is_dir():
+        for p in sorted(_LORA_OUTPUT_DIR.glob("*.safetensors")):
+            if job_name and not p.stem.startswith(job_name):
+                continue
+            _add(p)
+
+    checkpoints.sort(key=lambda item: item.step if item.step is not None else -1, reverse=True)
     return LoraCheckpointsResponse(
         ok=True,
-        job_name=resolved_name,
+        job_name="all",
         checkpoints=checkpoints,
         count=len(checkpoints),
         updated_at=updated_at,
     )
+
+
+@app.get("/api/lora-training/jobs")
+async def lora_training_jobs():
+    jobs = await list_training_jobs()
+    return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.get("/api/lora-training/samples")
+async def lora_training_samples(job_name: str):
+    """List sample images synced from training to the VPS."""
+    db_job = await get_training_job(job_name)
+    paths = (db_job.get("metadata") or {}).get("sample_paths", []) if db_job else []
+    return {"ok": True, "samples": paths, "count": len(paths)}
+
+
+@app.get("/api/lora-training/sample-image")
+async def lora_training_sample_image(path: str):
+    """Serve a training sample image from the VPS output directory."""
+    target = _OUTPUT_DIR / path.lstrip("/")
+    target = target.resolve()
+    if not str(target).startswith(str(_OUTPUT_DIR.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(target)
 
 
 @app.get("/api/listing")

@@ -1,9 +1,19 @@
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _load_config_file() -> dict[str, Any]:
+    p = _REPO_ROOT / "config.json"
+    if p.exists():
+        return json.loads(p.read_text())
+    return {}
 
 NodeRole = Literal["image", "video", "training", "default"]
 
@@ -54,47 +64,18 @@ ComfyNode = GpuNode
 class Settings(BaseSettings):
     """Runtime settings for the agent-native API wrapper."""
 
-    comfy_url: str = Field(default="http://127.0.0.1:8188", validation_alias="COMFY_URL")
-    gpu_nodes_json: str | None = Field(default=None, validation_alias="NEMOFLIX_GPU_NODES")
-    comfy_nodes_json: str | None = Field(default=None, validation_alias="NEMOFLIX_COMFY_NODES")
+    comfy_url: str = Field(validation_alias="COMFY_URL")
     request_timeout_seconds: float = Field(default=120.0, validation_alias="REQUEST_TIMEOUT_SECONDS")
-    database_url: str = Field(default="postgresql:///nemoflix_amd", validation_alias="DATABASE_URL")
-    output_dir: str = Field(default="/root/ComfyUI/output", validation_alias="NEMOFLIX_OUTPUT_DIR")
+    database_url: str = Field(validation_alias="DATABASE_URL")
+    output_dir: str = Field(default="/home/ubuntu/nemoflix/outputs", validation_alias="NEMOFLIX_OUTPUT_DIR")
+    aitk_api_url: str = Field(validation_alias="AITK_API_URL")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def gpu_nodes(self) -> list[GpuNode]:
-        """Return enabled GPU nodes. Prefer generic GPU config; accept old Comfy-only config."""
-        raw_nodes: list[dict[str, Any]] = []
-        if self.gpu_nodes_json:
-            parsed = json.loads(self.gpu_nodes_json)
-            if not isinstance(parsed, list):
-                raise ValueError("NEMOFLIX_GPU_NODES must be a JSON array")
-            raw_nodes = parsed
-        elif self.comfy_nodes_json:
-            parsed = json.loads(self.comfy_nodes_json)
-            if not isinstance(parsed, list):
-                raise ValueError("NEMOFLIX_COMFY_NODES must be a JSON array")
-            # Legacy compatibility: map Comfy-only records into GPU nodes.
-            raw_nodes = [
-                {
-                    "id": raw.get("id", f"node{index}"),
-                    "name": raw.get("name"),
-                    "roles": [role for role in raw.get("roles", ["default", "image", "video"]) if role != "training"],
-                    "enabled": raw.get("enabled", True),
-                    "comfyui": {"url": raw.get("url"), "client_id": raw.get("client_id")},
-                    "metadata": raw.get("metadata", {}),
-                }
-                for index, raw in enumerate(parsed)
-                if isinstance(raw, dict)
-            ]
-        else:
-            raw_nodes = [{
-                "id": "default",
-                "name": "Default GPU",
-                "roles": ["default", "image", "video"],
-                "comfyui": {"url": self.comfy_url},
-            }]
+        """Return enabled GPU nodes from config.json."""
+        cfg_file = _load_config_file()
+        raw_nodes: list[dict[str, Any]] = cfg_file.get("gpu_nodes", [])
 
         nodes: list[GpuNode] = []
         seen_ids: set[str] = set()

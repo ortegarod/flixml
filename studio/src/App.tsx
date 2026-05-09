@@ -4,6 +4,7 @@ import { Menu, Sparkles, UserCircle } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
 import { ProjectsView } from "./components/ProjectsView";
+import { LoraTrainingPage } from "./components/LoraTrainingPage";
 import { ProjectDetailView } from "./components/ProjectDetailView";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import type { SidebarTab } from "./components/sidebar/AppSidebar";
@@ -34,7 +35,9 @@ interface AppContextType {
   setSidebarOpen: (v: boolean) => void;
   activeSidebarTab: SidebarTab;
   setActiveSidebarTab: (tab: SidebarTab) => void;
+  training: LoraTrainingStatus | null;
   checkpoints: LoraCheckpoint[];
+  trainingJobs: any[];
   deleteItem: (item: MediaItem) => Promise<void>;
   load: () => Promise<void>;
   projectData: { project: Project; scenes: Scene[]; shots: Shot[] } | null;
@@ -178,7 +181,9 @@ function Shell() {
             activeTab={ctx.activeSidebarTab}
             onTabChange={(tab) => {
               ctx.setActiveSidebarTab(tab);
+              if (tab === "generate") navigate("/");
               if (tab === "projects") navigate("/projects");
+              if (tab === "characters") navigate("/lora-training");
             }}
             onClose={() => ctx.setSidebarOpen(false)}
             checkpoints={ctx.checkpoints}
@@ -295,6 +300,7 @@ export default function App() {
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [training, setTraining] = useState<LoraTrainingStatus | null>(null);
   const [checkpoints, setCheckpoints] = useState<LoraCheckpoint[]>([]);
+  const [trainingJobs, setTrainingJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -324,10 +330,11 @@ export default function App() {
       setLoading(false);
     }
 
-    const [jobsResult, trainingResult, checkpointsResult] = await Promise.allSettled([
+    const [jobsResult, trainingResult, checkpointsResult, trainingJobsResult] = await Promise.allSettled([
       fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 3500),
       fetchJson<LoraTrainingStatus & { ok?: boolean }>("/api/lora-training/status", 3500),
       fetchJson<{ checkpoints?: LoraCheckpoint[] }>("/api/lora-training/checkpoints", 3500),
+      fetchJson<{ jobs?: any[] }>("/api/lora-training/jobs", 3500),
     ]);
 
     if (jobsResult.status === "fulfilled") setJobs(jobsResult.value.jobs || []);
@@ -335,6 +342,8 @@ export default function App() {
       setTraining(trainingResult.value.ok ? trainingResult.value : null);
     if (checkpointsResult.status === "fulfilled")
       setCheckpoints(checkpointsResult.value.checkpoints || []);
+    if (trainingJobsResult.status === "fulfilled")
+      setTrainingJobs(trainingJobsResult.value.jobs || []);
   }, [hasLoadedOnce]);
 
   useEffect(() => {
@@ -443,7 +452,9 @@ export default function App() {
     setSidebarOpen,
     activeSidebarTab,
     setActiveSidebarTab,
+    training,
     checkpoints,
+    trainingJobs,
     deleteItem,
     load,
     projectData,
@@ -466,6 +477,7 @@ export default function App() {
             <Route path="projects" element={<ProjectsRoute />} />
             <Route path="projects/:projectId" element={<ProjectRoute />} />
             <Route path="characters/:characterId" element={<CharacterRoute />} />
+            <Route path="lora-training" element={<LoraTrainingPage />} />
           </Route>
         </Routes>
       </AppContext.Provider>

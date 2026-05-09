@@ -27,13 +27,7 @@ download_if_missing() {
         return 0
     fi
     mkdir -p "$(dirname "$dest")"
-    local auth_args=()
-    if [ -n "${HF_TOKEN:-}" ]; then
-        auth_args=(--header="Authorization: Bearer ${HF_TOKEN}")
-    elif [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
-        auth_args=(--header="Authorization: Bearer ${HUGGINGFACE_HUB_TOKEN}")
-    fi
-    wget -q --show-progress "${auth_args[@]}" "$url" -O "$dest.tmp"
+    wget -q --show-progress "$url" -O "$dest.tmp"
     test -s "$dest.tmp"
     mv "$dest.tmp" "$dest"
 }
@@ -44,14 +38,6 @@ download_if_missing "$HF_BASE_FLUX2/diffusion_models/flux2_dev_fp8mixed.safetens
 download_if_missing "$HF_BASE_FLUX2/vae/flux2-vae.safetensors" "$COMFY_DIR/models/vae/flux2-vae.safetensors"
 download_if_missing "$HF_BASE_FLUX2/text_encoders/mistral_3_small_flux2_bf16.safetensors" "$COMFY_DIR/models/text_encoders/mistral_3_small_flux2_bf16.safetensors"
 download_if_missing "$HF_BASE_Z_IMAGE/text_encoders/qwen_3_4b.safetensors" "$COMFY_DIR/models/text_encoders/qwen_3_4b.safetensors"
-
-# If a LoRA output directory is provided, make those training outputs visible to ComfyUI without copying GBs.
-LORA_OUTPUT_DIR="${NEMOFLIX_LORA_OUTPUT_DIR:-}"
-if [ -n "$LORA_OUTPUT_DIR" ] && [ -d "$LORA_OUTPUT_DIR" ]; then
-    find "$LORA_OUTPUT_DIR" -maxdepth 1 -type f -name '*.safetensors' -print0 | while IFS= read -r -d '' lora; do
-        ln -sf "$lora" "$COMFY_DIR/models/loras/nemoflix-amd/$(basename "$lora")"
-    done
-fi
 
 if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files comfyui.service >/dev/null 2>&1; then
     systemctl restart comfyui.service
