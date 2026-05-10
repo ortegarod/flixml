@@ -127,7 +127,7 @@ You are the director. Your human pitched the idea. Your job is to take that pitc
 8. **Generate images** only after they approve the outline. POST `/api/projects/{prj}/scenes/{scn}/shots/{sht}/generate-image` per shot. Show each one.
 9. **Iterate on images.** Regenerate any shot that doesn't land. Wait for approval.
 10. **Animate** approved shots: POST `/api/projects/{prj}/scenes/{scn}/shots/{sht}/animate`.
-11. (Captions, voiceovers, and final stitching aren't wired yet. Note this to your human and stop here.)
+11. **Render the final cut** with TTS voiceovers burned in: POST `/api/projects/{prj}/render`. The backend generates voiceover audio per shot (based on `subtitle` + `speaker` voice), mixes it into each clip, concatenates, and burns subtitles on top.
 
 **Hold the line on iteration.** Every image and every clip is a real GPU render on AMD MI300X — not free, not instant. Show the outline before generating. Show images before animating. Your human approves each stage. They are the editor; you are the director.
 
@@ -161,14 +161,67 @@ You are the director. Your human pitched the idea. Your job is to take that pitc
 | Field | What you put here |
 |---|---|
 | `shot_number` | Order within the scene. Required. |
-| `description` | Plain English: what's in the frame — camera framing, setting, lighting, technical direction for image generation. |
-| `subtitle` | **Viewer-facing narration** for this shot. This is the text burned onto the final video for viewers to read. Write it as first-person or third-person narrative that tells the story beat-by-beat. Distinct from `description` which is technical shot direction for the AI. |
+| `description` | Screenwriting-style visual direction, not an image prompt. Start with the shot type (Medium shot, Close-up, Wide shot, Over-the-shoulder, Two-shot). Then describe who is in frame and what they're doing. End with the environment/set. 2–3 sentences max. Example: "Medium shot. She stands at the edge of the platform, looking down at the city. Industrial lighting from below, scaffolding and steam filling the background." |
+| `subtitle` | The voiceover script line for this shot — spoken by TTS and burned as text on screen. Write 1–3 sentences of narrator prose that narrate the story beat while this shot plays. This is NOT a description of the image; it's what the audience hears. Match length to clip duration: at a natural speaking pace (~2.5 words/second), a 5-second clip fits roughly 10–13 words. Use first or third person consistently across shots. Example: "By noon, the first failure appeared. The system didn't blink." |
+| `speaker` | Which character or voice says this subtitle. Set to a character ID (uses that character's assigned voice), `"narrator"` (uses the project's narrator voice), or leave empty (uses default voice). |
 | `image_prompt` | The actual visual prompt you'll send to image generation. Be specific — character trigger words, lighting, lens, mood. |
 | `motion_prompt` | Camera move + motion for the animate step. "Slow push in, suit plates locking into place." |
 | `camera_motion` | Optional shorthand: `"push in"`, `"orbit"`, `"static"`, etc. |
-| `subtitle` | Viewer-facing narration burned onto the final video. Write as the story's narrative voice — this is what viewers read. |
 | `duration_seconds` | Clip length when animated. Default 5. |
 | `characters` | IDs of characters in this shot. |
+
+## TTS & Voiceovers — rendering with spoken audio
+
+Each shot's `subtitle` becomes BOTH visual text and spoken voiceover when you render the final project. The render pipeline:
+
+1. Looks up the shot's `speaker` field
+2. Finds the matching voice: character voice → project narrator voice → default
+3. Generates TTS via ElevenLabs with that voice
+4. Mixes audio into the clip with ffmpeg
+5. Concatenates all clips and burns subtitles on top
+
+### List available voices
+
+```bash
+curl -sS "$NEMOFLIX_API_URL/api/tts/voices"
+```
+
+Returns all ElevenLabs voices available on this account — premade voices and any cloned voices.
+
+### Assign a voice to a character
+
+PATCH the character with a `voice` object:
+
+```json
+{
+  "voice": {
+    "provider": "elevenlabs",
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "name": "George - Storyteller",
+    "settings": {"stability":0.6,"similarity_boost":0.8,"style":0.2}
+  }
+}
+```
+
+### Set project narrator voice
+
+PATCH the project with a `narrator_voice` object (same schema as character voice). Used when a shot's speaker is `"narrator"` or when no speaker is set.
+
+### Set speaker on a shot
+
+PATCH the shot:
+- `"speaker": "narrator"` — uses project narrator voice
+- `"speaker": null` or omitted — uses default voice
+
+### Render the final video
+
+```bash
+curl -sS -X POST "$NEMOFLIX_API_URL/api/projects/{project_id}/render"
+```
+
+The response includes `render_id`. Poll `GET /api/projects/{project_id}/render` for status. When `render_status` is `completed`, `final_video` contains the path.
+
+---
 
 ## Worked example: "Put me in an Iron Man movie"
 
@@ -206,6 +259,7 @@ Before you do image-to-video, identity work, body/likeness generation, or any fu
 - Don't generate images before showing the outline.
 - Don't animate before showing the images.
 - Don't ask your human to fill in fields. 
+- Don't render the final video before your human has approved the animated clips. 
 
 ## Summary
 You're the agent — you can draft the project, scenes, and shots in seconds, based off of a simple user prompt and maybe a few follow-up questions, compared to the user it would take them several minutes. So this is the advantage of using the agent. Follow the instructions in this SKILL.md, don't be afraid to ask questions, iterate with the user.

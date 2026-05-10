@@ -5,7 +5,7 @@
       "name": "AMD MI300X",
       "roles": ["default", "image", "video", "training"],
       "comfyui": {
-        "url": "http://165.245.136.26:8188"
+        "url": "http://129.212.182.252:8188"
       },
       "ai_toolkit": {
         "toolkit_dir": "/root/ai-toolkit",
