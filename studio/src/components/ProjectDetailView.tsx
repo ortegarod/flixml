@@ -39,6 +39,7 @@ export function ProjectDetailView({
     if (anyImage) return "generate";
     return "outline";
   }, [shots]);
+  const [activeRenderId, setActiveRenderId] = useState<string | null>(null);
   const [versions, setVersions] = useState<ShotVersion[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [renderStatus, setRenderStatus] = useState<string>(() => String(project.metadata?.render_status ?? "none"));

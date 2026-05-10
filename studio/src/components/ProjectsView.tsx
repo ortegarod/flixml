@@ -174,7 +174,7 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
                     {(project as any).render_count || 1} render{(project as any).render_count > 1 ? "s" : ""}
                   </span>
                 )}
-                {(project.metadata?.final_video) && (
+                {(project.metadata?.final_video as string | undefined) && (
                   <a
                     href={`/media/${project.metadata.final_video}`}
                     target="_blank"
