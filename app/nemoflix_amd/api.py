@@ -200,16 +200,16 @@ class VideoGenerateRequest(BaseModel):
     characters: list[CharacterBinding] = Field(default_factory=list)
     image: str | None = Field(default=None, description="ComfyUI input filename for image-to-video")
     negative: str = WAN_NEGATIVE
-    width: int = 1280
-    height: int = 720
-    length: int = Field(default=121, description="Frame count, not seconds")
+    width: int = 640
+    height: int = 640
+    length: int = Field(default=81, description="Frame count, not seconds")
     fps: int = 16
     seed: int | None = None
     filename_prefix: str | None = None
     steps_high: int = 2
     steps_low: int = 2
-    cfg_high: float = 3.5
-    cfg_low: float = 3.5
+    cfg_high: float = 1.0
+    cfg_low: float = 1.0
     shift: float = 5.0
     sampler: str = "euler"
     scheduler: str = "simple"
@@ -891,7 +891,9 @@ async def remove_project_shot(project_id: str, scene_id: str, shot_id: str) -> d
 
 
 def _wan_resolution(aspect_ratio: str | None) -> tuple[int, int]:
-    return {"9:16": (720, 1280), "1:1": (1024, 1024)}.get(aspect_ratio or "", (1280, 720))
+    # Wan 2.2 I2V works best at 640x640 per official ComfyUI blueprint.
+    # Override project aspect ratio to prevent distortion.
+    return (640, 640)
 
 
 def _character_bindings_from_ids(ids: list[str]) -> list[CharacterBinding]:
