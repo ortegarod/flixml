@@ -64,10 +64,10 @@ ComfyNode = GpuNode
 class Settings(BaseSettings):
     """Runtime settings for the agent-native API wrapper."""
 
-    comfy_url: str = Field(validation_alias="COMFY_URL")
+    comfy_url: str | None = Field(default=None, validation_alias="COMFY_URL")
     request_timeout_seconds: float = Field(default=120.0, validation_alias="REQUEST_TIMEOUT_SECONDS")
     database_url: str = Field(validation_alias="DATABASE_URL")
-    output_dir: str = Field(default="/home/ubuntu/nemoflix/outputs", validation_alias="NEMOFLIX_OUTPUT_DIR")
+    output_dir: str = Field(validation_alias="NEMOFLIX_OUTPUT_DIR")
     aitk_api_url: str = Field(validation_alias="AITK_API_URL")
     elevenlabs_api_key: str | None = Field(default=None, validation_alias="ELEVENLABS_API_KEY")
 
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
             seen_ids.add(node.id)
             nodes.append(node)
         if not nodes:
-            nodes.append(GpuNode(id="default", name="Default GPU", roles=["default", "image", "video"], comfyui=ComfyRuntime(url=self.comfy_url)))
+            raise ValueError("No GPU nodes configured in config.json. Add at least one node to gpu_nodes array.")
         return nodes
 
     def comfy_nodes(self) -> list[GpuNode]:

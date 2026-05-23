@@ -20,6 +20,7 @@ ComfyUI_*.webp
 
 # Local/private configuration
 configs/
+config.json
 .env
 .env.*
 

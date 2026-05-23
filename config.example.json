@@ -1,0 +1,20 @@
+{
+  "gpu_nodes": [
+    {
+      "id": "local-image",
+      "name": "Local image node",
+      "roles": ["image", "default"],
+      "comfyui": {
+        "url": "http://localhost:8188"
+      }
+    },
+    {
+      "id": "local-video",
+      "name": "Local video node",
+      "roles": ["video"],
+      "comfyui": {
+        "url": "http://localhost:8189"
+      }
+    }
+  ]
+}
