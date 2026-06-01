@@ -1,0 +1,38 @@
+{
+  "id": "wan22_t2v",
+  "name": "Wan 2.2 Text-to-Video",
+  "description": "Generate video from text with Wan 2.2",
+  "task": "text-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "wan22",
+    "supports_lora": false
+  },
+  "params": {
+    "prompt": {"type": "str", "required": true, "description": "Text prompt"},
+    "negative_prompt": {"type": "str", "default": "bright colors, overexposed, static, blurred details"},
+    "width": {"type": "int", "default": 640},
+    "height": {"type": "int", "default": 640},
+    "length": {"type": "int", "default": 81, "description": "Frame count"},
+    "fps": {"type": "int", "default": 16},
+    "seed": {"type": "int", "required": false},
+    "steps_high": {"type": "int", "default": 2},
+    "steps_low": {"type": "int", "default": 2},
+    "cfg_high": {"type": "float", "default": 1.0},
+    "cfg_low": {"type": "float", "default": 1.0},
+    "shift": {"type": "float", "default": 5.0},
+    "sampler": {"type": "str", "default": "euler"},
+    "scheduler": {"type": "str", "default": "simple"},
+    "high_model": {"type": "str", "default": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors", "description": "High-noise UNet model"},
+    "low_model": {"type": "str", "default": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors", "description": "Low-noise UNet model"},
+    "vae": {"type": "str", "default": "Wan2.1_VAE.safetensors"},
+    "clip": {"type": "str", "default": "umt5_xxl_fp8_e4m3fn_scaled.safetensors"},
+    "lightx2v_high_lora": {"type": "str", "default": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"},
+    "lightx2v_low_lora": {"type": "str", "default": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"},
+    "lightx2v_high_strength": {"type": "float", "default": 1.0},
+    "lightx2v_low_strength": {"type": "float", "default": 1.0}
+  },
+  "compatible_providers": ["local", "cloud_serverless"],
+  "examples": []
+}

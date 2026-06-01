@@ -1,0 +1,25 @@
+{
+  "id": "sdxl_base",
+  "name": "SDXL Base Image",
+  "description": "Generate images with SDXL checkpoints",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 8,
+    "workflow_type": "sdxl",
+    "supports_lora": false
+  },
+  "params": {
+    "prompt": {"type": "string", "required": true, "description": "Image prompt"},
+    "negative_prompt": {"type": "string", "default": ""},
+    "width": {"type": "integer", "default": 832},
+    "height": {"type": "integer", "default": 1216},
+    "seed": {"type": "integer", "default": 42},
+    "steps": {"type": "integer", "default": 40},
+    "cfg": {"type": "float", "default": 5.0},
+    "sampler": {"type": "string", "default": "dpmpp_2m"},
+    "scheduler": {"type": "string", "default": "karras"},
+    "checkpoint": {"type": "string", "required": true, "description": "Checkpoint model filename discovered from the local ComfyUI node or supplied by the caller"}
+  },
+  "compatible_providers": ["local"]
+}

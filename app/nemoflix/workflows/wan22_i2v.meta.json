@@ -1,0 +1,40 @@
+{
+  "id": "wan22_i2v",
+  "name": "Wan 2.2 Image-to-Video",
+  "description": "Turn images into video with Wan 2.2",
+  "task": "image-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "wan22",
+    "supports_lora": true
+  },
+  "params": {
+    "prompt": {"type": "str", "required": true, "description": "Motion prompt"},
+    "image": {"type": "str", "required": true, "description": "Input image filename"},
+    "negative_prompt": {"type": "str", "default": "bright colors, overexposed, static, blurred details"},
+    "width": {"type": "int", "default": 512},
+    "height": {"type": "int", "default": 512},
+    "length": {"type": "int", "default": 49, "description": "Frame count (must be 4k+1, e.g. 33/49/65/81)"},
+    "fps": {"type": "int", "default": 16},
+    "seed": {"type": "int", "required": false},
+    "steps_high": {"type": "int", "default": 4, "description": "Lightning LoRA trained on 4 steps per pass"},
+    "steps_low": {"type": "int", "default": 4, "description": "Lightning LoRA trained on 4 steps per pass"},
+    "total_steps": {"type": "int", "default": 8, "description": "steps_high + steps_low; passed to KSamplerAdvanced.steps"},
+    "cfg_high": {"type": "float", "default": 1.0},
+    "cfg_low": {"type": "float", "default": 1.0},
+    "shift": {"type": "float", "default": 5.0},
+    "sampler": {"type": "str", "default": "euler"},
+    "scheduler": {"type": "str", "default": "simple"},
+    "vae": {"type": "str", "default": "Wan2.1_VAE.safetensors"},
+    "clip": {"type": "str", "default": "umt5_xxl_fp8_e4m3fn_scaled.safetensors"},
+    "high_model": {"type": "str", "default": "Wan2.2-I2V-A14B-HighNoise-Q3_K_S.gguf", "description": "GGUF quantized UNet (loaded via UnetLoaderGGUF)"},
+    "low_model": {"type": "str", "default": "Wan2.2-I2V-A14B-LowNoise-Q3_K_S.gguf", "description": "GGUF quantized UNet (loaded via UnetLoaderGGUF)"},
+    "high_lora": {"type": "str", "default": "Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors", "description": "Lightning speed LoRA for high-noise model"},
+    "low_lora": {"type": "str", "default": "Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors", "description": "Lightning speed LoRA for low-noise model"},
+    "high_lora_strength": {"type": "float", "default": 1.0},
+    "low_lora_strength": {"type": "float", "default": 1.0}
+  },
+  "compatible_providers": ["local", "cloud_serverless"],
+  "examples": []
+}

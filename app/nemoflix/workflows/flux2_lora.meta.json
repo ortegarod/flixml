@@ -1,0 +1,29 @@
+{
+  "id": "flux2_lora",
+  "name": "FLUX.2 + LoRA Image",
+  "description": "Generate images with FLUX.2 and character LoRAs",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "flux2",
+    "supports_lora": true
+  },
+  "params": {
+    "prompt": {"type": "str", "required": true, "description": "Text prompt"},
+    "loras": {"type": "list", "required": false, "description": "List of LoRA specs"},
+    "lora_strength": {"type": "float", "default": 1.0, "min": 0.0, "max": 2.0},
+    "width": {"type": "int", "default": 1248, "description": "Output width"},
+    "height": {"type": "int", "default": 832, "description": "Output height"},
+    "seed": {"type": "int", "required": false, "description": "Random seed (auto if omitted)"},
+    "steps": {"type": "int", "default": 20, "min": 1, "max": 50},
+    "cfg": {"type": "float", "default": 4.0, "min": 1.0, "max": 20.0},
+    "sampler": {"type": "str", "default": "euler"},
+    "guidance": {"type": "float", "default": 4.0, "description": "FLUX guidance scale"},
+    "unet": {"type": "str", "default": "flux2_dev_fp8mixed.safetensors"},
+    "clip": {"type": "str", "default": "mistral_3_small_flux2_fp4_mixed.safetensors"},
+    "vae": {"type": "str", "default": "flux2-vae.safetensors"}
+  },
+  "compatible_providers": ["local", "cloud_serverless"],
+  "examples": []
+}

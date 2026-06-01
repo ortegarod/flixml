@@ -1,0 +1,26 @@
+{
+  "id": "flux2_base",
+  "name": "FLUX.2 Base Image",
+  "description": "Generate images with FLUX.2 without LoRA",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "flux2",
+    "supports_lora": false
+  },
+  "params": {
+    "prompt": {"type": "str", "required": true, "description": "Text prompt"},
+    "width": {"type": "int", "default": 832, "description": "Output width"},
+    "height": {"type": "int", "default": 832, "description": "Output height"},
+    "seed": {"type": "int", "required": false, "description": "Random seed (auto if omitted)"},
+    "steps": {"type": "int", "default": 20, "min": 1, "max": 50},
+    "sampler": {"type": "str", "default": "euler"},
+    "guidance": {"type": "float", "default": 4.0, "description": "FLUX guidance scale"},
+    "unet": {"type": "str", "default": "flux2_dev_fp8mixed.safetensors"},
+    "clip": {"type": "str", "default": "mistral_3_small_flux2_fp4_mixed.safetensors"},
+    "vae": {"type": "str", "default": "flux2-vae.safetensors"}
+  },
+  "compatible_providers": ["local", "cloud_serverless"],
+  "examples": []
+}

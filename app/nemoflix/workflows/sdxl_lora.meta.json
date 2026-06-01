@@ -1,0 +1,27 @@
+{
+  "id": "sdxl_lora",
+  "name": "SDXL + LoRA Image",
+  "description": "Generate images with SDXL checkpoints and LoRA",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 8,
+    "workflow_type": "sdxl",
+    "supports_lora": true
+  },
+  "params": {
+    "prompt": {"type": "string", "required": true, "description": "Image prompt"},
+    "negative_prompt": {"type": "string", "default": ""},
+    "width": {"type": "integer", "default": 832},
+    "height": {"type": "integer", "default": 1216},
+    "seed": {"type": "integer", "default": 42},
+    "steps": {"type": "integer", "default": 28},
+    "cfg": {"type": "float", "default": 7.0},
+    "sampler": {"type": "string", "default": "dpmpp_2m"},
+    "scheduler": {"type": "string", "default": "karras"},
+    "checkpoint": {"type": "string", "required": true, "description": "SDXL checkpoint model filename"},
+    "lora_name": {"type": "string", "required": true, "description": "LoRA filename"},
+    "lora_strength": {"type": "float", "default": 0.8, "description": "LoRA strength (model and clip)"}
+  },
+  "compatible_providers": ["local"]
+}
