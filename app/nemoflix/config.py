@@ -30,8 +30,8 @@ class ComfyRuntime(BaseModel):
 class AiToolkitRuntime(BaseModel):
     toolkit_dir: str = "/root/ai-toolkit"
     venv: str = "/root/ai-toolkit-venv"
-    training_dir: str = "/root/nemoflix-training"
-    runner: str = "/root/nemoflix-training/run-ai-toolkit.sh"
+    training_dir: str = "/root/nemoflix-studio/training"
+    runner: str = "/root/nemoflix-studio/training/run-ai-toolkit.sh"
     status: Literal["local_cli", "remote_cli", "manual", "unknown"] = "local_cli"
 
 
@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     output_dir: str = Field(validation_alias="NEMOFLIX_OUTPUT_DIR")
     aitk_api_url: str = Field(validation_alias="AITK_API_URL")
     elevenlabs_api_key: str | None = Field(default=None, validation_alias="ELEVENLABS_API_KEY")
+    elevenlabs_voice_id: str | None = Field(default=None, validation_alias="ELEVENLABS_VOICE_ID")
+    digitalocean_token: str | None = Field(default=None, validation_alias="DIGITALOCEAN_TOKEN")
+    training_cloud_region: str = Field(default="atl1", validation_alias="TRAINING_CLOUD_REGION")
+    training_cloud_size: str = Field(default="gpu-mi300x1-192gb", validation_alias="TRAINING_CLOUD_SIZE")
+    training_cloud_image: str = Field(default="gpu-amd-base", validation_alias="TRAINING_CLOUD_IMAGE")
+    training_cloud_ttl_hours: int = Field(default=12, validation_alias="TRAINING_CLOUD_TTL_HOURS")
+    training_cloud_repo_url: str = Field(default="https://github.com/ortegarod/nemoflix-studio.git", validation_alias="TRAINING_CLOUD_REPO_URL")
+    training_cloud_ssh_keys: str | None = Field(default=None, validation_alias="TRAINING_CLOUD_SSH_KEYS")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

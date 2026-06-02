@@ -63,6 +63,24 @@ def _json(value: Any) -> str | None:
     return json.dumps(value)
 
 
+def _text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def _job_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
     metadata = data.get("metadata")
@@ -87,6 +105,7 @@ async def save_job(
     metadata: dict[str, Any] | None = None,
     error: str | None = None,
 ) -> None:
+    """Save a job to the database."""
     async with get_pool().acquire() as conn:
         await conn.execute(
             """
@@ -263,7 +282,7 @@ async def update_training_job_status(
 
 def _character_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
-    for key in ("source_images", "loras", "defaults", "metadata"):
+    for key in ("source_images", "loras", "voice", "defaults"):
         value = data.get(key)
         if isinstance(value, str):
             with contextlib.suppress(json.JSONDecodeError):
@@ -285,27 +304,31 @@ async def upsert_character(character: dict[str, Any]) -> dict[str, Any]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO characters (id, name, trigger, description, source_images, loras, defaults, metadata, updated_at)
-            VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,NOW())
+            INSERT INTO characters (id, name, kind, trigger, description, base_prompt, source_images, loras, voice, defaults, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,NOW())
             ON CONFLICT (id) DO UPDATE SET
                 name=EXCLUDED.name,
+                kind=EXCLUDED.kind,
                 trigger=EXCLUDED.trigger,
                 description=EXCLUDED.description,
+                base_prompt=EXCLUDED.base_prompt,
                 source_images=EXCLUDED.source_images,
                 loras=EXCLUDED.loras,
+                voice=EXCLUDED.voice,
                 defaults=EXCLUDED.defaults,
-                metadata=EXCLUDED.metadata,
                 updated_at=NOW()
             RETURNING *
             """,
             character["id"],
             character["name"],
+            character.get("kind"),
             character.get("trigger"),
             character.get("description"),
+            character.get("base_prompt"),
             _json(character.get("source_images", [])),
             _json(character.get("loras", [])),
+            _json(character.get("voice")),
             _json(character.get("defaults", {})),
-            _json(character.get("metadata", {})),
         )
     return _character_row(row)
 
@@ -531,8 +554,8 @@ async def upsert_project_shot(shot: dict[str, Any]) -> dict[str, Any]:
             INSERT INTO project_shots (
                 id, project_id, scene_id, shot_number, text, description, subtitle, speaker, image_prompt, motion_prompt,
                 characters, duration_seconds, status, image_file, video_file,
-                image_prompt_id, video_prompt_id, metadata, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18::jsonb,NOW())
+                image_prompt_id, video_prompt_id, workflow, previous_shot_id, end_frame_file, end_frame_prompt, metadata, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,NOW())
             ON CONFLICT (id) DO UPDATE SET
                 shot_number=EXCLUDED.shot_number,
                 text=EXCLUDED.text,
@@ -548,6 +571,10 @@ async def upsert_project_shot(shot: dict[str, Any]) -> dict[str, Any]:
                 video_file=EXCLUDED.video_file,
                 image_prompt_id=EXCLUDED.image_prompt_id,
                 video_prompt_id=EXCLUDED.video_prompt_id,
+                workflow=COALESCE(EXCLUDED.workflow, project_shots.workflow),
+                previous_shot_id=EXCLUDED.previous_shot_id,
+                end_frame_file=EXCLUDED.end_frame_file,
+                end_frame_prompt=EXCLUDED.end_frame_prompt,
                 metadata=EXCLUDED.metadata,
                 updated_at=NOW()
             RETURNING *
@@ -569,6 +596,10 @@ async def upsert_project_shot(shot: dict[str, Any]) -> dict[str, Any]:
             shot.get("video_file"),
             shot.get("image_prompt_id"),
             shot.get("video_prompt_id"),
+            shot.get("workflow"),
+            shot.get("previous_shot_id"),
+            shot.get("end_frame_file"),
+            shot.get("end_frame_prompt"),
             _json(shot.get("metadata", {})),
         )
     return _shot_row(row)
@@ -644,9 +675,23 @@ async def upsert_project_render(render: dict[str, Any]) -> dict[str, Any]:
     return _render_row(row)
 
 
-async def list_jobs(limit: int = 100) -> list[dict[str, Any]]:
-    rows = await get_pool().fetch("SELECT * FROM jobs ORDER BY updated_at DESC LIMIT $1", limit)
+async def list_jobs(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    rows = await get_pool().fetch("SELECT * FROM jobs ORDER BY updated_at DESC LIMIT $1 OFFSET $2", limit, offset)
     return [_job_row(row) for row in rows]
+
+
+async def list_jobs_by_character(
+    character_id: str, limit: int = 60, offset: int = 0
+) -> list[dict[str, Any]]:
+    """Return completed jobs for a character."""
+    all_rows = await list_jobs(limit=100, offset=0)
+    matching = [
+        row for row in all_rows
+        if row.get("status") == "completed"
+        and isinstance(row.get("character_ids"), list)
+        and character_id in row["character_ids"]
+    ]
+    return matching[offset:offset + limit]
 
 
 async def upsert_media(row: dict[str, Any]) -> None:
@@ -655,14 +700,14 @@ async def upsert_media(row: dict[str, Any]) -> None:
             """
             INSERT INTO media (
                 filename, type, width, height, size, modified,
-                prompt, seed, steps, guidance, sampler,
-                model, vae, text_encoder, loras, workflow_type, prompt_id,
-                source_image, video_file, updated_at
+                prompt, negative_prompt, seed, steps, guidance, sampler, scheduler,
+                model, vae, text_encoder, loras, workflow_type, workflow_json, prompt_id,
+                source_image, video_file, character_ids, tags, updated_at
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,
-                $7,$8,$9,$10,$11,
-                $12,$13,$14,$15::jsonb,$16,$17,
-                $18,$19,NOW()
+                $7,$8,$9,$10,$11,$12,$13,
+                $14,$15,$16,$17::jsonb,$18,$19::jsonb,$20,
+                $21,$22,$23::text[],$24::text[],NOW()
             )
             ON CONFLICT (filename) DO UPDATE SET
                 type=EXCLUDED.type,
@@ -671,18 +716,23 @@ async def upsert_media(row: dict[str, Any]) -> None:
                 size=EXCLUDED.size,
                 modified=EXCLUDED.modified,
                 prompt=COALESCE(EXCLUDED.prompt, media.prompt),
+                negative_prompt=COALESCE(EXCLUDED.negative_prompt, media.negative_prompt),
                 seed=COALESCE(EXCLUDED.seed, media.seed),
                 steps=COALESCE(EXCLUDED.steps, media.steps),
                 guidance=COALESCE(EXCLUDED.guidance, media.guidance),
                 sampler=COALESCE(EXCLUDED.sampler, media.sampler),
+                scheduler=COALESCE(EXCLUDED.scheduler, media.scheduler),
                 model=COALESCE(EXCLUDED.model, media.model),
                 vae=COALESCE(EXCLUDED.vae, media.vae),
                 text_encoder=COALESCE(EXCLUDED.text_encoder, media.text_encoder),
                 loras=COALESCE(EXCLUDED.loras, media.loras),
                 workflow_type=COALESCE(EXCLUDED.workflow_type, media.workflow_type),
+                workflow_json=COALESCE(EXCLUDED.workflow_json, media.workflow_json),
                 prompt_id=COALESCE(EXCLUDED.prompt_id, media.prompt_id),
                 source_image=COALESCE(EXCLUDED.source_image, media.source_image),
                 video_file=COALESCE(EXCLUDED.video_file, media.video_file),
+                character_ids=CASE WHEN cardinality(EXCLUDED.character_ids) > 0 THEN EXCLUDED.character_ids ELSE media.character_ids END,
+                tags=CASE WHEN cardinality(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE media.tags END,
                 updated_at=NOW()
             """,
             row.get("filename"),
@@ -692,38 +742,187 @@ async def upsert_media(row: dict[str, Any]) -> None:
             row.get("size"),
             row.get("modified"),
             row.get("prompt"),
+            row.get("negative_prompt"),
             row.get("seed"),
             row.get("steps"),
             row.get("guidance"),
             row.get("sampler"),
+            row.get("scheduler"),
             row.get("model"),
             row.get("vae"),
             row.get("text_encoder"),
             _json(row.get("loras")),
             row.get("workflow_type"),
+            _json(row.get("workflow_json")),
             row.get("prompt_id"),
             row.get("source_image"),
             row.get("video_file"),
+            _text_list(row.get("character_ids")),
+            _text_list(row.get("tags")),
         )
 
 
-async def list_media(limit: int = 60, offset: int = 0) -> list[dict[str, Any]]:
+_VIDEO_PREDICATE = (
+    "(type = 'video' "
+    "OR LOWER(filename) LIKE '%.mp4' "
+    "OR LOWER(filename) LIKE '%.webm' "
+    "OR LOWER(filename) LIKE '%.gif')"
+)
+
+
+def _media_where(
+    type_filter: str | None,
+    search: str | None,
+    dir_prefix: str | None,
+    character_id: str | None = None,
+    tag: str | None = None,
+    training_dataset: bool | None = None,
+    start_param: int = 1,
+) -> tuple[str, list[Any]]:
+    """Build a shared WHERE clause + params for media listing/count queries.
+
+    Keeps list_media and media_count in lockstep so `total` always matches the
+    rows that would be returned by a paged listing with the same filters.
+    """
+    clauses = [
+        "workflow_type IS DISTINCT FROM 'project_render'",
+        "NOT (filename LIKE 'projects/%' AND filename LIKE '%render-%')",
+    ]
+    params: list[Any] = []
+
+    def _next() -> str:
+        return f"${start_param + len(params)}"
+
+    if type_filter == "video":
+        clauses.append(_VIDEO_PREDICATE)
+    elif type_filter == "image":
+        clauses.append(f"NOT {_VIDEO_PREDICATE}")
+
+    if search:
+        token = _next()
+        params.append(f"%{search.lower()}%")
+        clauses.append(f"(LOWER(COALESCE(prompt, '')) LIKE {token} OR LOWER(filename) LIKE {token} OR EXISTS (SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE {token}))")
+
+    if dir_prefix:
+        token = _next()
+        params.append(dir_prefix.strip("/") + "/%")
+        clauses.append(f"filename LIKE {token}")
+
+    if character_id == "__unassigned__":
+        clauses.append("cardinality(character_ids) = 0")
+    elif character_id:
+        token = _next()
+        params.append(character_id)
+        clauses.append(f"{token} = ANY(character_ids)")
+
+    if tag:
+        token = _next()
+        params.append(tag.lower())
+        clauses.append(f"EXISTS (SELECT 1 FROM unnest(tags) t WHERE LOWER(t) = {token})")
+
+    if training_dataset is True:
+        clauses.append("included_in_training_dataset = TRUE")
+    elif training_dataset is False:
+        clauses.append("included_in_training_dataset = FALSE")
+
+    return " AND ".join(clauses), params
+
+
+async def list_media(
+    limit: int = 60,
+    offset: int = 0,
+    type_filter: str | None = None,
+    search: str | None = None,
+    dir_prefix: str | None = None,
+    character_id: str | None = None,
+    tag: str | None = None,
+    training_dataset: bool | None = None,
+) -> list[dict[str, Any]]:
+    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1)
+    limit_param = f"${len(params) + 1}"
+    offset_param = f"${len(params) + 2}"
+    sql = f"""
+        SELECT * FROM media
+        WHERE {where}
+        ORDER BY COALESCE(modified, created_at) DESC, filename DESC
+        LIMIT {limit_param} OFFSET {offset_param}
+    """
+    rows = await get_pool().fetch(sql, *params, limit, offset)
+    return [dict(row) for row in rows]
+
+
+async def media_count(
+    type_filter: str | None = None,
+    search: str | None = None,
+    dir_prefix: str | None = None,
+    character_id: str | None = None,
+    tag: str | None = None,
+    training_dataset: bool | None = None,
+) -> int:
+    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1)
+    sql = f"SELECT COUNT(*) FROM media WHERE {where}"
+    return int(await get_pool().fetchval(sql, *params) or 0)
+
+
+async def list_training_dataset_media(character_id: str) -> list[dict[str, Any]]:
     rows = await get_pool().fetch(
         """
         SELECT * FROM media
-        WHERE workflow_type IS DISTINCT FROM 'project_render'
-          AND NOT (filename LIKE 'projects/%' AND filename LIKE '%render-%')
+        WHERE included_in_training_dataset = TRUE
+          AND type = 'image'
+          AND $1 = ANY(character_ids)
         ORDER BY COALESCE(modified, created_at) DESC, filename DESC
-        LIMIT $1 OFFSET $2
         """,
-        limit,
-        offset,
+        character_id,
     )
     return [dict(row) for row in rows]
 
 
-async def media_count() -> int:
-    return int(await get_pool().fetchval("SELECT COUNT(*) FROM media") or 0)
+async def training_dataset_media_count(character_id: str) -> int:
+    return int(await get_pool().fetchval(
+        """
+        SELECT COUNT(*) FROM media
+        WHERE included_in_training_dataset = TRUE
+          AND type = 'image'
+          AND $1 = ANY(character_ids)
+        """,
+        character_id,
+    ) or 0)
+
+
+async def update_media_metadata(
+    filename: str,
+    *,
+    character_ids: list[str] | None = None,
+    tags: list[str] | None = None,
+    included_in_training_dataset: bool | None = None,
+) -> dict[str, Any] | None:
+    sets: list[str] = []
+    params: list[Any] = [filename]
+    if character_ids is not None:
+        params.append(_text_list(character_ids))
+        sets.append(f"character_ids=${len(params)}::text[]")
+    if tags is not None:
+        params.append(_text_list(tags))
+        sets.append(f"tags=${len(params)}::text[]")
+    if included_in_training_dataset is not None:
+        params.append(bool(included_in_training_dataset))
+        sets.append(f"included_in_training_dataset=${len(params)}")
+    if not sets:
+        return await get_media_by_filename(filename)
+    sql = f"""
+        UPDATE media
+        SET {', '.join(sets)}, updated_at=NOW()
+        WHERE filename=$1
+        RETURNING *
+    """
+    row = await get_pool().fetchrow(sql, *params)
+    return dict(row) if row else None
+
+
+async def get_media_by_filename(filename: str) -> dict[str, Any] | None:
+    row = await get_pool().fetchrow("SELECT * FROM media WHERE filename=$1", filename)
+    return dict(row) if row else None
 
 
 async def delete_media_rows(files: list[str]) -> None:

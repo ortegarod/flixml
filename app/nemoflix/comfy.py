@@ -107,6 +107,42 @@ class ComfyClient:
             )
             raise
 
+    async def upload_input_file(self, path: Path, *, overwrite: bool = True) -> dict[str, Any]:
+        """Upload an arbitrary file into ComfyUI's input directory.
+
+        ComfyUI's upload endpoint is named /upload/image, but current ComfyUI
+        uses it as the generic browser-upload path for input assets, including
+        videos consumed by LoadVideo.
+        """
+        data = {"type": "input", "overwrite": str(overwrite).lower()}
+        try:
+            with path.open("rb") as fh:
+                files = {"image": (path.name, fh, "application/octet-stream")}
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(f"{self.base_url}/upload/image", data=data, files=files)
+                    response.raise_for_status()
+                    result = response.json()
+            logger.info(
+                "comfy upload_input_file ok",
+                extra={
+                    "event": "comfy.upload_file.ok",
+                    "base_url": self.base_url,
+                    "file_name": path.name,
+                    "size_bytes": path.stat().st_size if path.exists() else None,
+                },
+            )
+            return result
+        except httpx.HTTPError:
+            logger.exception(
+                "comfy upload_input_file failed",
+                extra={
+                    "event": "comfy.upload_file.error",
+                    "base_url": self.base_url,
+                    "file_name": path.name,
+                },
+            )
+            raise
+
     def view_url_sync(self, filename: str, *, subfolder: str = "", folder_type: str = "output") -> str:
         # Return a directly fetchable Comfy URL; caller can download or embed it.
         params = httpx.QueryParams({"filename": filename, "subfolder": subfolder, "type": folder_type})

@@ -23,11 +23,9 @@ from pydantic import BaseModel, Field
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_characters, list_datasets, list_jobs, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_metadata, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
-from .workflows import WAN_NEGATIVE, build_flux2_lora_image, build_wan22_i2v, build_wan22_t2v
-
-# ── ElevenLabs TTS ──
-# Default voice from the account's available voices. Users can override per-character or per-project.
-ELEVENLABS_VOICE_ID = "CwhRBWXzGAHq8TQ4Fs17"  # Roger — Laid-Back, Casual, Resonant
+from .workflows.registry import init_registry, get_registry
+from .providers import init_default_providers, list_providers
+from .services import GenerationService, GenerationError, WorkflowNotFoundError
 
 
 async def _generate_tts(text: str, output_path: Path, voice_id: str | None = None, voice_settings: dict[str, Any] | None = None) -> tuple[bool, float | None]:
@@ -39,6 +37,9 @@ async def _generate_tts(text: str, output_path: Path, voice_id: str | None = Non
     settings = get_settings()
     api_key = settings.elevenlabs_api_key
     if not api_key:
+        return False, None
+    resolved_voice_id = voice_id or settings.elevenlabs_voice_id
+    if not resolved_voice_id:
         return False, None
     payload: dict[str, Any] = {
         "text": text,
@@ -54,7 +55,7 @@ async def _generate_tts(text: str, output_path: Path, voice_id: str | None = Non
     import base64
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id or ELEVENLABS_VOICE_ID}/with-timestamps",
+            f"https://api.elevenlabs.io/v1/text-to-speech/{resolved_voice_id}/with-timestamps",
             headers={"xi-api-key": api_key, "Content-Type": "application/json"},
             json=payload,
         )
@@ -197,16 +198,18 @@ class ShotRecord(BaseModel):
     video_file: str | None = None
     image_prompt_id: str | None = None
     video_prompt_id: str | None = None
+    workflow: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class VideoGenerateRequest(BaseModel):
     mode: Literal["t2v", "i2v"] = "i2v"
+    workflow: str = Field(min_length=1, description="Workflow id to run (e.g. from GET /api/workflows)")
     prompt: str = Field(min_length=1)
     character: str | None = Field(default=None, description="Shortcut for one character binding")
     characters: list[CharacterBinding] = Field(default_factory=list)
     image: str | None = Field(default=None, description="ComfyUI input filename for image-to-video")
-    negative: str = WAN_NEGATIVE
+    negative: str | None = None
     width: int = 640
     height: int = 640
     length: int = Field(default=81, description="Frame count, not seconds")
@@ -231,6 +234,7 @@ class VideoGenerateRequest(BaseModel):
     high_lora_strength: float = 1.0
     low_lora_strength: float = 1.0
 
+    provider: str = Field(description="Provider id (see GET /api/providers)")
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
 
 
@@ -243,8 +247,13 @@ class VideoGenerateResponse(BaseModel):
     workflow: dict[str, Any] | None = None
 
 
+class ShotGenerateRequest(BaseModel):
+    workflow: str = Field(description="Workflow id to run (see GET /api/workflows)")
+    provider: str = Field(description="Provider id (see GET /api/providers)")
+
+
 class ImageGenerateRequest(BaseModel):
-    workflow: Literal["flux2_lora"] = "flux2_lora"
+    workflow: str = Field(min_length=1, description="Workflow id to run (e.g. from GET /api/workflows)")
     character: str | None = Field(default=None, description="Shortcut for one character binding")
     characters: list[CharacterBinding] = Field(default_factory=list)
     checkpoint: str | None = Field(default=None, description="LoRA checkpoint filename, path under the LoRA output dir, or 'latest'")
@@ -254,13 +263,14 @@ class ImageGenerateRequest(BaseModel):
     seed: int | None = None
     filename_prefix: str | None = None
     steps: int = 20
-    cfg: float = 4.0
+    cfg: float = 7.0
     sampler: str = "euler"
     guidance: float = 4.0
-    unet: str = "flux2_dev_fp8mixed.safetensors"
-    clip: str = "mistral_3_small_flux2_bf16.safetensors"
-    vae: str = "flux2-vae.safetensors"
+    unet: str | None = None  # Workflow-specific, set by service
+    clip: str | None = None  # Workflow-specific, set by service
+    vae: str | None = None  # Workflow-specific, set by service
     lora_strength: float = 1.0
+    provider: str = Field(description="Provider id (see GET /api/providers)")
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
 
 
@@ -338,11 +348,11 @@ class LoraTrainingStartRequest(BaseModel):
     # -- Job ------------------------------------------------------------------
     job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$")
     trigger_word: str = Field(min_length=1)
-    base_config: Literal["flux2_identity", "wan22_i2v_character"] = "flux2_identity"
+    base_config: str = Field(default="flux2_identity", description="Training template name; resolves to <name>_template.yaml in the training dir")
     dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/nemoflix-training/datasets/")
 
     # -- Model -----------------------------------------------------------------
-    model: Literal["flux2_dev", "flux2_klein_4b", "flux2_klein_9b", "wan22_i2v_14b", "wan22_t2v_14b"] = "flux2_dev"
+    model: str = Field(default="flux2_dev", description="Base model label, stored with the job")
     model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Hugging Face repo id for the base checkpoint")
     low_vram: bool = Field(default=False, description="Enable Low VRAM mode (Tier A 16-24 GB)")
     layer_offloading: bool = Field(default=False, description="Stream layers from CPU RAM (Tier A only)")
@@ -466,9 +476,8 @@ def _progress_state_metadata(nodes: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _comfy_ws_bridge() -> None:
-    settings = get_settings()
-    node = settings.comfy_node_for_role("default")
+async def _comfy_ws_bridge_for_node(node: ComfyNode) -> None:
+    """WebSocket bridge for a single ComfyUI node."""
     url = _ws_url(node.comfyui.normalized_url, node.comfy_client_id)
     while True:
         try:
@@ -519,6 +528,37 @@ async def _comfy_ws_bridge() -> None:
             await asyncio.sleep(3)
 
 
+async def _comfy_ws_bridge() -> None:
+    """Start WebSocket bridges for ALL configured ComfyUI nodes."""
+    settings = get_settings()
+    nodes = settings.comfy_nodes()
+    tasks = [asyncio.create_task(_comfy_ws_bridge_for_node(node)) for node in nodes]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@app.get("/api/workflows")
+async def list_workflows() -> list[dict]:
+    """List all available workflows an agent can request."""
+    registry = get_registry()
+    return [
+        {
+            "id": w.id,
+            "name": w.name,
+            "description": w.description,
+            "task": w.task,
+            "output_type": w.output_type,
+            "requirements": w.requirements,
+        }
+        for w in registry.list_workflows()
+    ]
+
+
+@app.get("/api/providers")
+async def list_registered_providers() -> list[dict]:
+    """List all registered providers an agent can target."""
+    return list_providers()
+
+
 @app.get("/api/events")
 async def sse_events(request: Request) -> StreamingResponse:
     q: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
@@ -548,7 +588,8 @@ async def sse_events(request: Request) -> StreamingResponse:
 async def start_comfy_bridge() -> None:
     global _WS_TASK
     await init_db()
-    await _seed_builtin_characters()
+    init_default_providers()  # Register GPU providers
+    init_registry(Path(__file__).parent / "workflows")  # Load workflow metadata
     if _WS_TASK is None or _WS_TASK.done():
         _WS_TASK = asyncio.create_task(_comfy_ws_bridge())
 
@@ -562,31 +603,6 @@ async def stop_comfy_bridge() -> None:
             await _WS_TASK
         _WS_TASK = None
     await close_db()
-
-
-async def _seed_builtin_characters() -> None:
-    existing = await get_character("mycharacter")
-    if existing:
-        return
-    await upsert_character({
-        "id": "mycharacter",
-        "name": "My Character",
-        "kind": "human",
-        "trigger": "Mycharacter",
-        "source_images": ["images/mycharacter-lora-api-test_00001_.png"],
-        "loras": [{
-            "workflow": "flux2_lora",
-            "name": "nemoflix-amd/mycharacter_flux2_lora_v1_dop.safetensors",
-            "strength": 1.0,
-            "base_model": "flux2",
-        }],
-        "defaults": {
-            "image_workflow": "flux2_lora",
-            "video_workflow": "wan22_i2v",
-            "reference_image": "images/mycharacter-lora-api-test_00001_.png",
-        },
-        "metadata": {"seeded": True},
-    })
 
 
 def _new_id(prefix: str) -> str:
@@ -880,7 +896,7 @@ async def patch_project_shot(project_id: str, scene_id: str, shot_id: str, patch
     current = await get_project_shot(project_id, scene_id, shot_id)
     if not current:
         raise HTTPException(status_code=404, detail="Shot not found")
-    allowed = {"shot_number", "text", "description", "subtitle", "speaker", "image_prompt", "motion_prompt", "characters", "duration_seconds", "status", "image_file", "video_file", "image_prompt_id", "video_prompt_id", "metadata"}
+    allowed = {"shot_number", "text", "description", "subtitle", "speaker", "image_prompt", "motion_prompt", "characters", "duration_seconds", "status", "image_file", "video_file", "image_prompt_id", "video_prompt_id", "workflow", "metadata"}
     unknown = sorted(set(patch) - allowed)
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unsupported shot fields: {', '.join(unknown)}")
@@ -918,7 +934,7 @@ async def _project_character_ids(project_id: str, scene_id: str, shot: dict[str,
 
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/generate-image", response_model=ImageGenerateResponse)
-async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: str) -> ImageGenerateResponse:
+async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest) -> ImageGenerateResponse:
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -933,55 +949,70 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
     bindings = [binding for binding, _ in resolved]
     records = [record for _, record in resolved]
     resolved_prompt = _prompt_with_character_triggers(prompt, records)
-    loras = _character_loras(records, "flux2_lora", bindings)
+    # Determine workflow from the shot (explicit, not inferred from characters)
+    workflow = body.workflow
+
+    loras = _character_loras(records, workflow, bindings)
     if not loras:
-        raise HTTPException(status_code=400, detail="No character LoRA resolved for image rendering")
+        raise HTTPException(status_code=400, detail=f"No character LoRA resolved for workflow: {workflow}")
 
     version_number = await next_shot_version_number(shot_id, "image")
     version_id = _new_id("ver")
-    graph = build_flux2_lora_image(
-        prompt=resolved_prompt,
-        loras=loras,
-        filename_prefix=f"projects/{project_id}/scene-{shot.get('shot_number', 1):02d}-{shot_id}-image-v{version_number:02d}",
-    )
+    filename_prefix = f"projects/{project_id}/scene-{shot.get('shot_number', 1):02d}-{shot_id}-image-v{version_number:02d}"
+
+    service = GenerationService()
+
+    workflow_params = {
+        "loras": loras,
+    }
+
     try:
-        image_client, image_node = comfy_for_role("image")
-        result = await image_client.queue_prompt(graph, client_id=image_node.comfy_client_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"ComfyUI prompt submission failed: {exc}") from exc
-
-    prompt_id = result.get("prompt_id")
-    if prompt_id:
-        await upsert_project_shot_version({
-            "id": version_id,
-            "project_id": project_id,
-            "scene_id": scene_id,
-            "shot_id": shot_id,
-            "version_number": version_number,
-            "kind": "image",
-            "status": "pending",
-            "prompt": resolved_prompt,
-            "prompt_id": prompt_id,
-            "metadata": {"character_ids": character_ids, "resolved_loras": loras},
-        })
-        shot.update({"status": "rendering_image", "image_prompt_id": prompt_id})
-        await upsert_project_shot(shot)
-        await save_job(
-            prompt_id=prompt_id,
-            job_type="project_image",
-            status="pending",
+        job_handle = await service.generate(
+            workflow=workflow,
             prompt=resolved_prompt,
-            width=1248,
-            height=832,
-            workflow_json=graph,
-            metadata={"project_id": project_id, "scene_id": scene_id, "shot_id": shot_id, "version_id": version_id, "output_role": "image", "character_ids": character_ids, "resolved_loras": loras},
+            provider=body.provider,
+            filename_prefix=filename_prefix,
+            workflow_params=workflow_params,
+            extra_metadata={
+                "project_id": project_id,
+                "scene_id": scene_id,
+                "shot_id": shot_id,
+                "version_id": version_id,
+            },
+            submit=True,
         )
+        prompt_id = job_handle.job_id  # type: ignore
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except GenerationError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
-    return ImageGenerateResponse(ok="prompt_id" in result, workflow="flux2_lora", lora_name=loras[0].get("name"), prompt_id=prompt_id, number=result.get("number"), node_errors=result.get("node_errors"))
+    # Project-specific side effects (not handled by service)
+    await upsert_project_shot_version({
+        "id": version_id,
+        "project_id": project_id,
+        "scene_id": scene_id,
+        "shot_id": shot_id,
+        "version_number": version_number,
+        "kind": "image",
+        "status": "pending",
+        "prompt": resolved_prompt,
+        "prompt_id": prompt_id,
+        "metadata": {"character_ids": character_ids, "resolved_loras": loras},
+    })
+    shot.update({"status": "rendering_image", "image_prompt_id": prompt_id})
+    await upsert_project_shot(shot)
+
+    return ImageGenerateResponse(
+        ok=True,
+        workflow=workflow,
+        lora_name=loras[0].get("name"),
+        prompt_id=prompt_id,
+    )
 
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/animate", response_model=VideoGenerateResponse)
-async def animate_project_shot(project_id: str, scene_id: str, shot_id: str) -> VideoGenerateResponse:
+async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest) -> VideoGenerateResponse:
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -1006,53 +1037,59 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str) -> 
     project = await get_project(project_id)
     width, height = _wan_resolution(project.get("aspect_ratio") if project else None)
 
-    # Wan I2V takes identity from the input image, not from a character LoRA or trigger word.
-    # Trigger injection and character LoRAs apply to image generation only.
     version_number = await next_shot_version_number(shot_id, "video")
     version_id = _new_id("ver")
-    workflow = build_wan22_i2v(
-        image=comfy_image,
-        prompt=prompt,
-        width=width,
-        height=height,
-        length=max(1, int(shot.get("duration_seconds") or 5) * 16),
-        fps=16,
-        filename_prefix=f"projects/{project_id}/scene-{shot.get('shot_number', 1):02d}-{shot_id}-video-v{version_number:02d}",
-    )
-    try:
-        video_client, video_node = comfy_for_role("video")
-        result = await video_client.queue_prompt(workflow, client_id=video_node.comfy_client_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"ComfyUI prompt submission failed: {exc}") from exc
+    filename_prefix = f"projects/{project_id}/scene-{shot.get('shot_number', 1):02d}-{shot_id}-video-v{version_number:02d}"
 
-    prompt_id = result.get("prompt_id")
-    if prompt_id:
-        await upsert_project_shot_version({
-            "id": version_id,
-            "project_id": project_id,
-            "scene_id": scene_id,
-            "shot_id": shot_id,
-            "version_number": version_number,
-            "kind": "video",
-            "status": "pending",
-            "prompt": prompt,
-            "prompt_id": prompt_id,
-            "metadata": {"source_image": image, "character_ids": character_ids},
-        })
-        shot.update({"status": "animating", "video_prompt_id": prompt_id})
-        await upsert_project_shot(shot)
-        await save_job(
-            prompt_id=prompt_id,
-            job_type="project_video",
-            status="pending",
+    service = GenerationService()
+    workflow_params = {
+        "image": comfy_image,
+        "length": max(1, int(shot.get("duration_seconds") or 5) * 16),
+        "fps": 16,
+    }
+
+    try:
+        job_handle = await service.generate(
+            workflow=body.workflow,
             prompt=prompt,
+            provider=body.provider,
             width=width,
             height=height,
-            workflow_json=workflow,
-            metadata={"project_id": project_id, "scene_id": scene_id, "shot_id": shot_id, "version_id": version_id, "output_role": "video", "source_image": image, "character_ids": character_ids},
+            filename_prefix=filename_prefix,
+            workflow_params=workflow_params,
+            extra_metadata={
+                "project_id": project_id,
+                "scene_id": scene_id,
+                "shot_id": shot_id,
+                "version_id": version_id,
+                "output_role": "video",
+                "source_image": image,
+                "character_ids": character_ids,
+            },
+            submit=True,
         )
+        prompt_id = job_handle.job_id
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except GenerationError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
-    return VideoGenerateResponse(ok="prompt_id" in result, mode="i2v", prompt_id=prompt_id, number=result.get("number"), node_errors=result.get("node_errors"))
+    await upsert_project_shot_version({
+        "id": version_id,
+        "project_id": project_id,
+        "scene_id": scene_id,
+        "shot_id": shot_id,
+        "version_number": version_number,
+        "kind": "video",
+        "status": "pending",
+        "prompt": prompt,
+        "prompt_id": prompt_id,
+        "metadata": {"source_image": image, "character_ids": character_ids},
+    })
+    shot.update({"status": "animating", "video_prompt_id": prompt_id})
+    await upsert_project_shot(shot)
+
+    return VideoGenerateResponse(ok=True, mode="i2v", prompt_id=prompt_id)
 
 
 def _srt_timestamp(seconds: float) -> str:
@@ -1429,81 +1466,70 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
     low_lora_strength = body.low_lora_strength
     filename_prefix = _resolve_filename_prefix(body.filename_prefix, "videos")
 
-    if body.mode == "i2v":
-        if not image:
-            raise HTTPException(status_code=400, detail="image is required for i2v mode. Upload first with /api/images/upload or supply a character with a reference image.")
-        workflow = build_wan22_i2v(
-            image=image,
-            prompt=prompt,
-            negative=body.negative,
-            width=body.width,
-            height=body.height,
-            length=body.length,
-            fps=body.fps,
-            seed=body.seed,
-            filename_prefix=filename_prefix,
-            steps_high=body.steps_high,
-            steps_low=body.steps_low,
-            cfg_high=body.cfg_high,
-            cfg_low=body.cfg_low,
-            shift=body.shift,
-            sampler=body.sampler,
-            scheduler=body.scheduler,
-            high_model=body.high_model,
-            low_model=body.low_model,
-            vae=body.vae,
-            clip=body.clip,
-            high_lora=high_lora,
-            low_lora=low_lora,
-            high_lora_strength=high_lora_strength,
-            low_lora_strength=low_lora_strength,
-        )
-    else:
-        workflow = build_wan22_t2v(
-            prompt=prompt,
-            negative=body.negative,
-            width=body.width,
-            height=body.height,
-            length=body.length,
-            fps=body.fps,
-            seed=body.seed,
-            filename_prefix=filename_prefix,
-            steps_high=body.steps_high,
-            steps_low=body.steps_low,
-            cfg_high=body.cfg_high,
-            cfg_low=body.cfg_low,
-            shift=body.shift,
-            sampler=body.sampler,
-            scheduler=body.scheduler,
-        )
+    if body.mode == "i2v" and not image:
+        raise HTTPException(status_code=400, detail="image is required for i2v mode. Upload first with /api/images/upload or supply a character with a reference image.")
 
-    if not body.submit:
-        return VideoGenerateResponse(ok=True, mode=body.mode, workflow=workflow)
+    service = GenerationService()
+
+    workflow_params = {
+        "length": body.length,
+        "fps": body.fps,
+        "steps_high": body.steps_high,
+        "steps_low": body.steps_low,
+        "cfg_high": body.cfg_high,
+        "cfg_low": body.cfg_low,
+        "shift": body.shift,
+        "sampler": body.sampler,
+        "scheduler": body.scheduler,
+    }
+    if body.negative is not None:
+        workflow_params["negative"] = body.negative
+
+    workflow_name = body.workflow
+    if body.mode == "i2v":
+        workflow_params.update({
+            "image": image,
+            "high_model": body.high_model,
+            "low_model": body.low_model,
+            "vae": body.vae,
+            "clip": body.clip,
+            "high_lora": high_lora,
+            "low_lora": low_lora,
+            "high_lora_strength": high_lora_strength,
+            "low_lora_strength": low_lora_strength,
+        })
 
     try:
-        video_client, video_node = comfy_for_role("video")
-        result = await video_client.queue_prompt(workflow, client_id=video_node.comfy_client_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"ComfyUI prompt submission failed: {exc}") from exc
-
-    prompt_id = result.get("prompt_id")
-    if prompt_id:
-        await save_job(
-            prompt_id=prompt_id,
-            job_type=f"wan22_{body.mode}",
-            status="pending",
+        result = await service.generate(
+            workflow=workflow_name,
             prompt=prompt,
+            provider=body.provider,
             width=body.width,
             height=body.height,
-            workflow_json=workflow,
-            metadata={**body.model_dump(), "resolved_image": image, "character_ids": [record.get("id") for record in character_records]},
+            seed=body.seed,
+            filename_prefix=filename_prefix,
+            workflow_params=workflow_params,
+            extra_metadata={
+                **body.model_dump(),
+                "resolved_image": image,
+                "character_ids": [record.get("id") for record in character_records],
+            },
+            submit=body.submit,
         )
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except GenerationError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if not body.submit:
+        return VideoGenerateResponse(ok=True, mode=body.mode, workflow=result["workflow"])  # type: ignore[index]
+
+    prompt_id = result.job_id  # type: ignore[union-attr]
+
     return VideoGenerateResponse(
-        ok="prompt_id" in result,
+        ok=True,
         mode=body.mode,
         prompt_id=prompt_id,
-        number=result.get("number"),
-        node_errors=result.get("node_errors"),
     )
 
 
@@ -1631,7 +1657,7 @@ async def _queue_position(client: ComfyClient, prompt_id: str) -> int | None:
 
 
 @app.get("/api/jobs")
-async def jobs(include_completed: bool = False) -> dict[str, Any]:
+async def jobs(include_completed: bool = True) -> dict[str, Any]:
     """Return jobs submitted through this API from durable Postgres state.
 
     ComfyUI remains the execution engine. Its live queue is used only to refresh
@@ -1767,7 +1793,10 @@ def _resolve_filename_prefix(prefix: str | None, subfolder: str) -> str:
     if existing:
         raise HTTPException(status_code=409, detail=f"Filename prefix '{safe}' already exists — choose a different name.")
     return safe
-_TRAINING_DIR = Path(os.environ.get("NEMOFLIX_TRAINING_DIR", "/home/ubuntu/nemoflix/training"))
+_TRAINING_DIR_VAL = os.environ.get("NEMOFLIX_TRAINING_DIR")
+if not _TRAINING_DIR_VAL:
+    raise RuntimeError("NEMOFLIX_TRAINING_DIR environment variable is required")
+_TRAINING_DIR = Path(_TRAINING_DIR_VAL)
 _TRAINING_CONFIG_DIR = _TRAINING_DIR / "config"
 # Droplet paths — these live on the GPU worker, referenced by name only from the VPS.
 _DROPLET_TRAINING_DIR = Path("/root/nemoflix-training")
@@ -1775,7 +1804,9 @@ _DROPLET_OUTPUT_DIR = _DROPLET_TRAINING_DIR / "output"
 _DROPLET_LOGS_DIR = _DROPLET_TRAINING_DIR / "logs"
 _DROPLET_DATASETS_DIR = _DROPLET_TRAINING_DIR / "datasets"
 _AITK_API_URL = get_settings().aitk_api_url
-_AITK_AUTH_TOKEN = os.environ.get("AITK_API_TOKEN", "")
+_AITK_AUTH_TOKEN = os.environ.get("AITK_API_TOKEN")
+if not _AITK_AUTH_TOKEN:
+    raise RuntimeError("AITK_API_TOKEN environment variable is required")
 _AITK_GPU_IDS = os.environ.get("AITK_GPU_IDS", "0")
 
 
@@ -1786,8 +1817,14 @@ def _aitk_headers() -> dict[str, str]:
 
 
 # Local VPS paths for LoRA checkpoints synced from the droplet.
-_LORA_OUTPUT_DIR = Path(os.environ.get("NEMOFLIX_LORA_OUTPUT_DIR", _OUTPUT_DIR / "loras"))
-_COMFY_LORA_DIR = Path(os.environ.get("NEMOFLIX_COMFY_LORA_DIR", "/home/ubuntu/nemoflix/ComfyUI/models/loras/nemoflix-amd"))
+_LORA_OUTPUT_DIR_VAL = os.environ.get("NEMOFLIX_LORA_OUTPUT_DIR")
+if not _LORA_OUTPUT_DIR_VAL:
+    raise RuntimeError("NEMOFLIX_LORA_OUTPUT_DIR environment variable is required")
+_LORA_OUTPUT_DIR = Path(_LORA_OUTPUT_DIR_VAL)
+_COMFY_LORA_DIR_VAL = os.environ.get("NEMOFLIX_COMFY_LORA_DIR")
+if not _COMFY_LORA_DIR_VAL:
+    raise RuntimeError("NEMOFLIX_COMFY_LORA_DIR environment variable is required")
+_COMFY_LORA_DIR = Path(_COMFY_LORA_DIR_VAL)
 _TRAINING_SAMPLES_DIR = _OUTPUT_DIR / "samples"
 
 
@@ -1867,25 +1904,10 @@ async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
     return None
 
 
-_MODEL_MAP: dict[str, dict[str, str]] = {
-    "flux2_dev": {"architecture": "flux2", "name_or_path": "black-forest-labs/FLUX.2-dev"},
-    "flux2_klein_4b": {"architecture": "flux2_klein", "name_or_path": "black-forest-labs/FLUX.2-klein-base-4B"},
-    "flux2_klein_9b": {"architecture": "flux2_klein", "name_or_path": "black-forest-labs/FLUX.2-klein-base-9B"},
-    "wan22_i2v_14b": {"architecture": "wan22_i2v", "name_or_path": "Wan-AI/Wan2.2-I2V-14B"},
-    "wan22_t2v_14b": {"architecture": "wan22_t2v", "name_or_path": "Wan-AI/Wan2.2-T2V-14B"},
-}
-
-_TEMPLATE_MAP: dict[str, str] = {
-    "flux2_identity": "flux2_identity_template.yaml",
-    "wan22_i2v_character": "wan22_i2v_character_template.yaml",
-}
-
-
 def _build_training_config(request: LoraTrainingStartRequest) -> tuple[Path, dict[str, Any]]:
-    template_name = _TEMPLATE_MAP[request.base_config]
-    template_path = _TRAINING_DIR / template_name
+    template_path = _TRAINING_DIR / f"{request.base_config}_template.yaml"
     if not template_path.is_file():
-        raise HTTPException(status_code=500, detail=f"Training template not found: {template_name}")
+        raise HTTPException(status_code=400, detail=f"Unknown base_config '{request.base_config}': no {template_path.name} in training dir")
 
     config = yaml.safe_load(template_path.read_text())
     job_name = request.job_name
@@ -1994,46 +2016,6 @@ def _read_dimensions(path: Path) -> tuple[int, int]:
             return im.width, im.height
     except Exception:
         return 0, 0
-
-
-async def _sync_filesystem_media(limit: int | None = None) -> None:
-    entries: list[Path] = []
-    try:
-        iterator = _OUTPUT_DIR.rglob("*")
-        for entry in iterator:
-            if entry.is_file() and entry.suffix.lower() in _ALLOW_EXT and ".thumbs" not in entry.parts and "samples" not in entry.parts and not entry.name.startswith("render-"):
-                entries.append(entry)
-    except (FileNotFoundError, PermissionError):
-        return
-    entries.sort(key=lambda item: item.stat().st_mtime, reverse=True)
-    for entry in entries[:limit]:
-        rel = str(entry.relative_to(_OUTPUT_DIR))
-        width, height = _read_dimensions(entry)
-        stat = entry.stat()
-        await upsert_media({
-            "filename": rel,
-            "type": "video" if entry.suffix.lower() in {".mp4", ".webm", ".gif"} else "image",
-            "width": width,
-            "height": height,
-            "size": stat.st_size,
-            "modified": utc_from_timestamp(stat.st_mtime),
-        })
-
-
-def _media_item(row: dict[str, Any]) -> dict[str, Any]:
-    filename = row["filename"]
-    return {
-        "name": Path(filename).name,
-        "filename": filename,
-        "type": row.get("type", "image"),
-        "width": row.get("width") or 0,
-        "height": row.get("height") or 0,
-        "mtime": row.get("modified").timestamp() if row.get("modified") else 0,
-        "url": f"/media/{filename}",
-        "thumb": f"/media/{filename}",
-        "prompt": row.get("prompt"),
-        "prompt_id": row.get("prompt_id"),
-    }
 
 
 
@@ -2226,14 +2208,11 @@ def _comfy_lora_name_for_checkpoint(path: Path) -> str:
     link_path = _COMFY_LORA_DIR / path.name
     if not link_path.exists():
         link_path.symlink_to(path)
-    return f"nemoflix-amd/{path.name}"
+    return f"{_COMFY_LORA_DIR.name}/{path.name}"
 
 
 @app.post("/api/image/generate", response_model=ImageGenerateResponse)
 async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
-    if body.workflow != "flux2_lora":
-        raise HTTPException(status_code=400, detail=f"Unsupported image workflow: {body.workflow}")
-
     resolved = await _resolve_characters(body.character, body.characters)
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
@@ -2250,55 +2229,60 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
 
     filename_prefix = _resolve_filename_prefix(body.filename_prefix, "images")
 
-    graph = build_flux2_lora_image(
-        prompt=prompt,
-        loras=loras,
-        width=body.width,
-        height=body.height,
-        seed=body.seed,
-        filename_prefix=filename_prefix,
-        steps=body.steps,
-        cfg=body.cfg,
-        sampler=body.sampler,
-        guidance=body.guidance,
-        unet=body.unet,
-        clip=body.clip,
-        vae=body.vae,
-        lora_strength=body.lora_strength,
-    )
-
     resolved_lora_name = checkpoint_lora_name or (loras[0].get("name") if loras else None)
 
-    if not body.submit:
-        return ImageGenerateResponse(ok=True, workflow=body.workflow, checkpoint=checkpoint_name, lora_name=resolved_lora_name, graph=graph)
+    # Use GenerationService for workflow build + submit + DB save
+    service = GenerationService()
+    
+    # Build workflow-specific params (only pass what the workflow builder accepts)
+    workflow_params: dict[str, Any] = {
+        "loras": loras,
+        "steps": body.steps,
+        "cfg": body.cfg,
+        "sampler": body.sampler,
+        "lora_strength": body.lora_strength,
+    }
+    
+    workflow_params["guidance"] = body.guidance
+    if body.unet is not None:
+        workflow_params["unet"] = body.unet
+    if body.clip is not None:
+        workflow_params["clip"] = body.clip
+    if body.vae is not None:
+        workflow_params["vae"] = body.vae
 
     try:
-        image_client, image_node = comfy_for_role("image")
-        result = await image_client.queue_prompt(graph, client_id=image_node.comfy_client_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"ComfyUI prompt submission failed: {exc}") from exc
-
-    prompt_id = result.get("prompt_id")
-    if prompt_id:
-        await save_job(
-            prompt_id=prompt_id,
-            job_type="flux2_lora_image",
-            status="pending",
+        result = await service.generate(
+            workflow=body.workflow,
             prompt=prompt,
+            provider=body.provider,
             width=body.width,
             height=body.height,
-            workflow_json=graph,
-            metadata={**body.model_dump(), "checkpoint": checkpoint_name, "lora_name": checkpoint_lora_name, "resolved_prompt": prompt, "character_ids": [record.get("id") for record in character_records], "resolved_loras": loras},
+            seed=body.seed,
+            filename_prefix=filename_prefix,
+            workflow_params=workflow_params,
+            submit=body.submit,
+        )
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except GenerationError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if not body.submit:
+        return ImageGenerateResponse(
+            ok=True,
+            workflow=body.workflow,
+            checkpoint=checkpoint_name,
+            lora_name=resolved_lora_name,
+            graph=result["workflow"],  # type: ignore
         )
 
     return ImageGenerateResponse(
-        ok="prompt_id" in result,
+        ok=True,
         workflow=body.workflow,
         checkpoint=checkpoint_name,
         lora_name=resolved_lora_name,
-        prompt_id=prompt_id,
-        number=result.get("number"),
-        node_errors=result.get("node_errors"),
+        prompt_id=result.job_id,  # type: ignore
     )
 
 
@@ -2408,22 +2392,54 @@ async def lora_training_sample_image(path: str):
 
 @app.get("/api/listing")
 async def listing(dir: str = "", offset: int = 0, limit: int = 60) -> dict[str, Any]:
-    # Backfill the database from ComfyUI's output folder before reading. This keeps
-    # old files visible while new generations become durable DB records.
-    await _sync_filesystem_media(limit=500)
-    rows = await list_media(limit=limit, offset=offset)
-    if dir:
-        prefix = dir.strip("/") + "/"
-        rows = [row for row in rows if str(row.get("filename", "")).startswith(prefix)]
-
-    # The database is metadata, not durable media storage. If a disposable GPU
-    # worker was destroyed before outputs were copied back, stale rows can point
-    # at files that no longer exist on the VPS. Do not return broken media tiles.
-    available_rows = [
-        row for row in rows
-        if (target := _safe_output_path(str(row.get("filename", "")))) is not None and target.is_file()
-    ]
-    return {"images": [_media_item(row) for row in available_rows], "total": len(available_rows), "offset": offset, "limit": limit}
+    """List completed generation jobs from the jobs table.
+    
+    Reads from the jobs table (source of truth), not filesystem scanning.
+    Each job includes output_filename, prompt, metadata, and status.
+    """
+    rows = await list_jobs(limit=limit, offset=offset)
+    
+    # Filter to completed jobs only
+    completed = [row for row in rows if row.get("status") == "completed"]
+    
+    # Transform jobs → listing format
+    items = []
+    for job in completed:
+        filename = job.get("output_filename")
+        if not filename:
+            continue
+        # Optional directory filter
+        if dir:
+            prefix = dir.strip("/") + "/"
+            if not filename.startswith(prefix):
+                continue
+        # Verify file exists on disk
+        target = _safe_output_path(filename)
+        if not target or not target.is_file():
+            continue
+        width, height = _read_dimensions(target)
+        items.append({
+            "name": Path(filename).name,
+            "filename": filename,
+            "type": "video" if Path(filename).suffix.lower() in {".mp4", ".webm", ".gif"} else "image",
+            "width": width,
+            "height": height,
+            "mtime": job.get("updated_at").timestamp() if job.get("updated_at") else 0,
+            "url": f"/media/{filename}",
+            "thumb": f"/media/{filename}",
+            "prompt": job.get("prompt"),
+            "prompt_id": job.get("prompt_id"),
+        })
+    
+    # Sort by mtime descending
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    
+    return {
+        "images": items[offset:offset+limit],
+        "total": len(items),
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 @app.get("/media/{path:path}")
