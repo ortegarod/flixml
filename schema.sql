@@ -10,18 +10,24 @@ CREATE TABLE IF NOT EXISTS media (
     size BIGINT,
     modified TIMESTAMPTZ,
     prompt TEXT,
+    negative_prompt TEXT,
     seed BIGINT,
     steps INT,
     guidance FLOAT,
     sampler TEXT,
+    scheduler TEXT,
     model TEXT,
     vae TEXT,
     text_encoder TEXT,
     loras JSONB,
     workflow_type TEXT,
+    workflow_json JSONB,
     prompt_id TEXT,
     source_image TEXT,
     video_file TEXT,
+    character_ids TEXT[] NOT NULL DEFAULT '{}'::text[],
+    tags TEXT[] NOT NULL DEFAULT '{}'::text[],
+    included_in_training_dataset BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -29,6 +35,9 @@ CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);
 CREATE INDEX IF NOT EXISTS idx_media_modified ON media(modified DESC);
 CREATE INDEX IF NOT EXISTS idx_media_prompt_id ON media(prompt_id) WHERE prompt_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_media_source_image ON media(source_image) WHERE source_image IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_media_character_ids ON media USING GIN(character_ids);
+CREATE INDEX IF NOT EXISTS idx_media_tags ON media USING GIN(tags);
+CREATE INDEX IF NOT EXISTS idx_media_included_in_training_dataset ON media(included_in_training_dataset) WHERE included_in_training_dataset = TRUE;
 
 -- Generation jobs
 CREATE TABLE IF NOT EXISTS jobs (
