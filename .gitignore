@@ -21,6 +21,7 @@ ComfyUI_*.webp
 # Local/private configuration
 configs/
 config.json
+secrets/
 .env
 .env.*
 
@@ -29,6 +30,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+*.db
 
 # Logs
 *.log
@@ -46,3 +49,6 @@ training/
 # Local/generated Hugging Face Space preview artifacts
 outputs/
 studio/public/demos/*.mp4
+
+# Local workflow overrides
+app/nemoflix/workflows/local/

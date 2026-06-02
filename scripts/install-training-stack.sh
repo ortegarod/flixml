@@ -6,7 +6,9 @@ set -x
 # Run this AFTER scripts/startup-script.sh has completed successfully
 
 PYTHON_BIN="/root/comfyui-venv/bin/python"
-TRAINING_DIR="/root/nemoflix-training"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TRAINING_DIR="${TRAINING_DIR:-$REPO_DIR/training}"
 DIFFUSERS_DIR="/root/diffusers"
 
 echo "=== Installing HF Diffusers Training Stack ==="
@@ -42,9 +44,9 @@ set -Eeuo pipefail
 # SDXL LoRA training script using HF diffusers
 # Usage: ./train-lora-sdxl.sh /path/to/dataset output_name
 
-DATASET_DIR="${1:-/root/nemoflix-training/datasets/sample}"
+DATASET_DIR="${1:-/root/nemoflix-studio/training/datasets/sample}"
 OUTPUT_NAME="${2:-my-lora}"
-OUTPUT_DIR="/root/nemoflix-training/outputs/${OUTPUT_NAME}"
+OUTPUT_DIR="/root/nemoflix-studio/training/outputs/${OUTPUT_NAME}"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
 
 echo "=== Training SDXL LoRA ==="

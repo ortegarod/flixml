@@ -7,8 +7,8 @@ trap 'echo "ERROR: setup failed at line $LINENO"' ERR
 
 APT_GET="apt-get -o DPkg::Lock::Timeout=300"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
-APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/nemoflix.git}"
-APP_DIR="${APP_DIR:-/root/nemoflix}"
+APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/nemoflix-studio.git}"
+APP_DIR="${APP_DIR:-/root/nemoflix-studio}"
 
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:8188}"
 
@@ -55,7 +55,7 @@ echo "=== PyTorch GPU Check ==="
 # Clone or update the project repo. The droplet uses this repo only for worker
 # install scripts/workflow assets. The durable API, database, Studio UI, and
 # control plane live on the VPS.
-echo "=== Cloning/updating Nemoflix repo ==="
+echo "=== Cloning/updating Nemoflix Studio repo ==="
 if [ -d "$APP_DIR/.git" ]; then
     git -C "$APP_DIR" fetch --depth 1 origin main
     git -C "$APP_DIR" reset --hard origin/main

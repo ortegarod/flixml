@@ -3,13 +3,13 @@ set -Eeuo pipefail
 set -x
 
 # Install Ostris AI Toolkit on a disposable AMD MI300X ROCm droplet.
-# Run after scripts/startup-script.sh so ROCm/system basics are already present.
-# This is intentionally idempotent: safe to rerun on a fresh or partially initialized box.
 
 APT_GET="apt-get -o DPkg::Lock::Timeout=300"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TOOLKIT_DIR="${TOOLKIT_DIR:-/root/ai-toolkit}"
 TOOLKIT_VENV="${TOOLKIT_VENV:-/root/ai-toolkit-venv}"
-TRAINING_DIR="${TRAINING_DIR:-/root/nemoflix-training}"
+TRAINING_DIR="${TRAINING_DIR:-$REPO_DIR/training}"
 ROCM_INDEX_PRIMARY="${ROCM_INDEX_PRIMARY:-https://download.pytorch.org/whl/rocm7.2}"
 ROCM_INDEX_FALLBACK="${ROCM_INDEX_FALLBACK:-https://download.pytorch.org/whl/rocm7.0}"
 AI_TOOLKIT_REF="${AI_TOOLKIT_REF:-main}"
@@ -29,6 +29,26 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "Run as root on the AMD droplet."
   exit 1
 fi
+
+# Fresh droplets often start unattended-upgrades on first boot, grabbing the apt lock.
+# Stop all apt-related services and kill any running apt processes so our apt-get
+# install can proceed. The droplet is disposable; we do not re-enable them.
+echo "=== Disabling automatic apt locks ==="
+systemctl stop apt-daily.service apt-daily-upgrade.service apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+systemctl mask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+killall -9 unattended-upgrade apt apt-get 2>/dev/null || true
+sleep 2
+
+# Give the lock file a moment to clear, then check
+_lock_wait_deadline=$(($(date +%s) + 30))
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  if [ "$(date +%s)" -ge "$_lock_wait_deadline" ]; then
+    echo "WARNING: apt lock still held after 30s of cleanup"
+    break
+  fi
+  echo "Waiting for apt lock to clear..."
+  sleep 5
+done
 
 echo "=== Installing AI Toolkit prerequisites ==="
 $APT_GET update -y
@@ -79,10 +99,9 @@ mkdir -p \
   "$TRAINING_DIR/config" \
   "$TOOLKIT_DIR/config"
 
-# If this script is run from a cloned Nemoflix repo, seed our checked-in config templates
-# into the disposable training workspace.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Seed checked-in config templates into the runtime config directory.
+# TRAINING_DIR defaults to the cloned Studio repo's training/ directory, so this
+# copy usually just makes editable job configs under training/config/.
 if compgen -G "$REPO_DIR/training/*.yaml" >/dev/null; then
   cp -f "$REPO_DIR"/training/*.yaml "$TRAINING_DIR/config/"
 fi
@@ -90,22 +109,24 @@ fi
 cat > "$TRAINING_DIR/README.md" <<'EOF'
 # Nemoflix AI Toolkit Training Workspace
 
-Persistent-ish training layout for disposable AMD droplets.
+Training layout for disposable AMD droplets. The Studio repo is cloned at
+`/root/nemoflix-studio`; datasets/config/output live under that repo's
+`training/` directory.
 
 ## Paths
 
 - AI Toolkit: `/root/ai-toolkit`
 - Venv: `/root/ai-toolkit-venv`
-- Datasets: `/root/nemoflix-training/datasets`
-- Configs: `/root/nemoflix-training/config`
-- Outputs/checkpoints: `/root/nemoflix-training/output`
-- Sample control images: `/root/nemoflix-training/samples`
+- Datasets: `/root/nemoflix-studio/training/datasets`
+- Configs: `/root/nemoflix-studio/training/config`
+- Outputs/checkpoints: `/root/nemoflix-studio/training/output`
+- Sample control images: `/root/nemoflix-studio/training/samples`
 
 ## Run a config
 
 ```bash
 cd /root/ai-toolkit
-/root/ai-toolkit-venv/bin/python run.py /root/nemoflix-training/config/<config>.yaml
+/root/ai-toolkit-venv/bin/python run.py /root/nemoflix-studio/training/config/<config>.yaml
 ```
 
 ## Hugging Face token
@@ -134,7 +155,7 @@ EOF
 cat > "$TRAINING_DIR/run-ai-toolkit.sh" <<'EOF'
 #!/bin/bash
 set -Eeuo pipefail
-CONFIG_PATH="${1:?Usage: /root/nemoflix-training/run-ai-toolkit.sh /root/nemoflix-training/config/job.yaml}"
+CONFIG_PATH="${1:?Usage: /root/nemoflix-studio/training/run-ai-toolkit.sh /root/nemoflix-studio/training/config/job.yaml}"
 cd /root/ai-toolkit
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
 exec /root/ai-toolkit-venv/bin/python run.py "$CONFIG_PATH"
@@ -202,7 +223,7 @@ echo "=== AI Toolkit install complete ==="
 echo "Toolkit:  $TOOLKIT_DIR"
 echo "Venv:     $TOOLKIT_VENV"
 echo "Training: $TRAINING_DIR"
-echo "UI API:   http://localhost:8675 (AI_TOOLKIT_AUTH=$AITK_AUTH_TOKEN)"
+echo "UI API:   http://localhost:8675 (AI_TOOLKIT_AUTH configured)"
 echo ""
 echo "=== !!! REMINDER !!! ==="
 echo "FLUX.2-dev is a gated Hugging Face model. The installer cannot download it automatically."
