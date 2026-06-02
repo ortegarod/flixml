@@ -1,3 +1,9 @@
+export interface CharacterSummary {
+  id: string;
+  name: string;
+  trigger?: string | null;
+}
+
 export interface MediaItem {
   name: string;
   type: "image" | "video";
@@ -9,6 +15,9 @@ export interface MediaItem {
   thumb?: string;
   prompt?: string | null;
   prompt_id?: string | null;
+  character_ids?: string[];
+  tags?: string[];
+  included_in_training_dataset?: boolean;
 }
 
 export interface LoraTrainingStatus {
@@ -28,6 +37,8 @@ export interface LoraTrainingStatus {
   vram_percent?: number | null;
   updated_at: string;
   error?: string | null;
+  info?: string | null;
+  speed_string?: string | null;
 }
 
 export interface LoraCheckpoint {
