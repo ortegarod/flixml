@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, Clock, Film, RefreshCw, Sparkles, UserCircle } from "lucide-react";
+import { Bot, Clock, Film, Plus, RefreshCw, Sparkles, UserCircle } from "lucide-react";
 
 interface Project {
   id: string;
@@ -56,6 +56,7 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   async function load() {
     setError(null);
@@ -68,6 +69,32 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
       setError(e instanceof Error ? e.message : "Failed to load projects");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function createProject() {
+    const title = window.prompt("Project title?", "Untitled project");
+    if (!title) return;
+    const aspect = window.prompt("Aspect ratio (9:16, 16:9, 1:1)?", "9:16") || "9:16";
+    setCreating(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, aspect_ratio: aspect, status: "draft" }),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(`Create failed: ${response.status} ${text}`);
+      }
+      const created = await response.json();
+      await load();
+      if (created?.id && onOpenProject) onOpenProject(created.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create project");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -87,8 +114,16 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
             <p className="text-xs text-gray-500 leading-relaxed">Multi-shot stories your agent is directing.</p>
           </div>
           <button
+            onClick={createProject}
+            disabled={creating}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-600/15 hover:bg-rose-600/25 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-rose-100 transition"
+            title="Create a new empty project"
+          >
+            <Plus className="w-3.5 h-3.5" /> {creating ? "Creating…" : "New project"}
+          </button>
+          <button
             onClick={() => { setLoading(true); load(); }}
-            className="ml-auto w-8 h-8 rounded-xl border border-gray-800 bg-gray-900/40 text-gray-500 hover:text-gray-200 hover:border-gray-600 transition flex items-center justify-center"
+            className="w-8 h-8 rounded-xl border border-gray-800 bg-gray-900/40 text-gray-500 hover:text-gray-200 hover:border-gray-600 transition flex items-center justify-center"
             title="Refresh projects"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />

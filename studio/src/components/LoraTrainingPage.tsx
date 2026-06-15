@@ -56,6 +56,99 @@ export function LoraTrainingPage() {
   const jobs = ctx.trainingJobs ?? [];
   const live = ctx.training;
 
+  // ── SSE live stream for the running job ──────────────────────────────────
+  const [sseData, setSseData] = useState<any>(null);
+  const [sseConnected, setSseConnected] = useState(false);
+
+  // Derive effective live state: SSE overrides polled data.
+  // SSE provides raw step/status/info; polled data provides total_steps, eta, lr, loss.
+  const effectiveLive = React.useMemo(() => {
+    if (!sseData && !live) return null;
+    return {
+      ...(live || {}),
+      ...(sseData || {}),
+      current_step: sseData?.step ?? live?.current_step ?? 0,
+      status: sseData?.status ?? live?.status,
+      info: sseData?.info ?? live?.info,
+      speed_string: sseData?.speed_string ?? live?.speed_string,
+    };
+  }, [sseData, live]);
+
+  // Open SSE stream whenever there is a running/training job.
+  useEffect(() => {
+    const runningJob = jobs.find((j: any) => j.status === "running" || j.status === "training" || j.status === "pending");
+    if (!runningJob) {
+      setSseConnected(false);
+      setSseData(null);
+      return;
+    }
+
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let intentionalClose = false;
+
+    const connect = () => {
+      if (intentionalClose) return;
+      const url = `/api/lora-training/stream?job_name=${encodeURIComponent(runningJob.job_name)}`;
+      es = new EventSource(url);
+
+      es.addEventListener("connected", () => {
+        setSseConnected(true);
+      });
+
+      es.addEventListener("poll", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setSseData(data);
+        } catch { /* ignore malformed */ }
+      });
+
+      es.addEventListener("samples", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          if (data.job_name) {
+            loadExpanded(data.job_name);
+          }
+        } catch { /* ignore malformed */ }
+      });
+
+      es.addEventListener("terminal", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setSseData(data);
+          setSseConnected(false);
+          intentionalClose = true;
+          es?.close();
+          // Force a full refresh to pick up synced checkpoints/samples.
+          ctx.load();
+        } catch { /* ignore malformed */ }
+      });
+
+      es.addEventListener("error", (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          setSseData((prev: any) => ({ ...prev, status: "failed", error: data.error }));
+        } catch { /* ignore malformed */ }
+      });
+
+      es.onerror = () => {
+        setSseConnected(false);
+        es?.close();
+        if (!intentionalClose) {
+          reconnectTimer = setTimeout(connect, 5000);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      intentionalClose = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    };
+  }, [jobs, ctx]);
+
   // Datasets
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [datasetsLoading, setDatasetsLoading] = useState(true);
@@ -116,12 +209,12 @@ export function LoraTrainingPage() {
     // Merge live ai-toolkit data into the matching job row so we get real
     // current_step / total_steps / loss / info. ai-toolkit uses "running"
     // while the DB-backed job list may say "training".
-    if (live && live.job_name === job.job_name && (live.status === "running" || live.status === "training")) {
-      return { ...job, ...live, _live: true };
+    if (effectiveLive && effectiveLive.job_name === job.job_name && (effectiveLive.status === "running" || effectiveLive.status === "training")) {
+      return { ...job, ...effectiveLive, _live: true };
     }
     // Job says running/training in the DB but ai-toolkit has no matching
     // live process. The job died or was abandoned — treat as failed.
-    if (!live || live.job_name !== job.job_name) {
+    if (!effectiveLive || effectiveLive.job_name !== job.job_name) {
       if (job.status === "running" || job.status === "training") {
         return { ...job, status: "failed", _dead: true };
       }
@@ -132,21 +225,22 @@ export function LoraTrainingPage() {
   const [showForm] = useState(true);
   const [formJobName, setFormJobName] = useState("");
   const [formTrigger, setFormTrigger] = useState("");
-  const [formDataset, setFormDataset] = useState("mycharacter_flux2_lora_v1_dop");
+  const [formCharacterId, setFormCharacterId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const submitTraining = async () => {
+    if (!window.confirm("Start Training will provision a paid AMD GPU droplet if one is not already running. Continue?")) return;
     setSubmitError(null);
     setSubmitting(true);
     try {
       const res = await fetch("/api/lora-training/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_name: formJobName, trigger_word: formTrigger, dataset: formDataset }),
+        body: JSON.stringify({ job_name: formJobName, trigger_word: formTrigger, character_id: formCharacterId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Failed to start training");
+      if (!res.ok || data.ok === false) throw new Error(data.detail || data.error || "Failed to start training");
       setFormJobName("");
       setFormTrigger("");
       ctx.load();
@@ -205,9 +299,9 @@ export function LoraTrainingPage() {
     }
   };
 
-  const completed = jobs.filter((j: any) => j.status === "completed").length;
-  const running = jobs.filter((j: any) => j.status === "training" || j.status === "running").length;
-  const failed = jobs.filter((j: any) => j.status === "failed").length;
+  const completed = mergedJobs.filter((j: any) => j.status === "completed").length;
+  const running = mergedJobs.filter((j: any) => j.status === "training" || j.status === "running").length;
+  const failed = mergedJobs.filter((j: any) => j.status === "failed").length;
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
@@ -225,11 +319,31 @@ export function LoraTrainingPage() {
       {showForm && (
         <div className="rounded-xl border border-fuchsia-500/30 bg-gray-950 p-5 space-y-4">
           <h2 className="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide">Start Training Job</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+          {/* Before-you-train guidance — follows RunComfy FLUX.2 LoRA guide */}
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-100/90 space-y-2">
+            <p className="font-semibold text-amber-200 uppercase tracking-wide text-[11px]">Before you train</p>
+            <div>
+              <p className="font-medium text-amber-200">Trigger word</p>
+              <p>Short, <span className="font-semibold">unique</span> token that isn't a real English word — e.g. <code className="text-amber-300">ch4rtrig</code>, <code className="text-amber-300">subj_v1</code>, <code className="text-amber-300">midnight_tarot</code>. Don't use the character's actual name — it collides with base-model priors and dilutes identity learning.</p>
+            </div>
+            <div>
+              <p className="font-medium text-amber-200">Captions (.txt next to each image)</p>
+              <p>Format: <code className="text-amber-300">&lt;trigger&gt;, a woman, [scene description]</code> (or <code className="text-amber-300">a man</code> / <code className="text-amber-300">a person</code>). The class word stays available to the base model; the trigger absorbs identity.</p>
+              <p className="mt-1">Describe what's visible (pose, clothing, setting, lighting, framing). Don't describe the person's face/features — those are what the trigger should learn.</p>
+            </div>
+            <div>
+              <p className="font-medium text-amber-200">Dataset size</p>
+              <p>Character LoRA target: <span className="font-semibold">30–60 images</span>. More isn't better — it dilutes per-image exposure.</p>
+            </div>
+            <p className="text-amber-200/70 text-[11px] pt-1 border-t border-amber-500/10">Full guide: <a href="https://www.runcomfy.com/trainer/ai-toolkit/flux-2-dev-lora-training" target="_blank" rel="noreferrer" className="underline hover:text-amber-200">RunComfy FLUX.2 LoRA training guide</a></p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-1.5">
               <label className="text-xs text-gray-400 uppercase tracking-wide">Job Name</label>
               <Input
-                placeholder="e.g. mycharacter_v6_full"
+                placeholder="e.g. character_v1"
                 value={formJobName}
                 onChange={e => setFormJobName(e.target.value)}
                 className="bg-black/40 border-gray-700 text-white placeholder:text-gray-600"
@@ -238,37 +352,31 @@ export function LoraTrainingPage() {
             <div className="space-y-1.5">
               <label className="text-xs text-gray-400 uppercase tracking-wide">Trigger Word</label>
               <Input
-                placeholder="e.g. Mycharacter"
+                placeholder="e.g. ch4rtrig (must be unique)"
                 value={formTrigger}
                 onChange={e => setFormTrigger(e.target.value)}
                 className="bg-black/40 border-gray-700 text-white placeholder:text-gray-600"
               />
+              <p className="text-[10px] text-gray-500 leading-snug">Short, unique token. Not a real word and not the character's name.</p>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-gray-400 uppercase tracking-wide">Dataset</label>
-              {datasets.length > 0 ? (
-                <select
-                  value={formDataset}
-                  onChange={e => setFormDataset(e.target.value)}
-                  className="w-full rounded-md border border-gray-700 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-fuchsia-500"
-                >
-                  {datasets.map(ds => (
-                    <option key={ds.id} value={ds.id}>{ds.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <Input
-                  value={formDataset}
-                  onChange={e => setFormDataset(e.target.value)}
-                  className="bg-black/40 border-gray-700 text-white"
-                />
-              )}
+              <label className="text-xs text-gray-400 uppercase tracking-wide">Character</label>
+              <select
+                value={formCharacterId}
+                onChange={e => setFormCharacterId(e.target.value)}
+                className="w-full rounded-md border border-gray-700 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-fuchsia-500"
+              >
+                <option value="">Select character…</option>
+                {ctx.characters.map(character => (
+                  <option key={character.id} value={character.id}>{character.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           {submitError && <p className="text-sm text-rose-400">{submitError}</p>}
           <Button
             onClick={submitTraining}
-            disabled={submitting || !formJobName || !formTrigger || !formDataset}
+            disabled={submitting || !formJobName || !formTrigger || !formCharacterId}
             className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white"
           >
             {submitting ? "Starting…" : "Start Training"}
@@ -298,15 +406,14 @@ export function LoraTrainingPage() {
         {showAddDataset && (
           <div className="px-5 py-4 border-b border-gray-800/40 bg-gray-900/20 space-y-3">
             <p className="text-xs text-gray-500">
-              Register a dataset folder. Place your images at{" "}
-              <code className="text-gray-400 bg-black/40 px-1 rounded">/root/nemoflix-training/datasets/&lt;id&gt;/</code>{" "}
-              on the AMD node before starting a training job.
+              Register a remote dataset folder name. Start Training now fills it from gallery images marked for the selected character at{" "}
+              <code className="text-gray-400 bg-black/40 px-1 rounded">/root/nemoflix-studio/training/datasets/&lt;id&gt;/</code>.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-500 uppercase tracking-wide">Folder ID *</label>
                 <Input
-                  placeholder="e.g. mycharacter_v2_photos"
+                  placeholder="e.g. atlas_v2_photos"
                   value={addDatasetId}
                   onChange={e => setAddDatasetId(e.target.value)}
                   className="bg-black/40 border-gray-700 text-white text-sm placeholder:text-gray-600"
@@ -324,7 +431,7 @@ export function LoraTrainingPage() {
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-500 uppercase tracking-wide">Description</label>
                 <Input
-                  placeholder="e.g. Mycharacter reference photos v2"
+                  placeholder="e.g. Atlas reference photos v2"
                   value={addDatasetDesc}
                   onChange={e => setAddDatasetDesc(e.target.value)}
                   className="bg-black/40 border-gray-700 text-white text-sm placeholder:text-gray-600"
@@ -364,8 +471,6 @@ export function LoraTrainingPage() {
               <div
                 key={ds.id}
                 className="px-5 py-3 flex items-center gap-4 hover:bg-gray-900/30 transition cursor-pointer"
-                onClick={() => setFormDataset(ds.id)}
-                title="Use in training form"
               >
                 <div className="w-8 h-8 rounded-lg bg-fuchsia-900/30 border border-fuchsia-500/20 flex items-center justify-center flex-shrink-0">
                   <Database className="w-4 h-4 text-fuchsia-400" />
@@ -425,6 +530,12 @@ export function LoraTrainingPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-sm text-white">{job.job_name}</span>
                         <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
+                        {sseConnected && (job.status === "running" || job.status === "training") && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400" title="Live SSE connection">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            live
+                          </span>
+                        )}
                         {job.model && <span className="text-[11px] text-gray-600">{job.model}</span>}
                       </div>
                       <p className="text-[11px] text-gray-500 mt-1">
@@ -457,7 +568,7 @@ export function LoraTrainingPage() {
                   {isInitializing && (
                     <div className="flex items-center gap-2 mt-2 text-sm text-amber-400">
                       <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
-                      Initializing — loading models, caching latents…
+                      {job.info || "Initializing — loading models, caching latents…"}
                     </div>
                   )}
 

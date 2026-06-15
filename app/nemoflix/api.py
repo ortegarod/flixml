@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_characters, list_datasets, list_jobs, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_metadata, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_metadata, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
 from .workflows.registry import init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
@@ -258,6 +258,7 @@ class ImageGenerateRequest(BaseModel):
     characters: list[CharacterBinding] = Field(default_factory=list)
     checkpoint: str | None = Field(default=None, description="LoRA checkpoint filename, path under the LoRA output dir, or 'latest'")
     prompt: str = Field(min_length=1)
+    negative: str | None = None
     width: int = 1248
     height: int = 832
     seed: int | None = None
@@ -380,7 +381,7 @@ class LoraTrainingStartRequest(BaseModel):
     cache_latents: bool = Field(default=True, description="Cache VAE latents to disk to save VRAM")
 
     # -- Regularization --------------------------------------------------------
-    dop_enabled: bool = Field(default=False, description="Differential Output Preservation — keep base model behaviour outside your trigger")
+    dop_enabled: bool = Field(default=False, description="Differential Output Preservation - keep base model behaviour outside your trigger")
     preservation_class: str = Field(default="photo", description="Neutral class word for DOP non-trigger path")
 
     # -- Advanced --------------------------------------------------------------
@@ -713,7 +714,7 @@ async def agent_chat(payload: dict[str, Any]) -> dict[str, Any]:
         "I'm the built-in Nemoflix agent surface. I can use the same API shape OpenClaw uses: "
         "characters, image/video generation, projects, GPU nodes, and ai-toolkit LoRA training. "
         "For this hackathon demo I'm wired through assistant-ui; the next step is enabling tool execution for requests like"
-        f" ‘{last_text or 'generate an image'}'."
+        f" '{last_text or 'generate an image'}'."
     )
     return {"ok": True, "text": text}
 
@@ -759,6 +760,37 @@ async def remove_character(character_id: str) -> dict[str, Any]:
     if not deleted:
         raise HTTPException(status_code=404, detail="Character not found")
     return {"ok": True, "id": character_id}
+
+
+@app.get("/api/characters/{character_id}/media")
+async def character_media(character_id: str, offset: int = 0, limit: int = 60) -> dict[str, Any]:
+    """List completed generation jobs for a specific character."""
+    jobs = await list_jobs_by_character(character_id, limit=limit, offset=offset)
+
+    items = []
+    for job in jobs:
+        filename = job.get("output_filename")
+        if not filename:
+            continue
+        target = _safe_output_path(filename)
+        if not target or not target.is_file():
+            continue
+        width, height = _read_dimensions(target)
+        items.append({
+            "name": Path(filename).name,
+            "filename": filename,
+            "type": "video" if Path(filename).suffix.lower() in {".mp4", ".webm", ".gif"} else "image",
+            "width": width,
+            "height": height,
+            "mtime": job.get("updated_at").timestamp() if job.get("updated_at") else 0,
+            "url": f"/media/{filename}",
+            "thumb": f"/media/{filename}",
+            "prompt": job.get("prompt"),
+            "prompt_id": job.get("prompt_id"),
+        })
+
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return {"images": items, "total": len(items), "offset": offset, "limit": limit}
 
 
 @app.get("/api/projects")
@@ -1186,7 +1218,7 @@ async def _run_render(project_id: str, shots: list[dict[str, Any]], render_id: s
                 await _set_render_status(project_id, "failed", f"Failed to freeze image for shot {shot['id']}")
                 return
             clip_pairs.append((still_path, shot))
-        # no media — skip
+        # no media - skip
 
     if not clip_pairs:
         await _set_render_status(project_id, "failed", "No renderable clips found")
@@ -1448,7 +1480,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
 async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
     # Character resolution only supplies a fallback reference image for i2v.
     # Wan video takes identity from the image, so character triggers and character LoRAs
-    # are not injected here — pass body.high_lora/body.low_lora explicitly to override.
+    # are not injected here - pass body.high_lora/body.low_lora explicitly to override.
     resolved = await _resolve_characters(body.character, body.characters)
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
@@ -1791,14 +1823,14 @@ def _resolve_filename_prefix(prefix: str | None, subfolder: str) -> str:
     safe = prefix.strip().lstrip("/")
     existing = list((_OUTPUT_DIR / safe).parent.glob(f"{(_OUTPUT_DIR / safe).name}*"))
     if existing:
-        raise HTTPException(status_code=409, detail=f"Filename prefix '{safe}' already exists — choose a different name.")
+        raise HTTPException(status_code=409, detail=f"Filename prefix '{safe}' already exists - choose a different name.")
     return safe
 _TRAINING_DIR_VAL = os.environ.get("NEMOFLIX_TRAINING_DIR")
 if not _TRAINING_DIR_VAL:
     raise RuntimeError("NEMOFLIX_TRAINING_DIR environment variable is required")
 _TRAINING_DIR = Path(_TRAINING_DIR_VAL)
 _TRAINING_CONFIG_DIR = _TRAINING_DIR / "config"
-# Droplet paths — these live on the GPU worker, referenced by name only from the VPS.
+# Droplet paths - these live on the GPU worker, referenced by name only from the VPS.
 _DROPLET_TRAINING_DIR = Path("/root/nemoflix-training")
 _DROPLET_OUTPUT_DIR = _DROPLET_TRAINING_DIR / "output"
 _DROPLET_LOGS_DIR = _DROPLET_TRAINING_DIR / "logs"
@@ -1958,7 +1990,7 @@ def _build_training_config(request: LoraTrainingStartRequest) -> tuple[Path, dic
     datasets = process.get("datasets", [])
     if datasets:
         ds = datasets[0]
-        # Dataset lives on the droplet — use droplet path
+        # Dataset lives on the droplet - use droplet path
         ds["folder_path"] = str(_DROPLET_DATASETS_DIR / request.dataset)
         ds["resolution"] = request.resolution
         ds["caption_dropout_rate"] = request.caption_dropout_rate
@@ -2054,7 +2086,7 @@ async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingSta
                 headers=_aitk_headers(),
             )
             if create_resp.status_code == 409:
-                # Already exists — fetch it
+                # Already exists - fetch it
                 existing = await client.get(
                     f"{_AITK_API_URL}/api/jobs",
                     params={"job_ref": job_name},
@@ -2233,7 +2265,7 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
 
     # Use GenerationService for workflow build + submit + DB save
     service = GenerationService()
-    
+
     # Build workflow-specific params (only pass what the workflow builder accepts)
     workflow_params: dict[str, Any] = {
         "loras": loras,
@@ -2242,8 +2274,10 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
         "sampler": body.sampler,
         "lora_strength": body.lora_strength,
     }
-    
+
     workflow_params["guidance"] = body.guidance
+    if body.negative is not None:
+        workflow_params["negative_prompt"] = body.negative
     if body.unet is not None:
         workflow_params["unet"] = body.unet
     if body.clip is not None:
@@ -2306,7 +2340,7 @@ async def lora_training_checkpoints(job_name: str | None = None) -> LoraCheckpoi
             modified_at=datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
         ))
 
-    # 1. Local VPS checkpoints — always available, persisted across droplets.
+    # 1. Local VPS checkpoints - always available, persisted across droplets.
     for d in _LORA_OUTPUT_DIR.parent.glob("*"):
         if not d.is_dir():
             continue
@@ -2393,15 +2427,15 @@ async def lora_training_sample_image(path: str):
 @app.get("/api/listing")
 async def listing(dir: str = "", offset: int = 0, limit: int = 60) -> dict[str, Any]:
     """List completed generation jobs from the jobs table.
-    
+
     Reads from the jobs table (source of truth), not filesystem scanning.
     Each job includes output_filename, prompt, metadata, and status.
     """
     rows = await list_jobs(limit=limit, offset=offset)
-    
+
     # Filter to completed jobs only
     completed = [row for row in rows if row.get("status") == "completed"]
-    
+
     # Transform jobs → listing format
     items = []
     for job in completed:
@@ -2430,10 +2464,10 @@ async def listing(dir: str = "", offset: int = 0, limit: int = 60) -> dict[str, 
             "prompt": job.get("prompt"),
             "prompt_id": job.get("prompt_id"),
         })
-    
+
     # Sort by mtime descending
     items.sort(key=lambda x: x["mtime"], reverse=True)
-    
+
     return {
         "images": items[offset:offset+limit],
         "total": len(items),

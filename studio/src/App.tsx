@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Toaster, toast } from "sonner";
 import { BrowserRouter, Routes, Route, Outlet, useMatch, useNavigate, useParams, Link } from "react-router-dom";
 import { Menu, Sparkles, UserCircle } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
@@ -7,10 +9,12 @@ import { ProjectsView } from "./components/ProjectsView";
 import { LoraTrainingPage } from "./components/LoraTrainingPage";
 import { ProjectDetailView } from "./components/ProjectDetailView";
 import { ProjectFilmsView } from "./components/ProjectFilmsView";
+import { Lightbox } from "./components/Lightbox";
+
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import LandingPage from "./LandingPage";
 import type { SidebarTab } from "./components/sidebar/AppSidebar";
-import type { JobItem, LoraCheckpoint, LoraTrainingStatus, MediaItem, Project, Scene, Shot, ProjectPhase, ProjectModeData } from "./types";
+import type { CharacterSummary, JobItem, LoraCheckpoint, LoraTrainingStatus, MediaItem, Project, Scene, Shot, ProjectPhase, ProjectModeData } from "./types";
 
 async function fetchJson<T>(url: string, timeoutMs = 5000): Promise<T> {
   const controller = new AbortController();
@@ -22,6 +26,37 @@ async function fetchJson<T>(url: string, timeoutMs = 5000): Promise<T> {
   } finally {
     window.clearTimeout(id);
   }
+}
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 2_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+const listingKeyBase = ["listing"] as const;
+const countsKey = ["listing-counts"] as const;
+const jobsKey = ["jobs"] as const;
+const charactersKey = ["characters"] as const;
+const LISTING_PAGE_SIZE = 60;
+
+export type GalleryFilter = "all" | "images" | "videos";
+
+interface ListingPage {
+  images: MediaItem[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+interface ListingCounts {
+  total: number;
+  images: number;
+  videos: number;
 }
 
 /* ── App Context ── */
@@ -51,6 +86,26 @@ interface AppContextType {
   addScene: () => Promise<void>;
   deleteScene: (sceneId: string) => Promise<void>;
   deleteShot: (shotId: string) => Promise<void>;
+  // Gallery pagination + filters
+  galleryFilter: GalleryFilter;
+  setGalleryFilter: (filter: GalleryFilter) => void;
+  gallerySearch: string;
+  setGallerySearch: (search: string) => void;
+  filteredTotal: number;
+  fetchNextGalleryPage: () => void;
+  hasNextGalleryPage: boolean;
+  isFetchingNextGalleryPage: boolean;
+  counts: ListingCounts;
+  characters: CharacterSummary[];
+  galleryCharacter: string;
+  setGalleryCharacter: (characterId: string) => void;
+  galleryTag: string;
+  setGalleryTag: (tag: string) => void;
+  galleryTrainingDatasetOnly: boolean;
+  setGalleryTrainingDatasetOnly: (enabled: boolean) => void;
+  updateMediaMetadata: (item: MediaItem, patch: { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => Promise<void>;
+  bulkDeleteItems: (items: MediaItem[]) => Promise<void>;
+  bulkUpdateMediaMetadata: (items: MediaItem[], patcher: (item: MediaItem) => { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType>(null!);
@@ -115,8 +170,8 @@ function Shell() {
       : undefined;
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
-      <header className="h-14 border-b border-gray-800/60 bg-black/90 backdrop-blur-xl flex items-center justify-between px-5 sticky top-0 z-40">
+    <div className="h-screen overflow-hidden bg-black text-white flex flex-col">
+      <header className="h-14 flex-shrink-0 border-b border-gray-800/60 bg-black/90 backdrop-blur-xl flex items-center justify-between px-5 z-40">
         <div className="flex items-center gap-3 min-w-0">
           {!ctx.sidebarOpen && (
             <button
@@ -150,12 +205,15 @@ function Shell() {
 
         <div className="flex items-center gap-2 text-[11px]">
           <div className="hidden md:flex items-center gap-1.5">
-            {ctx.jobs.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-800/40 bg-amber-950/30 px-2.5 py-1 text-amber-400 font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                {ctx.jobs.length} generating
-              </span>
-            )}
+            {(() => {
+              const activeCount = ctx.jobs.filter((j) => j.status === "pending" || j.status === "running").length;
+              return activeCount > 0 ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-800/40 bg-amber-950/30 px-2.5 py-1 text-amber-400 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  {activeCount} generating
+                </span>
+              ) : null;
+            })()}
             <span className="rounded-full border border-gray-800 bg-gray-900/50 px-2.5 py-1 text-gray-500">
               {ctx.items.length} media
             </span>
@@ -186,7 +244,7 @@ function Shell() {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {ctx.sidebarOpen && (
           <AppSidebar
             activeTab={ctx.activeSidebarTab}
@@ -213,20 +271,15 @@ function Shell() {
       </div>
 
       {/* Lightbox */}
-      {ctx.selected && (
-        <div
-          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4"
-          onClick={() => ctx.setSelected(null)}
-        >
-          <div className="max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
-            {ctx.selected.endsWith(".mp4") || ctx.selected.endsWith(".webm") ? (
-              <video src={ctx.selected} controls autoPlay className="max-w-full max-h-[90vh] rounded" />
-            ) : (
-              <img src={ctx.selected} alt="" className="max-w-full max-h-[90vh] rounded" />
-            )}
-          </div>
-        </div>
-      )}
+      <Lightbox
+        items={ctx.items}
+        selectedUrl={ctx.selected}
+        onClose={() => ctx.setSelected(null)}
+        onSelect={ctx.setSelected}
+        characters={ctx.characters}
+        onUpdateMetadata={ctx.updateMediaMetadata}
+        onDelete={ctx.deleteItem}
+      />
     </div>
   );
 }
@@ -243,6 +296,25 @@ function StudioRoute() {
       onOpen={ctx.setSelected}
       onDelete={ctx.deleteItem}
       onOpenProjects={() => window.location.href = "/studio/projects"}
+      filter={ctx.galleryFilter}
+      onFilterChange={ctx.setGalleryFilter}
+      query={ctx.gallerySearch}
+      onQueryChange={ctx.setGallerySearch}
+      filteredTotal={ctx.filteredTotal}
+      counts={ctx.counts}
+      fetchNextPage={ctx.fetchNextGalleryPage}
+      hasNextPage={ctx.hasNextGalleryPage}
+      isFetchingNextPage={ctx.isFetchingNextGalleryPage}
+      characters={ctx.characters}
+      characterFilter={ctx.galleryCharacter}
+      onCharacterFilterChange={ctx.setGalleryCharacter}
+      tagFilter={ctx.galleryTag}
+      onTagFilterChange={ctx.setGalleryTag}
+      trainingDatasetOnly={ctx.galleryTrainingDatasetOnly}
+      onTrainingDatasetOnlyChange={ctx.setGalleryTrainingDatasetOnly}
+      onBulkDelete={ctx.bulkDeleteItems}
+      onBulkUpdateMetadata={ctx.bulkUpdateMediaMetadata}
+      onImported={ctx.load}
     />
   );
 }
@@ -304,13 +376,12 @@ function ProjectFilmsRoute() {
 
 function CharacterRoute() {
   const { characterId } = useParams<{ characterId: string }>();
-  const { items, setSelected, deleteItem, setActiveSidebarTab, setSidebarOpen } = useApp();
+  const { setSelected, deleteItem, setActiveSidebarTab, setSidebarOpen } = useApp();
   const navigate = useNavigate();
   if (!characterId) return null;
   return (
     <CharacterProfileView
       characterId={characterId}
-      items={items}
       onOpen={setSelected}
       onDelete={deleteItem}
       onGenerate={() => {
@@ -323,15 +394,77 @@ function CharacterRoute() {
 }
 
 /* ── App Root ── */
-export default function App() {
-  const [items, setItems] = useState<MediaItem[]>([]);
-  const [jobs, setJobs] = useState<JobItem[]>([]);
+function AppRoutes() {
+  const queryClient = useQueryClient();
+
+  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>("all");
+  const [gallerySearch, setGallerySearch] = useState("");
+  const [galleryCharacter, setGalleryCharacter] = useState("");
+  const [galleryTag, setGalleryTag] = useState("");
+  const [galleryTrainingDatasetOnly, setGalleryTrainingDatasetOnly] = useState(false);
+
+  const listingKey = useMemo(
+    () => [...listingKeyBase, galleryFilter, gallerySearch, galleryCharacter, galleryTag, galleryTrainingDatasetOnly] as const,
+    [galleryFilter, gallerySearch, galleryCharacter, galleryTag, galleryTrainingDatasetOnly]
+  );
+
+  const listingQuery = useInfiniteQuery({
+    queryKey: listingKey,
+    initialPageParam: 0,
+    queryFn: ({ pageParam = 0 }) => {
+      const params = new URLSearchParams();
+      params.set("offset", String(pageParam));
+      params.set("limit", String(LISTING_PAGE_SIZE));
+      if (galleryFilter === "images") params.set("type", "image");
+      if (galleryFilter === "videos") params.set("type", "video");
+      const trimmed = gallerySearch.trim();
+      if (trimmed) params.set("q", trimmed);
+      if (galleryCharacter) params.set("character_id", galleryCharacter);
+      const trimmedTag = galleryTag.trim();
+      if (trimmedTag) params.set("tag", trimmedTag);
+      if (galleryTrainingDatasetOnly) params.set("training_dataset", "true");
+      return fetchJson<ListingPage>(`/api/listing?${params.toString()}`, 8000);
+    },
+    getNextPageParam: (lastPage) => {
+      const next = lastPage.offset + lastPage.images.length;
+      return next < lastPage.total && lastPage.images.length > 0 ? next : undefined;
+    },
+    refetchInterval: 5000,
+  });
+
+  const countsQuery = useQuery({
+    queryKey: countsKey,
+    queryFn: () => fetchJson<ListingCounts>("/api/listing/counts", 3500),
+    refetchInterval: 10000,
+  });
+
+  const jobsQuery = useQuery({
+    queryKey: jobsKey,
+    queryFn: () => fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 3500),
+    refetchInterval: 5000,
+  });
+
+  const charactersQuery = useQuery({
+    queryKey: charactersKey,
+    queryFn: () => fetchJson<{ characters?: CharacterSummary[] }>("/api/characters", 3500),
+    staleTime: 30_000,
+  });
+
+  const items = useMemo(
+    () => (listingQuery.data?.pages ?? []).flatMap((page) => page.images),
+    [listingQuery.data]
+  );
+  const filteredTotal = listingQuery.data?.pages?.[0]?.total ?? 0;
+  const counts: ListingCounts = countsQuery.data ?? { total: 0, images: 0, videos: 0 };
+
+  const jobs = jobsQuery.data?.jobs || [];
+  const characters = charactersQuery.data?.characters || [];
+  const loading = listingQuery.isLoading;
+  const hasLoadedOnce = listingQuery.isFetched;
+  const error = listingQuery.error instanceof Error ? listingQuery.error.message : null;
   const [training, setTraining] = useState<LoraTrainingStatus | null>(null);
   const [checkpoints, setCheckpoints] = useState<LoraCheckpoint[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>("generate");
@@ -345,33 +478,25 @@ export default function App() {
   const [projectId, setProjectId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      setError(null);
-      const listing = await fetchJson<{ images?: MediaItem[] }>("/api/listing", 8000);
-      setItems(listing.images || []);
-      if (!hasLoadedOnce) setHasLoadedOnce(true);
-    } catch (e) {
-      console.error("Failed to load gallery", e);
-      setError(e instanceof Error ? e.message : "Failed to load gallery");
-    } finally {
-      setLoading(false);
-    }
+    await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: listingKeyBase }),
+      queryClient.invalidateQueries({ queryKey: countsKey }),
+      queryClient.invalidateQueries({ queryKey: jobsKey }),
+    ]);
 
-    const [jobsResult, trainingResult, checkpointsResult, trainingJobsResult] = await Promise.allSettled([
-      fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 3500),
+    const [trainingResult, checkpointsResult, trainingJobsResult] = await Promise.allSettled([
       fetchJson<LoraTrainingStatus & { ok?: boolean }>("/api/lora-training/status", 3500),
       fetchJson<{ checkpoints?: LoraCheckpoint[] }>("/api/lora-training/checkpoints", 3500),
       fetchJson<{ jobs?: any[] }>("/api/lora-training/jobs", 3500),
     ]);
 
-    if (jobsResult.status === "fulfilled") setJobs(jobsResult.value.jobs || []);
     if (trainingResult.status === "fulfilled")
       setTraining(trainingResult.value.ok ? trainingResult.value : null);
     if (checkpointsResult.status === "fulfilled")
       setCheckpoints(checkpointsResult.value.checkpoints || []);
     if (trainingJobsResult.status === "fulfilled")
       setTrainingJobs(trainingJobsResult.value.jobs || []);
-  }, []);
+  }, [queryClient]);
 
   // Stable polling — uses refs to avoid dependency churn
   const loadRef = useRef(load);
@@ -379,17 +504,57 @@ export default function App() {
 
   useEffect(() => {
     loadRef.current();
-    const id = window.setInterval(() => loadRef.current(), 5000);
 
     const es = new EventSource("/api/events");
-    es.addEventListener("job_update", () => loadRef.current());
+    es.addEventListener("job_update", (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (!msg.prompt_id) return;
+
+        const status = msg.status;
+        const promptId = msg.prompt_id;
+
+        if (status === "running" && msg.progress_percent !== undefined) {
+          // Smooth in-place progress update — no full refresh
+          queryClient.setQueryData<{ jobs?: JobItem[] }>(jobsKey, (current) => ({
+            jobs: (current?.jobs || []).map((j) =>
+              j.prompt_id === promptId
+                ? { ...j, status: "running", progress_percent: msg.progress_percent }
+                : j
+            ),
+          }));
+        } else if (status === "completed") {
+          // Mark as completed in-place first so user sees "Done"
+          queryClient.setQueryData<{ jobs?: JobItem[] }>(jobsKey, (current) => ({
+            jobs: (current?.jobs || []).map((j) =>
+              j.prompt_id === promptId
+                ? { ...j, status: "completed", progress_percent: 100 }
+                : j
+            ),
+          }));
+          // Refresh after a brief delay so the transition is visible
+          window.setTimeout(() => loadRef.current(), 2000);
+        } else if (status === "failed") {
+          // Show failed state
+          queryClient.setQueryData<{ jobs?: JobItem[] }>(jobsKey, (current) => ({
+            jobs: (current?.jobs || []).map((j) =>
+              j.prompt_id === promptId
+                ? { ...j, status: "failed", error: msg.error || "Generation failed" }
+                : j
+            ),
+          }));
+        }
+      } catch {
+        // If we can't parse, fall back to full refresh
+        loadRef.current();
+      }
+    });
     es.onerror = () => {};
 
     return () => {
-      window.clearInterval(id);
       es.close();
     };
-  }, []);
+  }, [queryClient]);
 
   const loadProject = useCallback(async (id: string) => {
     setProjectId(id);
@@ -456,8 +621,8 @@ export default function App() {
     loadProject(projectId);
   }, [projectId, projectData, selectedShotId, loadProject]);
 
-  const deleteItem = useCallback(
-    async (item: MediaItem) => {
+  const deleteMutation = useMutation({
+    mutationFn: async (item: MediaItem) => {
       const filename = item.filename || item.url.replace(/^\/media\//, "");
       const response = await fetch("/api/delete", {
         method: "POST",
@@ -468,16 +633,121 @@ export default function App() {
         const data = await response.json().catch(() => ({}));
         throw new Error(data?.detail || `Failed to delete ${filename}`);
       }
-      setItems((current) =>
-        current.filter(
-          (candidate) =>
-            (candidate.filename || candidate.url) !== (item.filename || item.url)
-        )
-      );
-      if (selected === item.url) setSelected(null);
+      return { item, filename };
     },
-    [selected]
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: listingKeyBase });
+      const key = (it: MediaItem) => it.filename || it.url;
+      const targetKey = key(item);
+
+      // Optimistically drop the item from every page of every active listing query.
+      const snapshots = queryClient.getQueriesData<{ pages: ListingPage[]; pageParams: unknown[] }>({ queryKey: listingKeyBase });
+      for (const [qKey, data] of snapshots) {
+        if (!data?.pages) continue;
+        queryClient.setQueryData(qKey, {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            images: page.images.filter((candidate) => key(candidate) !== targetKey),
+            total: Math.max(0, page.total - 1),
+          })),
+        });
+      }
+
+      if (selected === item.url) setSelected(null);
+      return { snapshots };
+    },
+    onError: (err, _item, context) => {
+      if (context?.snapshots) {
+        for (const [qKey, data] of context.snapshots) {
+          queryClient.setQueryData(qKey, data);
+        }
+      }
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    },
+    onSuccess: ({ filename }) => {
+      toast.success(`Deleted ${filename}`);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: listingKeyBase });
+      queryClient.invalidateQueries({ queryKey: countsKey });
+    },
+  });
+
+  const deleteItem = useCallback(
+    async (item: MediaItem) => {
+      await deleteMutation.mutateAsync(item);
+    },
+    [deleteMutation]
   );
+
+  const metadataMutation = useMutation({
+    mutationFn: async ({ item, patch }: { item: MediaItem; patch: { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean } }) => {
+      const filename = item.filename || item.url.replace(/^\/media\//, "");
+      const mediaPath = filename.split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`/api/media/${mediaPath}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.detail || `Failed to update ${filename}`);
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast.success("Media updated");
+      queryClient.invalidateQueries({ queryKey: listingKeyBase });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Update failed");
+    },
+  });
+
+  const updateMediaMetadata = useCallback(
+    async (item: MediaItem, patch: { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => {
+      await metadataMutation.mutateAsync({ item, patch });
+    },
+    [metadataMutation]
+  );
+
+  const bulkDeleteItems = useCallback(async (itemsToDelete: MediaItem[]) => {
+    if (itemsToDelete.length === 0) return;
+    const files = itemsToDelete.map((item) => item.filename || item.url.replace(/^\/media\//, ""));
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data?.detail || `Failed to delete ${files.length} files`);
+    }
+    if (itemsToDelete.some((item) => item.url === selected)) setSelected(null);
+    toast.success(`Deleted ${files.length} item${files.length === 1 ? "" : "s"}`);
+    queryClient.invalidateQueries({ queryKey: listingKeyBase });
+    queryClient.invalidateQueries({ queryKey: countsKey });
+  }, [queryClient, selected]);
+
+  const bulkUpdateMediaMetadata = useCallback(async (itemsToUpdate: MediaItem[], patcher: (item: MediaItem) => { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => {
+    if (itemsToUpdate.length === 0) return;
+    await Promise.all(itemsToUpdate.map(async (item) => {
+      const filename = item.filename || item.url.replace(/^\/media\//, "");
+      const mediaPath = filename.split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`/api/media/${mediaPath}/metadata`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patcher(item)),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.detail || `Failed to update ${filename}`);
+      }
+    }));
+    toast.success(`Updated ${itemsToUpdate.length} item${itemsToUpdate.length === 1 ? "" : "s"}`);
+    queryClient.invalidateQueries({ queryKey: listingKeyBase });
+  }, [queryClient]);
 
   const ctxValue: AppContextType = {
     items,
@@ -505,6 +775,25 @@ export default function App() {
     addScene,
     deleteScene,
     deleteShot,
+    galleryFilter,
+    setGalleryFilter,
+    gallerySearch,
+    setGallerySearch,
+    filteredTotal,
+    fetchNextGalleryPage: () => listingQuery.fetchNextPage(),
+    hasNextGalleryPage: Boolean(listingQuery.hasNextPage),
+    isFetchingNextGalleryPage: listingQuery.isFetchingNextPage,
+    counts,
+    characters,
+    galleryCharacter,
+    setGalleryCharacter,
+    galleryTag,
+    setGalleryTag,
+    galleryTrainingDatasetOnly,
+    setGalleryTrainingDatasetOnly,
+    updateMediaMetadata,
+    bulkDeleteItems,
+    bulkUpdateMediaMetadata,
   };
 
   return (
@@ -523,5 +812,15 @@ export default function App() {
         </Routes>
       </AppContext.Provider>
     </BrowserRouter>
+  );
+}
+
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppRoutes />
+      <Toaster richColors theme="dark" position="bottom-right" />
+    </QueryClientProvider>
   );
 }

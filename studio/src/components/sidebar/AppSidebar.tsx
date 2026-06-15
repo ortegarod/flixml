@@ -50,7 +50,7 @@ export function AppSidebar({ activeTab, onTabChange, onClose, checkpoints, onQue
   const visibleTabs = [...visibleTopTabs, ...visibleBottomTabs];
 
   return (
-    <div className="h-screen flex flex-shrink-0 border-r border-gray-800/60" style={{ width: `${SIDEBAR_WIDTH}px` }}>
+    <div className="h-full flex flex-shrink-0 border-r border-gray-800/60" style={{ width: `${SIDEBAR_WIDTH}px` }}>
       {/* Icon rail */}
       <div className="w-12 flex-shrink-0 bg-gray-950/60 border-r border-gray-800/40 flex flex-col items-center py-3 gap-1">
         {visibleTopTabs.map((tab) => (
@@ -295,7 +295,7 @@ function GuideTab() {
   -d '{"id":"my-char","name":"My Character","trigger":"MyTrigger"}'` },
     { label: "Create project", cmd: `curl -X POST ${apiRoot}/api/projects \\
   -H "Content-Type: application/json" \\
-  -d '{"title":"My First Short","content":"A brief story...","characters":["mycharacter"]}'` },
+  -d '{"title":"My First Short","content":"A brief story...","characters":["atlas"]}'` },
     { label: "Add scene to project", cmd: `curl -X POST ${apiRoot}/api/projects/<prj_id>/scenes \\
   -H "Content-Type: application/json" \\
   -d '{"scene_number":1,"heading":"INT.-DAY","summary":"Scene summary"}'` },
@@ -307,10 +307,10 @@ function GuideTab() {
     { label: "View project", cmd: `curl ${apiRoot}/api/projects/<prj_id>` },
     { label: "Raw image generation", cmd: `curl -X POST ${apiRoot}/api/image/generate \\
   -H "Content-Type: application/json" \\
-  -d '{"character":"mycharacter","prompt":"studio portrait"}'` },
+  -d '{"character":"atlas","prompt":"studio portrait"}'` },
     { label: "Raw video generation", cmd: `curl -X POST ${apiRoot}/api/video/generate \\
   -H "Content-Type: application/json" \\
-  -d '{"character":"mycharacter","prompt":"walks forward","width":1024,"height":1024,"length":41}'` },
+  -d '{"character":"atlas","prompt":"walks forward","width":1024,"height":1024,"length":41}'` },
   ];
 
   const allContent = examples.map(ex => `# ${ex.label}\n${ex.cmd}`).join("\n\n");

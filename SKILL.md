@@ -1,11 +1,15 @@
 ---
 name: nemoflix
-description: Read this when your human asks for AI image or video generation. Nemoflix is an HTTP API backed by ComfyUI on AMD GPU infrastructure. It gives you two ways to work — Studio (freeform single-shot generation, output lands in a gallery) and Projects (structured directorial work where you write a script, break it into scenes and shots, generate images per shot, animate approved shots, and assemble a final video). Use this skill to interpret your human's creative request, decide between a quick shot or a multi-shot storyboard pipeline, and drive the API on their behalf.
+description: Read this when your human asks for AI image or video generation. Nemoflix is an HTTP API backed by ComfyUI on GPU infrastructure. It gives you two ways to work — Studio (freeform single-shot generation, output lands in a gallery) and Projects (structured directorial work where you write a script, break it into scenes and shots, generate images per shot, animate approved shots, and assemble a final video). Use this skill to interpret your human's creative request, decide between a quick shot or a multi-shot storyboard pipeline, and drive the API on their behalf.
 ---
 
 # Nemoflix Skill
 
 You are reading this to learn how to use Nemoflix to make images and videos for your human. Nemoflix is the website and API. **You** are the agent driving it. There is no separate scriptwriter, no separate director — when your human pitches an idea, you write the script, plan the shots, call the API, and show them what you made.
+
+**API base:** `http://<api-host>:<port>` — the Nemoflix Studio API endpoint.
+**Live schema:** `GET <api-base>/api/openapi.json` — always read this for field names and types; don't guess.
+**Workflows:** `GET <api-base>/api/workflows` — discover workflow IDs, compatible providers, and workflow-specific params.
 
 ## Two modes — pick before you act
 
@@ -23,11 +27,11 @@ Rule of thumb: default to Studio for a single image/clip idea. Use Projects only
 ## Backend you'll be calling
 
 ```bash
-export NEMOFLIX_API_URL="http://<backend-host>:8190"
+export NEMOFLIX_API_URL="http://<api-host>:<port>"
 curl -sS "$NEMOFLIX_API_URL/api/health"
 ```
 
-Always check health first. If it fails, tell your human the backend is unavailable instead of pretending generation is working.
+Always check health first. If it fails, tell your human the backend is unavailable instead of pretending generation is working. Query `/api/workflows` and `/api/providers` live to discover what workflows and providers are currently available.
 
 # Studio mode — when generating ideas, freeform media creation
 
@@ -44,7 +48,7 @@ curl -sS "$NEMOFLIX_API_URL/api/characters"
 For direct Studio generation, pass one character with the `character` shortcut:
 
 ```json
-{"character":"mycharacter","prompt":"studio portrait, dramatic light"}
+{"character":"<id>","prompt":"studio portrait, dramatic light"}
 ```
 
 For advanced multi-character control, pass `characters` as character binding objects:
@@ -52,7 +56,7 @@ For advanced multi-character control, pass `characters` as character binding obj
 ```json
 {
   "characters": [
-    {"id":"mycharacter","role":"hero","lora_strength":1.0}
+    {"id":"atlas","role":"hero","lora_strength":1.0}
   ],
   "prompt":"cinematic hero shot in neon rain"
 }
@@ -74,13 +78,15 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/lora-training/datasets" \
 curl -sS -X POST "$NEMOFLIX_API_URL/api/lora-training/start" \
   -H "Content-Type: application/json" \
   -d '{
-    "job_name": "my-character-v1",
-    "trigger_word": "mycharacter",
+    "job_name": "<job-name>",
+    "trigger_word": "<trigger>",
     "dataset": "<run-name>",
-    "base_config": "flux2_identity",
-    "model": "flux2_dev"
+    "base_config": "<base-config>",
+    "model": "<model>"
   }'
 ```
+
+Discover available `base_config` and `model` values via `/api/openapi.json`.
 
 Monitor with `GET /api/lora-training/status`. Checkpoints appear at `GET /api/lora-training/checkpoints` as training progresses. Training runs on the AMD GPU and takes time — tell your human and don't block waiting for it.
 
@@ -89,7 +95,7 @@ Monitor with `GET /api/lora-training/status`. Checkpoints appear at `GET /api/lo
 ```bash
 curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
   -H "Content-Type: application/json" \
-  -d '{"character":"mycharacter","prompt":"in an open-helmet Iron Man suit getting ready to take-off"}'
+  -d '{"character":"atlas","prompt":"in an open-helmet Iron Man suit getting ready to take-off"}'
 ```
 
 ## Text-to-video
@@ -130,7 +136,7 @@ A **Project** is a script. The script breaks into **Scenes**. Each scene breaks 
 Projects, scenes, and shots use `characters` as an array of character ID strings:
 
 ```json
-{"characters":["mycharacter"]}
+{"characters":["atlas"]}
 ```
 
 Set the broad cast on the project. Override/narrow the cast on a scene or shot only when that beat needs a different set of characters. When rendering a project shot, the backend resolves characters in this order: shot `characters`, then scene `characters`, then project `characters`.
@@ -218,12 +224,14 @@ PATCH the character with a `voice` object:
 {
   "voice": {
     "provider": "elevenlabs",
-    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
-    "name": "George - Storyteller",
+    "voice_id": "<voice_id>",
+    "name": "Voice Name",
     "settings": {"stability":0.6,"similarity_boost":0.8,"style":0.2}
   }
 }
 ```
+
+Discover available voices via `GET /api/tts/voices`.
 
 ### Set project narrator voice
 
@@ -249,23 +257,23 @@ The response includes `render_id`. Poll `GET /api/projects/{project_id}/render` 
 
 Your human says: *"Put me in an Iron Man movie — suit-up, launch, rooftop landing, the whole thing."*
 
-You decide: this is a project because it asks for a sequence of movie beats. Cast `mycharacter`. Aspect `9:16`. ~30s. About 3 scenes, 1–3 shots each. Title: *Suit Up*.
+You decide: this is a project because it asks for a sequence of movie beats. Cast `atlas`. Aspect `9:16`. ~30s. About 3 scenes, 1–3 shots each. Title: *Suit Up*.
 
 You POST the project:
 
 ```json
 {
   "title": "Suit Up",
-  "description": "Mycharacter suits up in his workshop and steps out into the rain.",
+  "description": "Atlas suits up in his workshop and steps out into the rain.",
   "aspect_ratio": "9:16",
   "duration_seconds": 30,
-  "characters": ["mycharacter"]
+  "characters": ["atlas"]
 }
 ```
 
 Then your scenes — `1: INT. WORKSHOP - NIGHT`, `2: INT. WORKSHOP - SUIT ASSEMBLY`, `3: EXT. CITY ROOFTOP - RAIN`.
 
-Then your shots — for scene 2: `shot 1: wide of Mycharacter on the assembly platform`, `shot 2: medium of chest plate locking in`, `shot 3: close on the helmet snapping shut, eyes glow blue`. Each gets an `image_prompt` and `motion_prompt`.
+Then your shots — for scene 2: `shot 1: wide of Atlas on the assembly platform`, `shot 2: medium of chest plate locking in`, `shot 3: close on the helmet snapping shut, eyes glow blue`. Each gets an `image_prompt` and `motion_prompt`.
 
 Then you stop, point your human at the Projects page, and say something like *"I drafted Suit Up — three scenes, seven shots. Take a look. Want to change any of the beats before I start generating?"* Iterate. Only when they approve the outline do you start hitting `/generate-image`.
 

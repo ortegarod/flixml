@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import {
   ArrowRight,
   Bot,
+  Code2,
   Cpu,
   Film,
   Lock,
@@ -46,6 +47,15 @@ function Navbar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <a
+            href="/api/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-gray-500 hover:text-gray-200 transition"
+          >
+            <Code2 className="w-4 h-4" />
+            <span className="hidden sm:inline">API Docs</span>
+          </a>
           <a
             href="https://github.com/ortegarod/nemoflix"
             target="_blank"
@@ -315,7 +325,7 @@ function HowItWorks() {
               <p className="text-gray-600">{"{"}</p>
               <p className="pl-3">
                 <span className="text-amber-300">"character"</span>:{" "}
-                <span className="text-emerald-300">"mycharacter"</span>,
+                <span className="text-emerald-300">"atlas"</span>,
               </p>
               <p className="pl-3">
                 <span className="text-amber-300">"prompt"</span>:{" "}
@@ -526,6 +536,14 @@ function Footer() {
           <span className="text-gray-500">flix</span>
         </span>
         <div className="flex items-center gap-6 text-xs text-gray-600">
+          <a
+            href="/api/docs"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:text-gray-400 transition"
+          >
+            API Docs
+          </a>
           <a
             href="https://github.com/ortegarod/nemoflix"
             target="_blank"
