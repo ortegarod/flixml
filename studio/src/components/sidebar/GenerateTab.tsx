@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { LoraCheckpoint } from "../../types";
 
@@ -24,6 +24,7 @@ interface CharacterSummary {
   name: string;
   trigger: string | null;
   base_prompt?: string | null;
+  defaults?: Record<string, unknown>;
   loras: { workflow?: string; name?: string; strength?: number }[];
   source_images: string[];
 }
@@ -107,13 +108,6 @@ function resolveWorkflowId(
   return candidates[0].id;
 }
 
-const DEFAULT_IMAGE_PROMPT =
-  "Atlas, portrait in a sleek AI media studio, leaning one hand on a workstation beside glowing video timeline screens, calm confident expression, modern editorial photography, warm cinematic key light, 85mm lens, shallow depth of field, realistic skin texture and sharp facial detail.";
-const DEFAULT_SDXL_PROMPT =
-  "portrait, detailed face, cinematic lighting, dramatic composition, realistic skin texture, shallow depth of field";
-const DEFAULT_VIDEO_PROMPT =
-  "cinematic motion, dramatic camera movement, atmospheric lighting, dynamic composition, polished short-form video style";
-
 const VIDEO_LENGTHS = [33, 49, 65, 81] as const;
 
 function checkpointLabel(checkpoint: LoraCheckpoint) {
@@ -149,7 +143,8 @@ export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
   const [availableCheckpoints, setAvailableCheckpoints] = useState<string[]>([]);
   const [characterId, setCharacterId] = useState("none");
   const [checkpoint, setCheckpoint] = useState("base");
-  const [prompt, setPrompt] = useState(DEFAULT_IMAGE_PROMPT);
+  const [prompt, setPrompt] = useState("");
+  const [promptDirty, setPromptDirty] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("");
   const [sourceImage, setSourceImage] = useState("");
   const [width, setWidth] = useState(1248);
@@ -231,12 +226,33 @@ export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
   }, [searchParams.get("character")]);
 
   const selectedCharacter = characters.find((character) => character.id === characterId);
+
+  // Update prompt when character selection changes
+  useEffect(() => {
+    if (promptDirty) return;
+    if (selectedCharacter?.base_prompt) {
+      setPrompt(selectedCharacter.base_prompt);
+    } else if (characterId === "none") {
+      setPrompt("");
+    }
+  }, [characterId, selectedCharacter, mode, imageModel, promptDirty]);
+
+  // Update defaults (negative prompt) from character — overrides workflow default
+  useEffect(() => {
+    if (selectedCharacter?.defaults && typeof selectedCharacter.defaults.negative_prompt === "string") {
+      setNegativePrompt(selectedCharacter.defaults.negative_prompt);
+    } else if (characterId === "none") {
+      setNegativePrompt(workflowDefaultNegative.current);
+    }
+  }, [selectedCharacter, characterId]);
   const availableImageTypes = useMemo(() => getImageWorkflowTypes(workflows), [workflows]);
   const currentImageWorkflowId = resolveWorkflowId(workflows, "image", imageModel);
   const selectedCharacterHasImageLora = Boolean(
     selectedCharacter?.loras?.some((lora) => lora.workflow === currentImageWorkflowId),
   );
   const isVideoMode = mode !== "image";
+
+  const workflowDefaultNegative = useRef("");
 
   function applyWorkflowDefaults(workflowId: string) {
     const d = workflowDefaults[workflowId];
@@ -256,11 +272,15 @@ export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
     if (d.cfg_high != null) setCfgHigh(d.cfg_high as number);
     if (d.cfg_low != null) setCfgLow(d.cfg_low as number);
     if (d.shift != null) setShift(d.shift as number);
+    if (d.negative_prompt != null) {
+      setNegativePrompt(d.negative_prompt as string);
+      workflowDefaultNegative.current = d.negative_prompt as string;
+    }
   }
 
   function selectMode(nextMode: GenerateMode) {
     setMode(nextMode);
-    setPrompt(nextMode === "image" ? (imageModel === "sdxl" ? DEFAULT_SDXL_PROMPT : DEFAULT_IMAGE_PROMPT) : DEFAULT_VIDEO_PROMPT);
+    setPromptDirty(false);
     setProvider(providerForRole(providers, nextMode !== "image" ? "video" : "image"));
     applyWorkflowDefaults(resolveWorkflowId(workflows, nextMode, imageModel));
     setResult(null);
@@ -269,7 +289,7 @@ export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
 
   function selectImageModel(model: ImageModel) {
     setImageModel(model);
-    setPrompt(model === "sdxl" ? DEFAULT_SDXL_PROMPT : DEFAULT_IMAGE_PROMPT);
+    setPromptDirty(false);
     applyWorkflowDefaults(resolveWorkflowId(workflows, "image", model));
     setResult(null);
     setError(null);
@@ -310,6 +330,7 @@ export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
             character: useCharacter ? characterId : undefined,
             checkpoint: isFluxLike(imageModel) && useCheckpoint ? (checkpoint || latestCheckpoint) : undefined,
             prompt: cleanPrompt,
+            negative: negativePrompt.trim() || undefined,
             width,
             height,
             seed: parsedSeed ?? undefined,
@@ -480,7 +501,10 @@ export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
         <span className="text-xs font-medium text-gray-400">Prompt</span>
         <textarea
           value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
+          onChange={(event) => {
+            setPrompt(event.target.value);
+            setPromptDirty(true);
+          }}
           rows={8}
           className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white leading-relaxed resize-y focus:outline-none focus:border-rose-600"
         />

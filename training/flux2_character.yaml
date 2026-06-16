@@ -1,0 +1,121 @@
+# FLUX.2 [dev] identity/character LoRA template for AI Toolkit.
+# Aligned with RunComfy FLUX.2 LoRA guide — character/identity best practices.
+# https://www.runcomfy.com/trainer/ai-toolkit/flux-2-dev-lora-training
+#
+# Key design choices for character LoRAs:
+# - Differential Output Preservation (DOP) ON  → keeps base model intact outside trigger
+# - Differential Guidance ON (scale 3)         → faster detail lock-in per guide
+# - Cache Text Embeddings OFF                  → required because DOP rewrites prompts each step
+# - Caption Dropout 0.05                       → okay because embeddings are not cached
+# - Timestep Type "weighted"                   → guide default for character/style LoRAs
+# - Low VRAM OFF                               → Tier C (64GB+, e.g. MI300X/H100/H200)
+# - Rank 32, LR 1e-4, AdamW8Bit                → standard FLUX.2 defaults
+# - Steps aligned to save_every                → 2000 steps / 250 = 8 clean checkpoints
+#
+# IMPORTANT — key paths matter:
+#   DOP keys live UNDER train: as `diff_output_preservation` / `diff_output_preservation_class`.
+#   DG keys live UNDER train: as `do_differential_guidance` / `differential_guidance_scale`.
+#   Earlier versions of this file used wrong nesting/names and DOP+DG were silently no-ops.
+#
+# To use: copy this file, replace "my-character" with job name,
+# replace "character_trigger" with your trigger word, and point folder_path
+# to your dataset.
+---
+job: extension
+config:
+  name: "my-character"
+  process:
+    - type: "ui_trainer"
+      training_folder: "/root/nemoflix-studio/training/output"
+      device: cuda:0
+      # Replace with the private trigger for the subject, e.g. a short unique token.
+      trigger_word: "character_trigger"
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+      save:
+        dtype: bf16
+        save_every: 250
+        max_step_saves_to_keep: 6
+        push_to_hub: false
+      datasets:
+        - folder_path: "/root/nemoflix-studio/training/datasets/identity-flux2"
+          caption_ext: "txt"
+          # 0.05 dropout is the guide default when text embeddings are NOT cached.
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [768, 896, 1024]
+      train:
+        batch_size: 1
+        # 2000 steps aligns evenly with save_every=250 → 8 checkpoints.
+        # Guide range for character LoRA (30–60 images): 1000–2500 steps.
+        steps: 2000
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        # "weighted" is the guide default for character/style LoRAs on FLUX.2.
+        # "sigmoid" is only for very small, detail-heavy datasets.
+        timestep_type: "weighted"
+        optimizer: "adamw8bit"
+        lr: 1.0e-4
+        optimizer_params:
+          weight_decay: 1.0e-4
+        dtype: bf16
+        # Differential Output Preservation rewrites prompts each step → CANNOT cache embeddings.
+        unload_text_encoder: false
+        cache_text_embeddings: false
+        # Differential Output Preservation — teach the LoRA only the DIFFERENCE between
+        # base FLUX.2 and "FLUX.2 + trigger". Non-trigger prompts stay close to base.
+        # ai-toolkit reads these keys from train_config (see toolkit/config_modules.py).
+        # The preservation path replaces the literal trigger_word with this class string
+        # at runtime (SDTrainer.py: p.replace(trigger_word, preservation_class)), so the
+        # class should be a neutral noun like "photo" — NOT a word already in your captions
+        # (e.g. using "person" with captions like "xyz, a person, ..." produces "person, a person, ...").
+        diff_output_preservation: true
+        diff_output_preservation_class: "photo"
+        # Differential Guidance — experimental per-guide recommendation.
+        # Exaggerates the gap toward target for faster fine-detail lock-in.
+        # If early samples look noisy/oversharpened, lower scale to 2 or 1.
+        do_differential_guidance: true
+        differential_guidance_scale: 3.0
+        ema_config:
+          use_ma: false
+      model:
+        name_or_path: "black-forest-labs/FLUX.2-dev"
+        arch: "flux2"
+        quantize: true
+        qtype: "qfloat8"
+        quantize_te: true
+        qtype_te: "qfloat8"
+        # Tier C (64GB+, e.g. MI300X 192GB, H100, H200) — Low VRAM OFF for speed.
+        low_vram: false
+        model_kwargs:
+          match_target_res: false
+      logging:
+        use_ui_logger: true
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        width: 1024
+        height: 1024
+        prompts:
+          - "[trigger], realistic portrait, natural lighting"
+          - "[trigger], standing outdoors, daylight, candid photo"
+          - "[trigger], sitting indoors, soft ambient light"
+          - "[trigger], professional headshot, studio lighting"
+          - "[trigger], casual outdoor photo, golden hour"
+          - "[trigger], lifestyle photo, warm afternoon light"
+        neg: ""
+        seed: 42
+        walk_seed: false
+        # Training previews use guidance_scale=1 (FLUX.2 is guidance-distilled).
+        # At inference use 2–4.
+        guidance_scale: 1.0
+        sample_steps: 25
+meta:
+  name: "[name]"
+  version: "1.0"

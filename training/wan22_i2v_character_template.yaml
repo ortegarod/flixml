@@ -7,7 +7,7 @@ config:
   name: "character_wan22_i2v_v1"
   process:
     - type: "ui_trainer"
-      training_folder: "/root/nemoflix-training/output"
+      training_folder: "/root/nemoflix-studio/training/output"
       device: cuda:0
       trigger_word: "character_trigger"
       network:
@@ -19,7 +19,7 @@ config:
         save_every: 250
         max_step_saves_to_keep: 6
       datasets:
-        - folder_path: "/root/nemoflix-training/datasets/character-wan-i2v"
+        - folder_path: "/root/nemoflix-studio/training/datasets/character-wan-i2v"
           caption_ext: "txt"
           caption_dropout_rate: 0.05
           num_frames: 41
@@ -64,7 +64,7 @@ config:
         fps: 16
         # Wan I2V samples require a prompt + ctrl_img pair.
         # Replace this once we have character control/reference frames.
-        ctrl_img: "/root/nemoflix-training/samples/character_control.jpg"
+        ctrl_img: "/root/nemoflix-studio/training/samples/character_control.jpg"
         prompts:
           - "character_trigger, person, cinematic portrait, walking in heavy rain, dramatic lighting"
           - "character_trigger, person, wearing futuristic armor, rain-soaked city street, cinematic"
