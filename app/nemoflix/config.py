@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=120.0, validation_alias="REQUEST_TIMEOUT_SECONDS")
     database_url: str = Field(validation_alias="DATABASE_URL")
     output_dir: str = Field(validation_alias="NEMOFLIX_OUTPUT_DIR")
-    aitk_api_url: str = Field(validation_alias="AITK_API_URL")
+    aitk_api_url: str | None = Field(default=None, validation_alias="AITK_API_URL")
     elevenlabs_api_key: str | None = Field(default=None, validation_alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str | None = Field(default=None, validation_alias="ELEVENLABS_VOICE_ID")
     digitalocean_token: str | None = Field(default=None, validation_alias="DIGITALOCEAN_TOKEN")

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS media (
     character_ids TEXT[] NOT NULL DEFAULT '{}'::text[],
     tags TEXT[] NOT NULL DEFAULT '{}'::text[],
     included_in_training_dataset BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

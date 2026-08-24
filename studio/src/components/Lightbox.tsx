@@ -77,9 +77,33 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
 
   useEffect(() => {
     setDetail(null);
+    // Use metadata from the listing item if available (avoids extra fetch)
+    if (current?.metadata) {
+      const meta = current.metadata;
+      const wp = meta.workflow_params || {};
+      setDetail({
+        workflow: meta.workflow || wp.workflow || null,
+        checkpoint: wp.checkpoint || meta.model || null,
+        prompt: meta.prompt || current.prompt || null,
+        negative_prompt: wp.negative_prompt || meta.negative_prompt || null,
+        width: meta.width || current.width || null,
+        height: meta.height || current.height || null,
+        seed: meta.seed ?? wp.seed ?? null,
+        steps: meta.steps ?? wp.steps ?? null,
+        cfg: meta.cfg ?? wp.cfg ?? null,
+        sampler: meta.sampler || wp.sampler || null,
+        scheduler: meta.scheduler || wp.scheduler || null,
+        lora_name: wp.lora_name || (meta.loras?.[0]?.name) || null,
+        lora_strength: wp.lora_strength ?? (meta.loras?.[0]?.strength) ?? null,
+        completed_at: null,
+      });
+      setDetailLoading(false);
+      return;
+    }
+    // Fallback: fetch from API (legacy path for items without metadata)
     const mediaPath = current?.filename || current?.name;
     const detailUrl = current?.prompt_id
-      ? `/api/image/${current.prompt_id}`
+      ? `/api/jobs/${current.prompt_id}`
       : mediaPath
         ? `/api/media/${mediaPath.split("/").map(encodeURIComponent).join("/")}`
         : null;
@@ -87,10 +111,32 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
     setDetailLoading(true);
     fetch(detailUrl)
       .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data) return null;
+        // Normalize jobs response into ImageDetail shape
+        const meta = data.metadata || {};
+        const wp = meta.workflow_params || {};
+        return {
+          workflow: meta.workflow || wp.workflow || null,
+          checkpoint: wp.checkpoint || meta.model || null,
+          prompt: meta.prompt || data.prompt || null,
+          negative_prompt: wp.negative_prompt || meta.negative_prompt || null,
+          width: meta.width || data.width || null,
+          height: meta.height || data.height || null,
+          seed: meta.seed ?? wp.seed ?? null,
+          steps: meta.steps ?? wp.steps ?? null,
+          cfg: meta.cfg ?? wp.cfg ?? null,
+          sampler: meta.sampler || wp.sampler || null,
+          scheduler: meta.scheduler || wp.scheduler || null,
+          lora_name: wp.lora_name || (meta.loras?.[0]?.name) || null,
+          lora_strength: wp.lora_strength ?? (meta.loras?.[0]?.strength) ?? null,
+          completed_at: data.completed_at || null,
+        } as ImageDetail;
+      })
       .then(setDetail)
       .catch(() => setDetail(null))
       .finally(() => setDetailLoading(false));
-  }, [current?.prompt_id, current?.filename, current?.name]);
+  }, [current?.prompt_id, current?.filename, current?.name, current?.metadata]);
 
   if (!selectedUrl) return null;
 

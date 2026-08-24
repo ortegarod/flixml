@@ -702,12 +702,12 @@ async def upsert_media(row: dict[str, Any]) -> None:
                 filename, type, width, height, size, modified,
                 prompt, negative_prompt, seed, steps, guidance, sampler, scheduler,
                 model, vae, text_encoder, loras, workflow_type, workflow_json, prompt_id,
-                source_image, video_file, character_ids, tags, updated_at
+                source_image, video_file, character_ids, tags, metadata, updated_at
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,
                 $7,$8,$9,$10,$11,$12,$13,
                 $14,$15,$16,$17::jsonb,$18,$19::jsonb,$20,
-                $21,$22,$23::text[],$24::text[],NOW()
+                $21,$22,$23::text[],$24::text[],$25::jsonb,NOW()
             )
             ON CONFLICT (filename) DO UPDATE SET
                 type=EXCLUDED.type,
@@ -733,6 +733,7 @@ async def upsert_media(row: dict[str, Any]) -> None:
                 video_file=COALESCE(EXCLUDED.video_file, media.video_file),
                 character_ids=CASE WHEN cardinality(EXCLUDED.character_ids) > 0 THEN EXCLUDED.character_ids ELSE media.character_ids END,
                 tags=CASE WHEN cardinality(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE media.tags END,
+                metadata=COALESCE(EXCLUDED.metadata, media.metadata),
                 updated_at=NOW()
             """,
             row.get("filename"),
@@ -759,6 +760,7 @@ async def upsert_media(row: dict[str, Any]) -> None:
             row.get("video_file"),
             _text_list(row.get("character_ids")),
             _text_list(row.get("tags")),
+            row.get("metadata"),
         )
 
 

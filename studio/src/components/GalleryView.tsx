@@ -73,7 +73,7 @@ export function StudioView({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [viewSize, setViewSize] = useState<ViewSize>("comfortable");
+  const [viewSize, setViewSize] = useState<ViewSize>("large");
   const [importOpen, setImportOpen] = useState(false);
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importCharacter, setImportCharacter] = useState("");

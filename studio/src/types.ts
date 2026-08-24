@@ -18,6 +18,7 @@ export interface MediaItem {
   character_ids?: string[];
   tags?: string[];
   included_in_training_dataset?: boolean;
+  metadata?: Record<string, any> | null;
 }
 
 export interface LoraTrainingStatus {
