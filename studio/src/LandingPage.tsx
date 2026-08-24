@@ -48,7 +48,15 @@ function Navbar() {
 
         <div className="flex items-center gap-2">
           <a
-            href="/api/docs"
+            href="/api/guide"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-gray-500 hover:text-gray-200 transition"
+          >
+            <span className="hidden sm:inline">Guide</span>
+          </a>
+          <a
+            href="/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-gray-500 hover:text-gray-200 transition"
@@ -57,7 +65,7 @@ function Navbar() {
             <span className="hidden sm:inline">API Docs</span>
           </a>
           <a
-            href="https://github.com/ortegarod/nemoflix"
+            href="https://github.com/ortegarod/nemoflix-studio"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-gray-500 hover:text-gray-200 transition"
@@ -130,7 +138,7 @@ function Hero() {
             Launch Studio
           </Link>
           <a
-            href="https://github.com/ortegarod/nemoflix"
+            href="https://github.com/ortegarod/nemoflix-studio"
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-gray-500 hover:text-gray-300 transition"
@@ -325,7 +333,7 @@ function HowItWorks() {
               <p className="text-gray-600">{"{"}</p>
               <p className="pl-3">
                 <span className="text-amber-300">"character"</span>:{" "}
-                <span className="text-emerald-300">"atlas"</span>,
+                <span className="text-emerald-300">"mycharacter"</span>,
               </p>
               <p className="pl-3">
                 <span className="text-amber-300">"prompt"</span>:{" "}
@@ -512,7 +520,7 @@ function CTA() {
             Launch Studio
           </Link>
           <a
-            href="https://github.com/ortegarod/nemoflix"
+            href="https://github.com/ortegarod/nemoflix-studio"
             target="_blank"
             rel="noopener noreferrer"
             className={btnOutline}
@@ -537,7 +545,15 @@ function Footer() {
         </span>
         <div className="flex items-center gap-6 text-xs text-gray-600">
           <a
-            href="/api/docs"
+            href="/api/guide"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:text-gray-400 transition"
+          >
+            Guide
+          </a>
+          <a
+            href="/docs"
             target="_blank"
             rel="noreferrer"
             className="hover:text-gray-400 transition"
@@ -545,7 +561,7 @@ function Footer() {
             API Docs
           </a>
           <a
-            href="https://github.com/ortegarod/nemoflix"
+            href="https://github.com/ortegarod/nemoflix-studio"
             target="_blank"
             rel="noreferrer"
             className="hover:text-gray-400 transition"

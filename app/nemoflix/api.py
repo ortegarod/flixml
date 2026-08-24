@@ -16,9 +16,11 @@ from urllib.parse import quote, urlparse, urlunparse
 import httpx
 import websockets
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel, ConfigDict, Field
 
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
@@ -98,12 +100,71 @@ async def _tts_voices() -> list[dict[str, Any]]:
         return []
 
 
+_GUIDE_HTML: str | None = None
+
+
+def _load_guide_html() -> str:
+    global _GUIDE_HTML
+    if _GUIDE_HTML is not None:
+        return _GUIDE_HTML
+    # Resolve SKILL.md relative to the project root. The package lives under
+    # app/nemoflix/, so the project root is three directories up.
+    project_root = Path(__file__).resolve().parents[3]
+    skill_path = project_root / "SKILL.md"
+    if not skill_path.is_file():
+        # Last-ditch: look for a sibling install directory called nemoflix-studio.
+        skill_path = project_root.parent / "nemoflix-studio" / "SKILL.md"
+    md = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "# Nemoflix Skill\n\nSKILL.md not found."
+    _GUIDE_HTML = md
+    return _GUIDE_HTML
+
+
+API_DESCRIPTION = """Agent-native API for driving ComfyUI image and video generation.
+
+**Agent guide:** read `SKILL.md` or `GET /api/guide` for the full agent workflow.
+
+Nemoflix has two modes:
+- **Studio mode** — single images or clips (`/api/image/generate`, `/api/video/generate`).
+- **Projects mode** — structured stories: projects → scenes → shots → images → videos → final render.
+
+Workflows and providers are discovered live (`GET /api/workflows`, `GET /api/providers`).
+
+Security is currently optional: include an `Authorization: Bearer <token>` header if you have one.
+"""
+
+security = HTTPBearer(auto_error=False, scheme_name="bearerAuth", description="Optional Bearer token. Not enforced yet, but included for agent compatibility.")
+
 app = FastAPI(
-    title="Nemoflix AMD API",
-    description="Agent-native API for driving ComfyUI video generation on AMD GPUs.",
+    title="Nemoflix Studio API",
+    description=API_DESCRIPTION,
     version="0.1.0",
+    dependencies=[Depends(security)],
 )
 
+
+@app.get("/api/guide")
+async def guide() -> Response:
+    """Return SKILL.md as raw plain text for AI agents."""
+    md = _load_guide_html()
+    return Response(content=md, media_type="text/markdown; charset=utf-8")
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["security"] = [{"bearerAuth": []}]
+    app.openapi_schema = openapi_schema
+    return openapi_schema
+
+
+app.openapi = custom_openapi
 
 class CharacterBinding(BaseModel):
     id: str = Field(min_length=1)
@@ -127,12 +188,37 @@ class VoiceConfig(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
+class CharacterDefaults(BaseModel):
+    """Known preset fields a character's `defaults` blob can carry.
+
+    Stored as a freeform dict in the DB (characters.defaults JSONB) so new keys
+    don't require a migration, but this model gives the fields we actually
+    consume in /api/image/generate real names, types, and API-doc visibility
+    instead of them being silent dead weight. Unknown extra keys are preserved
+    but not read by the API.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    preferred_checkpoint: str | None = None
+    image_workflow: str | None = None
+    provider: str | None = None
+    cfg: float | None = None
+    steps: int | None = None
+    sampler: str | None = None
+    scheduler: str | None = None
+    image_width: int | None = None
+    image_height: int | None = None
+    negative_prompt: str | None = None
+    reference_image: str | None = None
+
+
 class CharacterRecord(BaseModel):
     id: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$")
     name: str = Field(min_length=1)
     kind: Literal["human", "agent"] | None = None
     trigger: str | None = None
     description: str | None = None
+    base_prompt: str | None = None
     source_images: list[str] = Field(default_factory=list)
     loras: list[CharacterLoraBinding] = Field(default_factory=list)
     voice: VoiceConfig | None = None
@@ -203,19 +289,34 @@ class ShotRecord(BaseModel):
 
 
 class VideoGenerateRequest(BaseModel):
-    mode: Literal["t2v", "i2v"] = "i2v"
-    workflow: str = Field(min_length=1, description="Workflow id to run (e.g. from GET /api/workflows)")
-    prompt: str = Field(min_length=1)
+    mode: Literal["t2v", "i2v"] = Field(
+        default="i2v",
+        json_schema_extra={"examples": ["i2v"]},
+    )
+    workflow: str = Field(
+        min_length=1,
+        description="Workflow id to run (e.g. from GET /api/workflows)",
+        json_schema_extra={"examples": ["wan2.2_i2v_14b_fp8"]},
+    )
+    prompt: str = Field(
+        min_length=1,
+        description="Motion/prompt for the video. In i2v mode the source image carries identity.",
+        json_schema_extra={"examples": ["a woman turning to face the camera, soft natural light, cinematic"]},
+    )
     character: str | None = Field(default=None, description="Shortcut for one character binding")
-    characters: list[CharacterBinding] = Field(default_factory=list)
-    image: str | None = Field(default=None, description="ComfyUI input filename for image-to-video")
-    negative: str | None = None
+    characters: list[CharacterBinding] = Field(default_factory=list, description="Optional explicit character bindings")
+    image: str | None = Field(
+        default=None,
+        description="ComfyUI input filename for image-to-video (i2v).",
+        json_schema_extra={"examples": ["projects/prj-xxx/scene-01-sht-xxx-image-v01_0001.png"]},
+    )
+    negative: str | None = Field(default=None, json_schema_extra={"examples": ["blurry, low quality"]})
     width: int = 640
     height: int = 640
     length: int = Field(default=81, description="Frame count, not seconds")
     fps: int = 16
     seed: int | None = None
-    filename_prefix: str | None = None
+    filename_prefix: str | None = Field(default=None, json_schema_extra={"examples": ["videos/my_clip"]})
     steps_high: int = 2
     steps_low: int = 2
     cfg_high: float = 1.0
@@ -234,7 +335,7 @@ class VideoGenerateRequest(BaseModel):
     high_lora_strength: float = 1.0
     low_lora_strength: float = 1.0
 
-    provider: str = Field(description="Provider id (see GET /api/providers)")
+    provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-pc"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
 
 
@@ -253,25 +354,56 @@ class ShotGenerateRequest(BaseModel):
 
 
 class ImageGenerateRequest(BaseModel):
-    workflow: str = Field(min_length=1, description="Workflow id to run (e.g. from GET /api/workflows)")
+    workflow: str = Field(
+        min_length=1,
+        description="Workflow id to run (e.g. from GET /api/workflows)",
+        json_schema_extra={"examples": ["flux_gguf_q4_1024"]},
+    )
     character: str | None = Field(default=None, description="Shortcut for one character binding")
-    characters: list[CharacterBinding] = Field(default_factory=list)
-    checkpoint: str | None = Field(default=None, description="LoRA checkpoint filename, path under the LoRA output dir, or 'latest'")
-    prompt: str = Field(min_length=1)
-    negative: str | None = None
-    width: int = 1248
-    height: int = 832
+    characters: list[CharacterBinding] = Field(default_factory=list, description="Optional explicit character bindings")
+    checkpoint: str | None = Field(
+        default=None,
+        description="LoRA checkpoint filename, path under the LoRA output dir, or 'latest'",
+        json_schema_extra={"examples": ["latest"]},
+    )
+    prompt: str = Field(
+        min_length=1,
+        description="Positive prompt. Character triggers are auto-injected if missing.",
+        json_schema_extra={"examples": ["portrait of a woman, natural window light, sharp focus"]},
+    )
+    negative: str | None = Field(default=None, json_schema_extra={"examples": ["blurry, low quality, watermark"]})
+    width: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
+    height: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
     seed: int | None = None
-    filename_prefix: str | None = None
-    steps: int = 20
-    cfg: float = 7.0
-    sampler: str = "euler"
+    filename_prefix: str | None = Field(default=None, json_schema_extra={"examples": ["images/character_portrait"]})
+    steps: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
+    cfg: float | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
+    sampler: str | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
+    scheduler: str | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
     guidance: float = 4.0
     unet: str | None = None  # Workflow-specific, set by service
     clip: str | None = None  # Workflow-specific, set by service
     vae: str | None = None  # Workflow-specific, set by service
     lora_strength: float = 1.0
-    provider: str = Field(description="Provider id (see GET /api/providers)")
+    image: str | None = Field(
+        default=None,
+        description="Source image filename or Studio output path for img2img / face-reference workflows.",
+        json_schema_extra={"examples": ["images/source.png"]},
+    )
+    denoise: float | None = Field(
+        default=None,
+        description="Denoise strength for img2img workflows (0.0 preserves source, 1.0 ignores it).",
+    )
+    model: str | None = Field(
+        default=None,
+        description="Base checkpoint model filename for SDXL workflows (e.g. cyberrealisticPony_v160.safetensors).",
+        json_schema_extra={"examples": ["cyberrealisticPony_v160.safetensors"]},
+    )
+    workflow_params: dict[str, Any] | None = Field(
+        default=None,
+        description="Passthrough for workflow-specific params (e.g. faceid_weight, denoise, scheduler). Overrides built-in defaults.",
+    )
+    provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-gpu-1"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
 
 
@@ -347,14 +479,14 @@ class LoraCheckpointsResponse(BaseModel):
 
 class LoraTrainingStartRequest(BaseModel):
     # -- Job ------------------------------------------------------------------
-    job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$")
-    trigger_word: str = Field(min_length=1)
-    base_config: str = Field(default="flux2_identity", description="Training template name; resolves to <name>_template.yaml in the training dir")
-    dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/nemoflix-training/datasets/")
+    job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", json_schema_extra={"examples": ["mycharacter_flux2_v1"]})
+    trigger_word: str = Field(min_length=1, json_schema_extra={"examples": ["mycharacter"]})
+    base_config: str = Field(default="flux2_identity", description="Training template name; resolves to <name>_template.yaml in the training dir", json_schema_extra={"examples": ["flux2_identity"]})
+    dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/nemoflix-training/datasets/", json_schema_extra={"examples": ["mycharacter_dataset_v1"]})
 
     # -- Model -----------------------------------------------------------------
-    model: str = Field(default="flux2_dev", description="Base model label, stored with the job")
-    model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Hugging Face repo id for the base checkpoint")
+    model: str = Field(default="flux2_dev", description="Base model label, stored with the job", json_schema_extra={"examples": ["flux2_dev"]})
+    model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Hugging Face repo id for the base checkpoint", json_schema_extra={"examples": ["black-forest-labs/FLUX.2-dev"]})
     low_vram: bool = Field(default=False, description="Enable Low VRAM mode (Tier A 16-24 GB)")
     layer_offloading: bool = Field(default=False, description="Stream layers from CPU RAM (Tier A only)")
     transformer_quantization: Literal["qfloat8", "uint4", "none"] = Field(default="qfloat8")
@@ -515,10 +647,11 @@ async def _comfy_ws_bridge_for_node(node: ComfyNode) -> None:
                         try:
                             history = await comfy().get(f"/history/{prompt_id}")
                             outputs = _extract_outputs(history, comfy())
-                            await _persist_outputs(prompt_id, outputs)
+                            persisted = await _persist_outputs(prompt_id, outputs)
                         except Exception:
-                            pass
-                        await _sse_broadcast("job_update", {"prompt_id": prompt_id, "status": "completed"})
+                            persisted = False
+                        status = "completed" if persisted else "running"
+                        await _sse_broadcast("job_update", {"prompt_id": prompt_id, "status": status})
                     elif msg_type in {"execution_error", "execution_interrupted"} and isinstance(prompt_id, str):
                         error = data.get("exception_message") or msg_type
                         await update_job_status(prompt_id, "failed", error=error)
@@ -562,6 +695,7 @@ async def list_registered_providers() -> list[dict]:
 
 @app.get("/api/events")
 async def sse_events(request: Request) -> StreamingResponse:
+    """Server-sent events stream for job progress, training updates, and lifecycle pings."""
     q: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
     _SSE_CLIENTS.add(q)
 
@@ -591,6 +725,7 @@ async def start_comfy_bridge() -> None:
     await init_db()
     init_default_providers()  # Register GPU providers
     init_registry(Path(__file__).parent / "workflows")  # Load workflow metadata
+    await _sync_media_catalog()
     if _WS_TASK is None or _WS_TASK.done():
         _WS_TASK = asyncio.create_task(_comfy_ws_bridge())
 
@@ -608,6 +743,54 @@ async def stop_comfy_bridge() -> None:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def _is_media_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _ALLOW_EXT
+
+
+def _media_type_from_path(path: Path) -> str:
+    return "video" if path.suffix.lower() in {".mp4", ".webm", ".gif"} else "image"
+
+
+def _parse_jsonb(value: Any) -> Any:
+    """Parse a JSONB string returned by asyncpg into a Python object."""
+    if isinstance(value, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            return json.loads(value)
+    return value
+
+
+async def _sync_media_catalog() -> None:
+    """Ensure every media file on disk has a row in the media table.
+
+    This is a one-way import: files present in the media table are left as-is,
+    and any output files missing from the table are upserted so the catalog
+    stays in sync with the filesystem. Project renders are excluded from the
+    gallery catalog.
+    """
+    try:
+        files = [p for p in _OUTPUT_DIR.rglob("*") if _is_media_file(p)]
+    except Exception:  # noqa: BLE001
+        return
+
+    for path in files:
+        rel = path.relative_to(_OUTPUT_DIR).as_posix()
+        if rel.startswith("projects/") and "render-" in rel:
+            continue
+        try:
+            stat = path.stat()
+            width, height = _read_dimensions(path)
+            await upsert_media({
+                "filename": rel,
+                "type": _media_type_from_path(path),
+                "width": width,
+                "height": height,
+                "size": stat.st_size,
+                "modified": utc_from_timestamp(stat.st_mtime),
+            })
+        except Exception:  # noqa: BLE001
+            continue
 
 
 def _record_with_id(data: BaseModel, prefix: str, **overrides: Any) -> dict[str, Any]:
@@ -683,7 +866,7 @@ async def _ensure_comfy_input_image(image: str) -> str:
 
 @app.post("/api/agent/chat")
 async def agent_chat(payload: dict[str, Any]) -> dict[str, Any]:
-    """Demo in-app agent endpoint for assistant-ui. Tool execution will be layered here."""
+    """Demo in-app chat endpoint for assistant-ui. Returns a friendly response; tool execution is planned."""
     messages = payload.get("messages") or []
 
     def _text_from_part(part: Any) -> str:
@@ -721,12 +904,14 @@ async def agent_chat(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/characters")
 async def characters() -> dict[str, Any]:
+    """List all registered characters with their LoRAs, triggers, and voices."""
     items = await list_characters()
     return {"characters": items, "count": len(items)}
 
 
 @app.get("/api/characters/{character_id}")
 async def character_detail(character_id: str) -> dict[str, Any]:
+    """Return a single character record by ID."""
     record = await get_character(character_id)
     if not record:
         raise HTTPException(status_code=404, detail="Character not found")
@@ -735,12 +920,14 @@ async def character_detail(character_id: str) -> dict[str, Any]:
 
 @app.post("/api/characters", response_model=CharacterRecord)
 async def create_character(character: CharacterRecord) -> CharacterRecord:
+    """Create or replace a character (idempotent by character id)."""
     record = await upsert_character(character.model_dump())
     return CharacterRecord(**record)
 
 
 @app.patch("/api/characters/{character_id}", response_model=CharacterRecord)
 async def patch_character(character_id: str, patch: dict[str, Any]) -> CharacterRecord:
+    """Update selected fields of an existing character."""
     current = await get_character(character_id)
     if not current:
         raise HTTPException(status_code=404, detail="Character not found")
@@ -756,6 +943,7 @@ async def patch_character(character_id: str, patch: dict[str, Any]) -> Character
 
 @app.delete("/api/characters/{character_id}")
 async def remove_character(character_id: str) -> dict[str, Any]:
+    """Delete a character and its associated media rows."""
     deleted = await delete_character(character_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Character not found")
@@ -764,37 +952,40 @@ async def remove_character(character_id: str) -> dict[str, Any]:
 
 @app.get("/api/characters/{character_id}/media")
 async def character_media(character_id: str, offset: int = 0, limit: int = 60) -> dict[str, Any]:
-    """List completed generation jobs for a specific character."""
-    jobs = await list_jobs_by_character(character_id, limit=limit, offset=offset)
+    """List media associated with a specific character."""
+    total = await media_count(character_id=character_id)
+    rows = await list_media(character_id=character_id, limit=limit, offset=offset)
 
     items = []
-    for job in jobs:
-        filename = job.get("output_filename")
+    for row in rows:
+        filename = row.get("filename")
         if not filename:
             continue
-        target = _safe_output_path(filename)
-        if not target or not target.is_file():
-            continue
-        width, height = _read_dimensions(target)
+        modified = row.get("modified") or row.get("updated_at") or row.get("created_at")
+        mtime = modified.timestamp() if hasattr(modified, "timestamp") else (modified or 0)
         items.append({
             "name": Path(filename).name,
             "filename": filename,
-            "type": "video" if Path(filename).suffix.lower() in {".mp4", ".webm", ".gif"} else "image",
-            "width": width,
-            "height": height,
-            "mtime": job.get("updated_at").timestamp() if job.get("updated_at") else 0,
+            "type": row.get("type", "image"),
+            "width": row.get("width", 0),
+            "height": row.get("height", 0),
+            "mtime": mtime,
             "url": f"/media/{filename}",
             "thumb": f"/media/{filename}",
-            "prompt": job.get("prompt"),
-            "prompt_id": job.get("prompt_id"),
+            "prompt": row.get("prompt"),
+            "prompt_id": row.get("prompt_id"),
+            "character_ids": row.get("character_ids") or [],
+            "tags": row.get("tags") or [],
+            "included_in_training_dataset": row.get("included_in_training_dataset", False),
+            "metadata": _parse_jsonb(row.get("metadata")),
         })
 
-    items.sort(key=lambda x: x["mtime"], reverse=True)
-    return {"images": items, "total": len(items), "offset": offset, "limit": limit}
+    return {"images": items, "total": total, "offset": offset, "limit": limit}
 
 
 @app.get("/api/projects")
 async def projects(limit: int = 100) -> dict[str, Any]:
+    """List all projects with basic metadata and render counts."""
     items = await list_projects(limit)
     # Augment each project with render count from the renders table
     for item in items:
@@ -804,6 +995,7 @@ async def projects(limit: int = 100) -> dict[str, Any]:
 
 @app.post("/api/projects", response_model=ProjectRecord)
 async def create_project(project: ProjectRecord) -> ProjectRecord:
+    """Create a new project (script) with title, aspect ratio, and cast."""
     record = _record_with_id(project, "prj")
     saved = await upsert_project(record)
     return ProjectRecord(**saved)
@@ -811,6 +1003,7 @@ async def create_project(project: ProjectRecord) -> ProjectRecord:
 
 @app.get("/api/projects/{project_id}")
 async def project_detail(project_id: str) -> dict[str, Any]:
+    """Return a project and all of its scenes and shots."""
     project = await get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -821,6 +1014,7 @@ async def project_detail(project_id: str) -> dict[str, Any]:
 
 @app.patch("/api/projects/{project_id}", response_model=ProjectRecord)
 async def patch_project(project_id: str, patch: dict[str, Any]) -> ProjectRecord:
+    """Update selected fields of an existing project."""
     current = await get_project(project_id)
     if not current:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -835,6 +1029,7 @@ async def patch_project(project_id: str, patch: dict[str, Any]) -> ProjectRecord
 
 @app.delete("/api/projects/{project_id}")
 async def remove_project(project_id: str) -> dict[str, Any]:
+    """Delete a project and all its scenes, shots, and renders."""
     deleted = await delete_project(project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -843,6 +1038,7 @@ async def remove_project(project_id: str) -> dict[str, Any]:
 
 @app.get("/api/projects/{project_id}/scenes")
 async def project_scenes(project_id: str) -> dict[str, Any]:
+    """List all scenes belonging to a project."""
     if not await get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     scenes = await list_project_scenes(project_id)
@@ -851,6 +1047,7 @@ async def project_scenes(project_id: str) -> dict[str, Any]:
 
 @app.post("/api/projects/{project_id}/scenes", response_model=SceneRecord)
 async def create_project_scene(project_id: str, scene: SceneRecord) -> SceneRecord:
+    """Add a scene to a project."""
     if not await get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     record = _record_with_id(scene, "scn", project_id=project_id)
@@ -860,6 +1057,7 @@ async def create_project_scene(project_id: str, scene: SceneRecord) -> SceneReco
 
 @app.patch("/api/projects/{project_id}/scenes/{scene_id}", response_model=SceneRecord)
 async def patch_project_scene(project_id: str, scene_id: str, patch: dict[str, Any]) -> SceneRecord:
+    """Update selected fields of a scene."""
     current = await get_project_scene(project_id, scene_id)
     if not current:
         raise HTTPException(status_code=404, detail="Scene not found")
@@ -874,6 +1072,7 @@ async def patch_project_scene(project_id: str, scene_id: str, patch: dict[str, A
 
 @app.delete("/api/projects/{project_id}/scenes/{scene_id}")
 async def remove_project_scene(project_id: str, scene_id: str) -> dict[str, Any]:
+    """Delete a scene and all its shots."""
     deleted = await delete_project_scene(project_id, scene_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Scene not found")
@@ -882,6 +1081,7 @@ async def remove_project_scene(project_id: str, scene_id: str) -> dict[str, Any]
 
 @app.get("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/versions")
 async def project_shot_versions(project_id: str, scene_id: str, shot_id: str) -> dict[str, Any]:
+    """List all generated image/video versions for a shot."""
     if not await get_project_shot(project_id, scene_id, shot_id):
         raise HTTPException(status_code=404, detail="Shot not found")
     versions = await list_project_shot_versions(project_id, scene_id, shot_id)
@@ -890,6 +1090,7 @@ async def project_shot_versions(project_id: str, scene_id: str, shot_id: str) ->
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/versions/{version_id}/select", response_model=ShotRecord)
 async def select_project_shot_version(project_id: str, scene_id: str, shot_id: str, version_id: str) -> ShotRecord:
+    """Pick a completed version as the active image or video for a shot."""
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -908,6 +1109,7 @@ async def select_project_shot_version(project_id: str, scene_id: str, shot_id: s
 
 @app.get("/api/projects/{project_id}/scenes/{scene_id}/shots")
 async def project_scene_shots(project_id: str, scene_id: str) -> dict[str, Any]:
+    """List all shots in a scene."""
     if not await get_project_scene(project_id, scene_id):
         raise HTTPException(status_code=404, detail="Scene not found")
     shots = await list_project_shots(project_id, scene_id)
@@ -916,6 +1118,7 @@ async def project_scene_shots(project_id: str, scene_id: str) -> dict[str, Any]:
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots", response_model=ShotRecord)
 async def create_project_shot(project_id: str, scene_id: str, shot: ShotRecord) -> ShotRecord:
+    """Add a shot to a scene."""
     if not await get_project_scene(project_id, scene_id):
         raise HTTPException(status_code=404, detail="Scene not found")
     record = _record_with_id(shot, "sht", project_id=project_id, scene_id=scene_id)
@@ -925,6 +1128,7 @@ async def create_project_shot(project_id: str, scene_id: str, shot: ShotRecord) 
 
 @app.patch("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}", response_model=ShotRecord)
 async def patch_project_shot(project_id: str, scene_id: str, shot_id: str, patch: dict[str, Any]) -> ShotRecord:
+    """Update selected fields of a shot."""
     current = await get_project_shot(project_id, scene_id, shot_id)
     if not current:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -939,6 +1143,7 @@ async def patch_project_shot(project_id: str, scene_id: str, shot_id: str, patch
 
 @app.delete("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}")
 async def remove_project_shot(project_id: str, scene_id: str, shot_id: str) -> dict[str, Any]:
+    """Delete a shot and all its versions."""
     deleted = await delete_project_shot(project_id, scene_id, shot_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -967,6 +1172,7 @@ async def _project_character_ids(project_id: str, scene_id: str, shot: dict[str,
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/generate-image", response_model=ImageGenerateResponse)
 async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest) -> ImageGenerateResponse:
+    """Generate an image for a project shot using its description/image_prompt and character LoRAs."""
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -1045,6 +1251,7 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/animate", response_model=VideoGenerateResponse)
 async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest) -> VideoGenerateResponse:
+    """Animate a project shot by generating a video from its selected/generated image."""
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -1306,6 +1513,7 @@ async def _run_render(project_id: str, shots: list[dict[str, Any]], render_id: s
 
 @app.post("/api/projects/{project_id}/render")
 async def render_project(project_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    """Assemble all completed shot images/videos into the final project video."""
     project = await get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1342,6 +1550,7 @@ async def list_tts_voices() -> dict[str, Any]:
 
 @app.get("/api/projects/{project_id}/render")
 async def render_project_status(project_id: str) -> dict[str, Any]:
+    """Return the latest render status, final video URL, and history for a project."""
     project = await get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1371,6 +1580,7 @@ async def render_project_status(project_id: str) -> dict[str, Any]:
 
 @app.delete("/api/projects/{project_id}/renders/{render_id}")
 async def delete_project_render(project_id: str, render_id: str) -> dict[str, Any]:
+    """Delete a project render record and its output file."""
     project = await get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1388,6 +1598,7 @@ async def delete_project_render(project_id: str, render_id: str) -> dict[str, An
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
+    """Report API health and how many configured ComfyUI nodes are reachable."""
     settings = get_settings()
     configured_nodes = settings.gpu_nodes()
     comfy_nodes = settings.comfy_nodes()
@@ -1465,6 +1676,7 @@ async def comfy_get(path: str) -> Any:
 
 @app.post("/api/images/upload")
 async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Upload an image to the local ComfyUI input folder so workflows can reference it."""
     suffix = Path(file.filename or "upload.png").suffix or ".png"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp_path = Path(tmp.name)
@@ -1478,6 +1690,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
 
 @app.post("/api/video/generate", response_model=VideoGenerateResponse)
 async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
+    """Submit a single video generation job (t2v or i2v)."""
     # Character resolution only supplies a fallback reference image for i2v.
     # Wan video takes identity from the image, so character triggers and character LoRAs
     # are not injected here - pass body.high_lora/body.low_lora explicitly to override.
@@ -1627,7 +1840,11 @@ async def _download_output_if_missing(output: JobOutput) -> Path | None:
         return None
 
 
-async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> None:
+async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
+    """Download outputs from ComfyUI and persist to local storage + DB.
+
+    Returns True if at least one file was successfully imported.
+    """
     first_filename: str | None = None
     job_meta = await get_job(prompt_id) or {}
     for output in outputs:
@@ -1656,6 +1873,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> None:
             "workflow_type": job_meta.get("mode"),
             "prompt_id": prompt_id,
             "source_image": job_meta.get("source_image"),
+            "metadata": job_meta.get("metadata"),
         })
     if first_filename:
         await update_job_status(prompt_id, "completed", output_filename=first_filename)
@@ -1677,6 +1895,8 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> None:
                 else:
                     shot.update({"video_file": first_filename, "status": "video_ready"})
                 await upsert_project_shot(shot)
+        return True
+    return False
 
 
 async def _queue_position(client: ComfyClient, prompt_id: str) -> int | None:
@@ -1690,12 +1910,7 @@ async def _queue_position(client: ComfyClient, prompt_id: str) -> int | None:
 
 @app.get("/api/jobs")
 async def jobs(include_completed: bool = True) -> dict[str, Any]:
-    """Return jobs submitted through this API from durable Postgres state.
-
-    ComfyUI remains the execution engine. Its live queue is used only to refresh
-    status/queue position for jobs already registered in Postgres; arbitrary
-    Comfy queue entries are not surfaced.
-    """
+    """Return jobs submitted through this API from durable Postgres state."""
     db_jobs = await list_jobs(limit=100)
     client = comfy()
 
@@ -1738,9 +1953,10 @@ async def jobs(include_completed: bool = True) -> dict[str, Any]:
                     job["_missing_from_comfy"] = True
                 else:
                     if outputs:
-                        await _persist_outputs(prompt_id, outputs)
-                        job["status"] = "completed"
-                        job["output_filename"] = outputs[0].filename
+                        persisted = await _persist_outputs(prompt_id, outputs)
+                        job["status"] = "completed" if persisted else "running"
+                        if persisted:
+                            job["output_filename"] = outputs[0].filename
                     else:
                         # Comfy is the source of truth. If a job is neither in
                         # /queue nor /history, do not invent a status for it.
@@ -1766,6 +1982,7 @@ async def jobs(include_completed: bool = True) -> dict[str, Any]:
 
 @app.get("/api/jobs/{prompt_id}", response_model=JobStatusResponse)
 async def job(prompt_id: str) -> JobStatusResponse:
+    """Get status, outputs, and queue position for a single job."""
     client = comfy()
 
     # ComfyUI's normalized jobs endpoint reports pending/in_progress/completed.
@@ -1773,11 +1990,19 @@ async def job(prompt_id: str) -> JobStatusResponse:
     try:
         comfy_job = await client.get(f"/api/jobs/{prompt_id}")
         outputs = _extract_outputs_from_comfy_job(comfy_job, client)
-        status = comfy_job.get("status", "unknown")
+        comfy_status = comfy_job.get("status", "unknown")
+
+        # Do NOT trust ComfyUI's "completed" until we've actually imported the files.
+        # "completed" here means generation finished; we need to download before
+        # we tell the frontend the job is truly done.
+        if comfy_status == "completed" and outputs:
+            persisted = await _persist_outputs(prompt_id, outputs)
+            status = "completed" if persisted else "running"
+        else:
+            status = comfy_status
+
         if status in {"pending", "running", "completed", "failed", "unknown"}:
             await update_job_status(prompt_id, status)
-        if status == "completed" and outputs:
-            await _persist_outputs(prompt_id, outputs)
         progress = 100.0 if status == "completed" else None
         position = await _queue_position(client, prompt_id) if status == "pending" else None
         return JobStatusResponse(
@@ -1787,19 +2012,21 @@ async def job(prompt_id: str) -> JobStatusResponse:
             progress=progress,
             queue_position=position,
             outputs_count=comfy_job.get("outputs_count"),
-            outputs=outputs,
+            outputs=outputs if status == "completed" else [],
             raw=comfy_job,
         )
     except Exception:
         # Older ComfyUI builds may not have /api/jobs/{id}; fall back to history.
         history = await client.get(f"/history/{prompt_id}")
         outputs = _extract_outputs(history, client)
-        status = "completed" if outputs else ("running" if history == {} else "unknown")
         if outputs:
-            await _persist_outputs(prompt_id, outputs)
+            persisted = await _persist_outputs(prompt_id, outputs)
+            status = "completed" if persisted else "running"
+        else:
+            status = "running" if history == {} else "unknown"
         await update_job_status(prompt_id, status)
-        progress = 100.0 if outputs else None
-        return JobStatusResponse(ok=True, prompt_id=prompt_id, status=status, progress=progress, outputs=outputs, raw=history)
+        progress = 100.0 if status == "completed" else None
+        return JobStatusResponse(ok=True, prompt_id=prompt_id, status=status, progress=progress, outputs=outputs if status == "completed" else [], raw=history)
 
 
 import os
@@ -2136,6 +2363,7 @@ async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingSta
 
 @app.get("/api/lora-training/status", response_model=LoraTrainingStatus)
 async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatus:
+    """Fetch the latest status, step count, ETA, and synced samples for a LoRA training job."""
     updated_at = datetime.now(UTC).isoformat()
 
     # Resolve job_name from our DB if not provided
@@ -2245,10 +2473,26 @@ def _comfy_lora_name_for_checkpoint(path: Path) -> str:
 
 @app.post("/api/image/generate", response_model=ImageGenerateResponse)
 async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
+    """Submit a single image generation job."""
     resolved = await _resolve_characters(body.character, body.characters)
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
-    prompt = _prompt_with_character_triggers(body.prompt, character_records)
+
+    # Character presets (checkpoint, cfg/steps/sampler/scheduler, negative prompt,
+    # resolution, look description) apply whenever the request doesn't explicitly
+    # override them. Only the first resolved character's defaults are used —
+    # multi-character requests must set params explicitly.
+    character_defaults = CharacterDefaults(**(character_records[0].get("defaults") or {})) if character_records else CharacterDefaults()
+    character_base_prompt = character_records[0].get("base_prompt") if character_records else None
+
+    # Prepend base_prompt (the character's look description) first, then run
+    # trigger-word injection on the combined text — base_prompt already names
+    # the character, so this stops the trigger word from being duplicated as
+    # an orphaned "Ciri," fragment between base_prompt and the scene prompt.
+    prompt = body.prompt
+    if character_base_prompt and character_base_prompt.lower() not in prompt.lower():
+        prompt = f"{character_base_prompt}, {prompt}"
+    prompt = _prompt_with_character_triggers(prompt, character_records)
     loras = _character_loras(character_records, body.workflow, bindings)
 
     checkpoint_name: str | None = None
@@ -2263,35 +2507,60 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
 
     resolved_lora_name = checkpoint_lora_name or (loras[0].get("name") if loras else None)
 
+    # Resolve each tunable field: explicit request value > character preset > workflow's own default (unset here).
+    resolved_model = body.model if body.model is not None else character_defaults.preferred_checkpoint
+    resolved_width = body.width if body.width is not None else character_defaults.image_width
+    resolved_height = body.height if body.height is not None else character_defaults.image_height
+    resolved_steps = body.steps if body.steps is not None else character_defaults.steps
+    resolved_cfg = body.cfg if body.cfg is not None else character_defaults.cfg
+    resolved_sampler = body.sampler if body.sampler is not None else character_defaults.sampler
+    resolved_scheduler = body.scheduler if body.scheduler is not None else character_defaults.scheduler
+    resolved_negative = body.negative if body.negative is not None else character_defaults.negative_prompt
+
     # Use GenerationService for workflow build + submit + DB save
     service = GenerationService()
 
-    # Build workflow-specific params (only pass what the workflow builder accepts)
+    # Build workflow-specific params (only pass what the workflow builder accepts).
+    # Omitting a key (rather than passing None) lets the workflow's own meta.json
+    # default apply when neither the request nor the character preset set it.
     workflow_params: dict[str, Any] = {
         "loras": loras,
-        "steps": body.steps,
-        "cfg": body.cfg,
-        "sampler": body.sampler,
         "lora_strength": body.lora_strength,
     }
+    if resolved_steps is not None:
+        workflow_params["steps"] = resolved_steps
+    if resolved_cfg is not None:
+        workflow_params["cfg"] = resolved_cfg
+    if resolved_sampler is not None:
+        workflow_params["sampler"] = resolved_sampler
+    if resolved_scheduler is not None:
+        workflow_params["scheduler"] = resolved_scheduler
 
     workflow_params["guidance"] = body.guidance
-    if body.negative is not None:
-        workflow_params["negative_prompt"] = body.negative
+    if resolved_negative is not None:
+        workflow_params["negative_prompt"] = resolved_negative
     if body.unet is not None:
         workflow_params["unet"] = body.unet
     if body.clip is not None:
         workflow_params["clip"] = body.clip
     if body.vae is not None:
         workflow_params["vae"] = body.vae
+    if body.denoise is not None:
+        workflow_params["denoise"] = body.denoise
+    if resolved_model is not None:
+        workflow_params["checkpoint"] = resolved_model
+    if body.image is not None:
+        workflow_params["image"] = await _ensure_comfy_input_image(body.image)
+    if body.workflow_params is not None:
+        workflow_params.update(body.workflow_params)
 
     try:
         result = await service.generate(
             workflow=body.workflow,
             prompt=prompt,
             provider=body.provider,
-            width=body.width,
-            height=body.height,
+            width=resolved_width,
+            height=resolved_height,
             seed=body.seed,
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
@@ -2322,6 +2591,7 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
 
 @app.get("/api/lora-training/checkpoints", response_model=LoraCheckpointsResponse)
 async def lora_training_checkpoints(job_name: str | None = None) -> LoraCheckpointsResponse:
+    """List LoRA checkpoint safetensors available on the VPS, optionally filtered by job."""
     updated_at = datetime.now(UTC).isoformat()
     seen: set[str] = set()
     checkpoints: list[LoraCheckpoint] = []
@@ -2369,6 +2639,7 @@ async def lora_training_checkpoints(job_name: str | None = None) -> LoraCheckpoi
 
 @app.get("/api/lora-training/checkpoints/download")
 async def lora_training_checkpoint_download(name: str) -> FileResponse:
+    """Download a LoRA checkpoint by name."""
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Invalid filename")
     target = (_LORA_OUTPUT_DIR / name).resolve()
@@ -2381,12 +2652,14 @@ async def lora_training_checkpoint_download(name: str) -> FileResponse:
 
 @app.get("/api/lora-training/jobs")
 async def lora_training_jobs():
+    """List all training jobs known to the local DB."""
     jobs = await list_training_jobs()
     return {"jobs": jobs, "count": len(jobs)}
 
 
 @app.get("/api/lora-training/datasets")
 async def lora_training_datasets_list():
+    """List all registered training datasets."""
     datasets = await list_datasets()
     return {"datasets": datasets, "count": len(datasets)}
 
@@ -2400,6 +2673,7 @@ class CreateDatasetRequest(BaseModel):
 
 @app.post("/api/lora-training/datasets")
 async def lora_training_datasets_create(body: CreateDatasetRequest):
+    """Register a new training dataset reference."""
     dataset = await upsert_dataset(body.id, body.name, body.description, body.image_count)
     return {"ok": True, "dataset": dataset}
 
@@ -2425,59 +2699,92 @@ async def lora_training_sample_image(path: str):
 
 
 @app.get("/api/listing")
-async def listing(dir: str = "", offset: int = 0, limit: int = 60) -> dict[str, Any]:
-    """List completed generation jobs from the jobs table.
+async def listing(
+    offset: int = 0,
+    limit: int = 60,
+    type: str = "",
+    q: str = "",
+    character_id: str = "",
+    tag: str = "",
+    training_dataset: str = "",
+) -> dict[str, Any]:
+    """List generated media from the media table.
 
-    Reads from the jobs table (source of truth), not filesystem scanning.
-    Each job includes output_filename, prompt, metadata, and status.
+    This is the source-of-truth catalog for all images and videos managed by
+    Nemoflix Studio. Filters are applied in the database and support pagination,
+    type filtering, free-text search, character/tag scoping, and training
+    dataset selection.
     """
-    rows = await list_jobs(limit=limit, offset=offset)
+    type_filter: str | None = None
+    if type in {"image", "video"}:
+        type_filter = type
+    search = q.strip() or None
+    char_id = character_id.strip() or None
+    tag_filter = tag.strip() or None
+    training_only = training_dataset.strip().lower() == "true"
 
-    # Filter to completed jobs only
-    completed = [row for row in rows if row.get("status") == "completed"]
+    total = await media_count(
+        type_filter=type_filter,
+        search=search,
+        character_id=char_id,
+        tag=tag_filter,
+        training_dataset=training_only if training_dataset.strip() else None,
+    )
+    rows = await list_media(
+        limit=limit,
+        offset=offset,
+        type_filter=type_filter,
+        search=search,
+        character_id=char_id,
+        tag=tag_filter,
+        training_dataset=training_only if training_dataset.strip() else None,
+    )
 
-    # Transform jobs → listing format
     items = []
-    for job in completed:
-        filename = job.get("output_filename")
+    for row in rows:
+        filename = row.get("filename")
         if not filename:
             continue
-        # Optional directory filter
-        if dir:
-            prefix = dir.strip("/") + "/"
-            if not filename.startswith(prefix):
-                continue
-        # Verify file exists on disk
-        target = _safe_output_path(filename)
-        if not target or not target.is_file():
-            continue
-        width, height = _read_dimensions(target)
+        modified = row.get("modified") or row.get("updated_at") or row.get("created_at")
+        mtime = modified.timestamp() if hasattr(modified, "timestamp") else (modified or 0)
         items.append({
             "name": Path(filename).name,
             "filename": filename,
-            "type": "video" if Path(filename).suffix.lower() in {".mp4", ".webm", ".gif"} else "image",
-            "width": width,
-            "height": height,
-            "mtime": job.get("updated_at").timestamp() if job.get("updated_at") else 0,
+            "type": row.get("type", "image"),
+            "width": row.get("width", 0),
+            "height": row.get("height", 0),
+            "mtime": mtime,
             "url": f"/media/{filename}",
             "thumb": f"/media/{filename}",
-            "prompt": job.get("prompt"),
-            "prompt_id": job.get("prompt_id"),
+            "prompt": row.get("prompt"),
+            "prompt_id": row.get("prompt_id"),
+            "character_ids": row.get("character_ids") or [],
+            "tags": row.get("tags") or [],
+            "included_in_training_dataset": row.get("included_in_training_dataset", False),
+            "metadata": _parse_jsonb(row.get("metadata")),
         })
 
-    # Sort by mtime descending
-    items.sort(key=lambda x: x["mtime"], reverse=True)
-
     return {
-        "images": items[offset:offset+limit],
-        "total": len(items),
+        "images": items,
+        "total": total,
         "offset": offset,
         "limit": limit,
     }
 
 
+@app.get("/api/listing/counts")
+async def listing_counts() -> dict[str, Any]:
+    """Return aggregate counts for all media, images, and videos."""
+    return {
+        "total": await media_count(),
+        "images": await media_count(type_filter="image"),
+        "videos": await media_count(type_filter="video"),
+    }
+
+
 @app.get("/media/{path:path}")
 async def media(path: str) -> FileResponse:
+    """Serve a generated image/video from the output directory with caching headers."""
     target = _safe_output_path(path)
     if not target:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -2493,6 +2800,7 @@ async def media(path: str) -> FileResponse:
 
 @app.post("/api/delete")
 async def delete_media(body: dict[str, Any]) -> dict[str, Any]:
+    """Delete generated files by relative path and remove their DB records."""
     files = body.get("files", [])
     if not isinstance(files, list):
         raise HTTPException(status_code=400, detail="files must be a list")

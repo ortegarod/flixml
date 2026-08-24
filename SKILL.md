@@ -37,6 +37,8 @@ Always check health first. If it fails, tell your human the backend is unavailab
 
 Studio is for one-off generations. Whatever you make lands in the gallery (`/api/listing`) where your human can see it.
 
+**Never ask before submitting a Studio job.** These run on idle local GPUs (srv01, PC) — cheap, minutes not hours, trivially redone. Don't end a turn with "want me to run this?" or "should I submit or adjust the prompt?" — decide, submit, show the result. If the first attempt has a problem (bad composition, wrong pose, weak prompt), fix it and resubmit yourself in the same turn — don't stop to ask permission to try again. Only pause for real ambiguity (which character, which of two very different concepts) — never for "is this good enough to try." (This is Studio-specific — Projects mode has its own approval gates below, since a project commits to a full multi-shot run.)
+
 ## Use a character in Studio
 
 Characters are reusable visual identities such as a person or agent likeness. List available character IDs before casting one:
@@ -56,13 +58,24 @@ For advanced multi-character control, pass `characters` as character binding obj
 ```json
 {
   "characters": [
-    {"id":"atlas","role":"hero","lora_strength":1.0}
+    {"id":"mycharacter","role":"hero","lora_strength":1.0}
   ],
   "prompt":"cinematic hero shot in neon rain"
 }
 ```
 
 `characters` items support `id`, optional `role`, optional `reference_image`, and optional `lora_strength`. The backend resolves the character record, automatically adds the character trigger word to the prompt when needed, and uses the character's LoRA when that workflow supports it. Current direct image generation requires either a character with a `flux2_lora` LoRA or a raw `checkpoint`. Direct image-to-video can use a character reference image if no `image` is supplied.
+
+## Discover workflows and providers first
+
+Before generating anything, read the live catalog so you send real workflow/provider IDs:
+
+```bash
+curl -sS "$NEMOFLIX_API_URL/api/workflows"
+curl -sS "$NEMOFLIX_API_URL/api/providers"
+```
+
+A workflow entry looks like `{ "id": "<workflow-id>", "name": "...", "type": "image", ... }`. A provider entry looks like `{ "id": "<provider-id>", "label": "..." }`. The values below are examples — replace them with IDs returned by your actual catalog.
 
 ## Start a LoRA training job
 
@@ -72,17 +85,17 @@ If your human wants to train a new character identity, use `/api/lora-training/s
 # Register the dataset
 curl -sS -X POST "$NEMOFLIX_API_URL/api/lora-training/datasets" \
   -H "Content-Type: application/json" \
-  -d '{"id": "<run-name>", "name": "My Character"}'
+  -d '{"id": "mycharacter_dataset_v1", "name": "My Character"}'
 
 # Start training
 curl -sS -X POST "$NEMOFLIX_API_URL/api/lora-training/start" \
   -H "Content-Type: application/json" \
   -d '{
-    "job_name": "<job-name>",
-    "trigger_word": "<trigger>",
-    "dataset": "<run-name>",
-    "base_config": "<base-config>",
-    "model": "<model>"
+    "job_name": "mycharacter_flux2_v1",
+    "trigger_word": "mycharacter",
+    "dataset": "mycharacter_dataset_v1",
+    "base_config": "flux2_identity",
+    "model": "flux2_dev"
   }'
 ```
 
@@ -92,29 +105,99 @@ Monitor with `GET /api/lora-training/status`. Checkpoints appear at `GET /api/lo
 
 ## Generate an image
 
+Required fields: `workflow`, `provider`, `prompt`. Optional: `character`, `characters`, `checkpoint`, `width`, `height`, etc.
+
+Replace `<workflow-id>` and `<provider-id>` with real IDs from `GET /api/workflows` and `GET /api/providers`.
+
 ```bash
 curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
   -H "Content-Type: application/json" \
-  -d '{"character":"atlas","prompt":"in an open-helmet Iron Man suit getting ready to take-off"}'
+  -d '{"workflow":"<workflow-id>","provider":"<provider-id>","character":"mycharacter","prompt":"portrait of a woman in an open-helmet Iron Man suit getting ready to take-off"}'
 ```
 
+If you trained a LoRA, you can use it directly with `checkpoint` instead of `character`:
+
+```bash
+curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
+  -H "Content-Type: application/json" \
+  -d '{"workflow":"<workflow-id>","provider":"<provider-id>","checkpoint":"latest","prompt":"portrait of a woman, natural window light, sharp focus"}'
+```
+
+## Image-to-image and face-reference workflows
+
+Some workflows accept a source `image` and need a base `model` (SDXL checkpoint, not LoRA). Use `workflow_params` to override any workflow-specific defaults.
+
+### `sdxl_img2img` — same composition, restyled
+
+```bash
+curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "<workflow-id>",
+    "provider": "<provider-id>",
+    "image": "source.png",
+    "model": "cyberrealisticPony_v160.safetensors",
+    "prompt": "portrait, soft light",
+    "denoise": 0.5,
+    "width": 1024,
+    "height": 1024
+  }'
+```
+
+- `image` — filename from `/api/images/upload` or a Studio output path
+- `model` — base SDXL checkpoint filename on the provider
+- `denoise` — 0.25 preserves more of the source; 0.5–0.7 allows more change
+
+### `sdxl_faceid` — same face, new pose/scene
+
+```bash
+curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow": "<workflow-id>",
+    "provider": "<provider-id>",
+    "image": "source.png",
+    "model": "cyberrealisticPony_v160.safetensors",
+    "prompt": "woman leaning against a bar counter, warm ambient light, confident smile",
+    "width": 832,
+    "height": 1216,
+    "workflow_params": {
+      "faceid_weight": 1.0,
+      "faceid_v2_weight": 2.0,
+      "faceid_end_at": 1.0
+    }
+  }'
+```
+
+- `faceid_weight` — identity strength (0.8 default, 1.0+ for stronger likeness)
+- `faceid_v2_weight` — v2 adapter boost (2.0 gives strong face match)
+- `faceid_end_at` — when to stop enforcing identity (1.0 = full generation)
+- Best results when the reference is a clean headshot, not full body
+
+### `workflow_params` passthrough
+
+Any field declared in the workflow's `.meta.json` `params` can be passed through `workflow_params` to override defaults. This avoids needing API model changes for every new workflow knob.
+
 ## Text-to-video
+
+Required fields: `workflow`, `provider`, `prompt`. `mode` must be `"t2v"`. Use a workflow ID from `GET /api/workflows` and a provider ID from `GET /api/providers`.
 
 ```bash
 curl -sS -X POST "$NEMOFLIX_API_URL/api/video/generate" \
   -H "Content-Type: application/json" \
-  -d '{"mode":"t2v","prompt":"cinematic shot of a lone explorer walking across an alien desert","width":1280,"height":720,"length":121,"fps":16}'
+  -d '{"mode":"t2v","workflow":"<workflow-id>","provider":"<provider-id>","prompt":"cinematic shot of a lone explorer walking across an alien desert","width":1280,"height":720,"length":121,"fps":16}'
 ```
 
 ## Image-to-video
 
-Upload first, then reference the filename:
+Upload first, then reference the filename. Required fields: `workflow`, `provider`, `prompt`, `image`.
 
 ```bash
 curl -sS -X POST "$NEMOFLIX_API_URL/api/images/upload" -F "file=@/path/to/source.png"
+
 curl -sS -X POST "$NEMOFLIX_API_URL/api/video/generate" \
   -H "Content-Type: application/json" \
-  -d '{"mode":"i2v","image":"source.png","prompt":"subject walking through neon rain","width":1280,"height":720,"length":121,"fps":16}'
+  -d '{"mode":"i2v","workflow":"<workflow-id>","provider":"<provider-id>","image":"source.png","prompt":"subject walking through neon rain","width":640,"height":640,"length":81,"fps":16}'
 ```
 
 ## Track jobs
@@ -136,7 +219,7 @@ A **Project** is a script. The script breaks into **Scenes**. Each scene breaks 
 Projects, scenes, and shots use `characters` as an array of character ID strings:
 
 ```json
-{"characters":["atlas"]}
+{"characters":["mycharacter"]}
 ```
 
 Set the broad cast on the project. Override/narrow the cast on a scene or shot only when that beat needs a different set of characters. When rendering a project shot, the backend resolves characters in this order: shot `characters`, then scene `characters`, then project `characters`.
@@ -257,23 +340,23 @@ The response includes `render_id`. Poll `GET /api/projects/{project_id}/render` 
 
 Your human says: *"Put me in an Iron Man movie — suit-up, launch, rooftop landing, the whole thing."*
 
-You decide: this is a project because it asks for a sequence of movie beats. Cast `atlas`. Aspect `9:16`. ~30s. About 3 scenes, 1–3 shots each. Title: *Suit Up*.
+You decide: this is a project because it asks for a sequence of movie beats. Cast `mycharacter`. Aspect `9:16`. ~30s. About 3 scenes, 1–3 shots each. Title: *Suit Up*.
 
 You POST the project:
 
 ```json
 {
   "title": "Suit Up",
-  "description": "Atlas suits up in his workshop and steps out into the rain.",
+  "description": "A hero suits up in a workshop and steps out into the rain.",
   "aspect_ratio": "9:16",
   "duration_seconds": 30,
-  "characters": ["atlas"]
+  "characters": ["mycharacter"]
 }
 ```
 
 Then your scenes — `1: INT. WORKSHOP - NIGHT`, `2: INT. WORKSHOP - SUIT ASSEMBLY`, `3: EXT. CITY ROOFTOP - RAIN`.
 
-Then your shots — for scene 2: `shot 1: wide of Atlas on the assembly platform`, `shot 2: medium of chest plate locking in`, `shot 3: close on the helmet snapping shut, eyes glow blue`. Each gets an `image_prompt` and `motion_prompt`.
+Then your shots — for scene 2: `shot 1: wide of the hero on the assembly platform`, `shot 2: medium of chest plate locking in`, `shot 3: close on the helmet snapping shut, eyes glow blue`. Each gets an `image_prompt` and `motion_prompt`.
 
 Then you stop, point your human at the Projects page, and say something like *"I drafted Suit Up — three scenes, seven shots. Take a look. Want to change any of the beats before I start generating?"* Iterate. Only when they approve the outline do you start hitting `/generate-image`.
 
