@@ -901,8 +901,8 @@ async def _ensure_comfy_input_audio(audio: str, provider: str | None = None) -> 
     Uses upload_input_file (generic /upload/image path) since audio has no dedicated
     endpoint. Returns the input filename LoadAudio expects, or the original on miss.
     """
-    source = _OUTPUT_DIR / Path(audio).name
-    if not source.is_file():
+    source = _resolve_output_file(audio)
+    if source is None:
         return audio
     node = comfy_node_for_provider(provider)
     tmp_path = Path(tempfile.gettempdir()) / source.name
@@ -914,6 +914,26 @@ async def _ensure_comfy_input_audio(audio: str, provider: str | None = None) -> 
         tmp_path.unlink(missing_ok=True)
 
 
+def _resolve_output_file(name: str) -> Path | None:
+    """Resolve a caller-supplied output reference to a real file under _OUTPUT_DIR.
+
+    Callers pass paths like 'videos/clip.mp4' or 'clip.wav'. Try the relative
+    subpath first (the common case for anything in outputs/videos, outputs/images,
+    etc.), then fall back to the bare filename at the output root. Returns None on
+    miss. Path components are stripped to their parts to keep resolution inside
+    _OUTPUT_DIR (no traversal).
+    """
+    rel = Path(name)
+    candidates = []
+    if rel.parts:
+        candidates.append(_OUTPUT_DIR.joinpath(*[p for p in rel.parts if p not in ("..", "/")]))
+    candidates.append(_OUTPUT_DIR / rel.name)
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
 async def _ensure_comfy_input_video(video: str, provider: str | None = None) -> str:
     """Stage a driving-video file into the run node's ComfyUI input dir.
 
@@ -921,8 +941,8 @@ async def _ensure_comfy_input_video(video: str, provider: str | None = None) -> 
     path) since VHS_LoadVideo reads from the same input dir. Returns the input filename
     VHS_LoadVideo expects, or the original on miss.
     """
-    source = _OUTPUT_DIR / Path(video).name
-    if not source.is_file():
+    source = _resolve_output_file(video)
+    if source is None:
         return video
     node = comfy_node_for_provider(provider)
     tmp_path = Path(tempfile.gettempdir()) / source.name
@@ -1447,6 +1467,128 @@ async def _probe_duration(path: Path) -> float:
         return 5.0
 
 
+# Render master defaults. Shots are normalized to these before concat so clips
+# with mismatched resolution / fps / audio can be stitched into one clean movie.
+_RENDER_FPS = 25          # matches InfiniteTalk lip-sync output fps; avoids re-timing drift
+_RENDER_A_RATE = 48000    # audio sample rate for the master track
+_RENDER_A_LAYOUT = "stereo"
+
+
+def _render_dimensions(aspect_ratio: str | None, base: int = 720) -> tuple[int, int]:
+    """Derive an even-numbered master W×H from a project aspect ratio.
+
+    Defaults to a square master (our footage is square). ``base`` is the short
+    edge. Widescreen/portrait ratios scale the long edge off it.
+    """
+    ratio = (aspect_ratio or "1:1").strip()
+    try:
+        w_r, h_r = (float(x) for x in ratio.split(":", 1))
+        if w_r <= 0 or h_r <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        w_r, h_r = 1.0, 1.0
+    if w_r >= h_r:
+        h = base
+        w = round(base * (w_r / h_r))
+    else:
+        w = base
+        h = round(base * (h_r / w_r))
+    # x264 requires even dimensions
+    return (w - (w % 2), h - (h % 2))
+
+
+async def _has_audio(path: Path) -> bool:
+    """True if the file has at least one audio stream."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+        "stream=codec_type", "-of", "csv=p=0", str(path),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    return b"audio" in stdout
+
+
+def _drawtext_filter(subtitle_text: str) -> str:
+    """Build a bottom-centered drawtext filter for a subtitle line."""
+    import textwrap
+    wrapped = "\n".join(textwrap.wrap(subtitle_text, width=32))
+    safe_text = (
+        wrapped
+        .replace("\\", "\\\\")
+        .replace("'", "'")
+        .replace(":", "\\:")
+        .replace("%", "\\%")
+        .replace("\n", "\\n")
+    )
+    return (
+        f"drawtext=text='{safe_text}'"
+        f":fontsize=26:fontcolor=white:borderw=2:bordercolor=black"
+        f":x=(w-text_w)/2:y=h-line_h*{wrapped.count(chr(10))+1}-50"
+    )
+
+
+async def _normalize_clip(
+    dst: Path,
+    target_w: int,
+    target_h: int,
+    *,
+    video_src: Path | None = None,
+    image_src: Path | None = None,
+    duration: float = 5.0,
+    subtitle_text: str = "",
+) -> tuple[bool, str]:
+    """Re-encode one shot to the master format so clips can be concatenated.
+
+    Normalizes video (scale+pad to target, setsar=1, fps, yuv420p) and audio
+    (48k stereo). Clips with no audio track — image stills, silent i2v — get a
+    synthesized silent track so every segment has matching streams. Returns
+    (ok, stderr_tail).
+    """
+    inputs: list[str] = []
+    if image_src is not None:
+        inputs += ["-loop", "1", "-t", str(duration), "-i", str(image_src)]
+        source_has_audio = False
+    else:
+        inputs += ["-i", str(video_src)]
+        source_has_audio = await _has_audio(video_src)  # type: ignore[arg-type]
+
+    vf = (
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+        f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2,"
+        f"setsar=1,fps={_RENDER_FPS},format=yuv420p"
+    )
+    if subtitle_text:
+        vf += "," + _drawtext_filter(subtitle_text)
+
+    cmd = ["ffmpeg", "-y", *inputs]
+    if source_has_audio:
+        filter_complex = (
+            f"[0:v]{vf}[v];"
+            f"[0:a]aformat=sample_rates={_RENDER_A_RATE}:channel_layouts={_RENDER_A_LAYOUT}[a]"
+        )
+        cmd += ["-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]"]
+    else:
+        # synthesize a silent track; -shortest clamps it to the video length
+        cmd += [
+            "-f", "lavfi", "-i",
+            f"anullsrc=channel_layout={_RENDER_A_LAYOUT}:sample_rate={_RENDER_A_RATE}",
+            "-filter_complex", f"[0:v]{vf}[v]",
+            "-map", "[v]", "-map", "1:a", "-shortest",
+        ]
+    cmd += [
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "160k", "-ar", str(_RENDER_A_RATE),
+        str(dst),
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        return False, stderr.decode(errors="replace")[-400:]
+    return True, ""
+
+
 async def _run_render(project_id: str, shots: list[dict[str, Any]], render_id: str) -> None:
     # Create the render record in the database
     render_number = await next_render_number(project_id)
@@ -1460,90 +1602,54 @@ async def _run_render(project_id: str, shots: list[dict[str, Any]], render_id: s
     out_path = (_OUTPUT_DIR / f"projects/{project_id}/render-{render_id}.mp4").resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    clip_pairs: list[tuple[Path, dict[str, Any]]] = []
-    for shot in shots:
+    # Master format for this render, derived from the project aspect ratio.
+    project = await get_project(project_id)
+    target_w, target_h = _render_dimensions((project or {}).get("aspect_ratio"))
+
+    # ── Normalize every shot to the master format ──
+    # Mismatched resolution / fps / audio-sample-rate / audio-presence across
+    # shots make a stream-copy concat break. Re-encode each shot to one uniform
+    # format (video + audio, silent track synthesized where missing) so the
+    # concat below is safe. Subtitles are burned in during this same pass.
+    output_clips: list[Path] = []
+    for idx, shot in enumerate(shots, start=1):
+        subtitle_text = (shot.get("subtitle") or "").strip()
+        norm_path = _OUTPUT_DIR / f"projects/{project_id}/render-{render_id}-shot{idx:02d}.mp4"
         video_file = shot.get("video_file")
         image_file = shot.get("image_file")
+
         if video_file:
-            p = (_OUTPUT_DIR / video_file).resolve()
-            if not p.is_file():
+            src = (_OUTPUT_DIR / video_file).resolve()
+            if not src.is_file():
                 await _set_render_status(project_id, "failed", f"Missing clip for shot {shot['id']}: {video_file}")
                 return
-            clip_pairs.append((p, shot))
+            ok, err = await _normalize_clip(
+                norm_path, target_w, target_h,
+                video_src=src, subtitle_text=subtitle_text,
+            )
         elif image_file:
             img_p = (_OUTPUT_DIR / image_file).resolve()
             if not img_p.is_file():
                 continue  # skip shots with missing image
-            duration = float(shot.get("duration_seconds") or 5)
-            still_path = _OUTPUT_DIR / f"projects/{project_id}/render-{render_id}-still-{shot['id']}.mp4"
-            still_cmd = [
-                "ffmpeg", "-y",
-                "-loop", "1", "-i", str(img_p),
-                "-t", str(duration),
-                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                "-pix_fmt", "yuv420p",
-                str(still_path),
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *still_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            ok, err = await _normalize_clip(
+                norm_path, target_w, target_h,
+                image_src=img_p, duration=float(shot.get("duration_seconds") or 5),
+                subtitle_text=subtitle_text,
             )
-            await proc.communicate()
-            if proc.returncode != 0:
-                await _set_render_status(project_id, "failed", f"Failed to freeze image for shot {shot['id']}")
-                return
-            clip_pairs.append((still_path, shot))
-        # no media - skip
+        else:
+            continue  # no media - skip
 
-    if not clip_pairs:
+        if not ok:
+            await _set_render_status(project_id, "failed", f"normalize failed shot {idx}: {err}")
+            return
+        output_clips.append(norm_path)
+
+    if not output_clips:
         await _set_render_status(project_id, "failed", "No renderable clips found")
         return
 
-    # ── Burn subtitle text into each clip ──
-    output_clips: list[Path] = []
-    for idx, (clip_path, shot) in enumerate(clip_pairs, start=1):
-        subtitle_text = (shot.get("subtitle") or "").strip()
-        if subtitle_text:
-            import textwrap
-            wrapped = "\n".join(textwrap.wrap(subtitle_text, width=32))
-            safe_text = (
-                wrapped
-                .replace("\\", "\\\\")
-                .replace("'", "'")
-                .replace(":", "\\:")
-                .replace("%", "\\%")
-                .replace("\n", "\\n")
-            )
-            drawtext = (
-                f"drawtext=text='{safe_text}'"
-                f":fontsize=26:fontcolor=white:borderw=2:bordercolor=black"
-                f":x=(w-text_w)/2:y=h-line_h*{wrapped.count(chr(10))+1}-50"
-            )
-            sub_path = _OUTPUT_DIR / f"projects/{project_id}/render-{render_id}-shot{idx:02d}-sub.mp4"
-            sub_cmd = [
-                "ffmpeg", "-y",
-                "-i", str(clip_path),
-                "-vf", drawtext,
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                "-c:a", "copy",
-                str(sub_path),
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *sub_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                await _set_render_status(project_id, "failed", f"subtitle burn failed shot {idx}: {stderr.decode(errors='replace')[-400:]}")
-                return
-            output_clips.append(sub_path)
-        else:
-            output_clips.append(clip_path)
-
     # ── Concatenate clips ──
+    # Safe stream-copy concat: all clips are now uniform after normalization.
     concat_tmp = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, prefix="nemo_concat_")
     try:
         for p in output_clips:
@@ -1806,6 +1912,23 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
         if not body.video:
             raise HTTPException(status_code=400, detail="video is required for v2v mode. Upload the driving motion clip first, then pass its filename.")
         workflow_params["video"] = await _ensure_comfy_input_video(body.video, body.provider)
+        # Output length (num_frames for the audio embeds) must cover the whole
+        # driving clip, or the motion + lip-sync get truncated. The graph now
+        # loads the full clip (frame_load_cap=0) and windows across it, matching
+        # Kijai's reference — so when the caller doesn't pin length, derive it
+        # from the driving clip's duration at the target fps.
+        if body.length is None:
+            _src = _resolve_output_file(body.video)
+            if _src is not None:
+                _fps = body.fps or 25
+                _dur = await _probe_duration(_src)
+                if _dur > 0:
+                    _frames = max(1, round(_dur * _fps))
+                    _CAP = 201  # ~8s at 25fps — bound RAM on 12GB nodes
+                    if _frames > _CAP:
+                        print(f"[v2v] auto-length {_frames} capped to {_CAP} frames", flush=True)
+                        _frames = _CAP
+                    workflow_params["length"] = _frames
 
     # Audio-driven workflows (InfiniteTalk lip-sync): stage the wav to the run node the
     # same way the image is staged, then hand LoadAudio the resolved input filename.

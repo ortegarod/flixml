@@ -64,6 +64,8 @@ export interface JobItem {
   prompt_id: string;
   status: "pending" | "running" | "completed" | "failed" | string;
   mode?: string;
+  output_type?: string;
+  job_type?: string;
   prompt?: string;
   created_at?: string;
   queue_position?: number | null;
@@ -71,9 +73,22 @@ export interface JobItem {
   step_value?: number;
   step_max?: number;
   nodes_finished?: number;
+  nodes_running?: number;
   nodes_total?: number;
   progress_percent?: number | null;
   error?: string;
+  // Job configuration (flattened from job metadata by the API) — what's being run.
+  workflow?: string;
+  provider?: string;
+  seed?: number | null;
+  width?: number;
+  height?: number;
+  length?: number | null;
+  steps?: number | null;
+  filename_prefix?: string;
+  image?: string | null;
+  video?: string | null;
+  audio?: string | null;
 }
 
 export interface Project {

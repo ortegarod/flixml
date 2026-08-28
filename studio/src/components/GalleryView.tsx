@@ -215,8 +215,11 @@ export function StudioView({
   const videoCount = counts.videos;
 
   const isJobVideo = (job: JobItem) =>
-    job.mode === "video" ||
-    (job.prompt_id && (job.prompt_id.startsWith("wan22") || job.prompt_id.includes("video")));
+    job.output_type === "video" ||
+    (job.job_type ? job.job_type.includes("video") : false) ||
+    job.mode === "i2v" ||
+    job.mode === "t2v" ||
+    job.mode === "flf2v";
 
   const isJobImage = (job: JobItem) => !isJobVideo(job);
 
@@ -315,9 +318,9 @@ export function StudioView({
         <ArrowRight className="w-5 h-5 text-violet-400 group-hover:translate-x-1 transition flex-shrink-0" />
       </button>
 
-      <section className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-3 flex flex-col gap-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex gap-2">
+      <section className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-2.5 flex flex-wrap items-center gap-2">
+        {/* Filter tabs */}
+        <div className="flex gap-1">
           {[
             ["all", "All", SlidersHorizontal],
             ["images", "Images", Image],
@@ -326,111 +329,120 @@ export function StudioView({
             <button
               key={id as string}
               onClick={() => onFilterChange(id as Filter)}
-              className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition ${
+              title={label as string}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
                 filter === id ? "bg-rose-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
-              {label as string}
+              <span className="hidden sm:inline">{label as string}</span>
             </button>
           ))}
-          </div>
-          <label className="relative w-full lg:w-80">
-          <Search className="w-4 h-4 text-gray-600 absolute left-3 top-1/2 -translate-y-1/2" />
+        </div>
+
+        {/* Character filter */}
+        <select
+          value={characterFilter}
+          onChange={(event) => onCharacterFilterChange(event.target.value)}
+          className="rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-300 focus:outline-none focus:border-rose-600 min-w-[120px]"
+        >
+          <option value="">All characters</option>
+          <option value="__unassigned__">Unassigned</option>
+          {characters.map((character) => (
+            <option key={character.id} value={character.id}>{character.name}</option>
+          ))}
+        </select>
+
+        {/* Tag filter (grows) */}
+        <input
+          value={tagFilter}
+          onChange={(event) => onTagFilterChange(event.target.value)}
+          placeholder="Filter by tag…"
+          title="Filter by tag, e.g. keeper, portrait, reference"
+          className="flex-1 min-w-[120px] rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
+        />
+
+        {/* Search (grows) */}
+        <label className="relative flex-1 min-w-[140px]">
+          <Search className="w-4 h-4 text-gray-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search studio"
-            className="w-full rounded-xl bg-black/40 border border-gray-800 pl-9 pr-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
+            className="w-full rounded-lg bg-black/40 border border-gray-800 pl-8 pr-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
           />
-          </label>
-        </div>
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[220px_1fr_auto]">
-          <select
-            value={characterFilter}
-            onChange={(event) => onCharacterFilterChange(event.target.value)}
-            className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-rose-600"
-          >
-            <option value="">All characters</option>
-            <option value="__unassigned__">Unassigned</option>
-            {characters.map((character) => (
-              <option key={character.id} value={character.id}>{character.name}</option>
-            ))}
-          </select>
-          <label className="relative">
-            <input
-              value={tagFilter}
-              onChange={(event) => onTagFilterChange(event.target.value)}
-              placeholder="Filter by tag, e.g. keeper, portrait, reference"
-              className="w-full rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
-            />
-          </label>
-          <button
-            onClick={() => onTrainingDatasetOnlyChange(!trainingDatasetOnly)}
-            className={`rounded-xl px-3 py-2 text-xs font-medium transition ${trainingDatasetOnly ? "bg-fuchsia-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
-            title="Show only images marked for LoRA training dataset"
-          >
-            Dataset only
-          </button>
-        </div>
-      </section>
+        </label>
 
-      <section className="rounded-2xl border border-gray-800/60 bg-gray-950/40 p-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setImportOpen((value) => !value)}
-            className={`rounded-xl px-3 py-2 text-xs font-medium transition ${importOpen ? "bg-violet-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
-          >
-            <Upload className="inline mr-1.5 h-3.5 w-3.5" />
-            Import
-          </button>
-          <button
-            onClick={() => { setSelectionMode((value) => !value); if (selectionMode) setSelectedKeys(new Set()); }}
-            className={`rounded-xl px-3 py-2 text-xs font-medium transition ${selectionMode ? "bg-rose-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
-          >
-            {selectionMode ? "Selecting" : "Select"}
-          </button>
-          {selectionMode && (
-            <>
-              <button onClick={selectVisible} className="rounded-xl bg-gray-900 px-3 py-2 text-xs text-gray-300 hover:text-white transition">Select visible</button>
-              <button onClick={clearSelection} className="rounded-xl bg-gray-900 px-3 py-2 text-xs text-gray-500 hover:text-white transition">Clear</button>
-              <span className="text-xs text-gray-500">{selectedItems.length} selected</span>
-            </>
-          )}
+        {/* Dataset only */}
+        <button
+          onClick={() => onTrainingDatasetOnlyChange(!trainingDatasetOnly)}
+          className={`rounded-lg px-2.5 py-2 text-xs font-medium transition ${trainingDatasetOnly ? "bg-fuchsia-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
+          title="Show only images marked for LoRA training dataset"
+        >
+          Dataset
+        </button>
+
+        {/* Import */}
+        <button
+          onClick={() => setImportOpen((value) => !value)}
+          title="Import media"
+          className={`rounded-lg px-2.5 py-2 text-xs font-medium transition ${importOpen ? "bg-violet-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
+        >
+          <Upload className="inline h-3.5 w-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">Import</span>
+        </button>
+
+        {/* Select */}
+        <button
+          onClick={() => { setSelectionMode((value) => !value); if (selectionMode) setSelectedKeys(new Set()); }}
+          className={`rounded-lg px-2.5 py-2 text-xs font-medium transition ${selectionMode ? "bg-rose-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
+        >
+          {selectionMode ? "Selecting" : "Select"}
+        </button>
+
+        {/* View density */}
+        <div className="flex rounded-lg border border-gray-800 bg-black/30 p-0.5">
+          {(["compact", "comfortable", "large"] as ViewSize[]).map((size) => (
+            <button
+              key={size}
+              onClick={() => setViewSize(size)}
+              title={size}
+              className={`rounded-md px-2 py-1 text-xs capitalize transition ${viewSize === size ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
+            >
+              <span className="sm:hidden">{size.charAt(0).toUpperCase()}</span>
+              <span className="hidden sm:inline">{size}</span>
+            </button>
+          ))}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {selectionMode && selectedItems.length > 0 && (
-            <>
-              <select
-                disabled={bulkBusy}
-                defaultValue=""
-                onChange={(event) => { const value = event.target.value; event.target.value = ""; bulkAssignCharacter(value === "__none__" ? "" : value); }}
-                className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-xs text-gray-300 focus:outline-none focus:border-rose-600 disabled:opacity-50"
-              >
-                <option value="">Assign character…</option>
-                <option value="__none__">No character</option>
-                {characters.map((character) => (
-                  <option key={character.id} value={character.id}>{character.name}</option>
-                ))}
-              </select>
-              <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(true)} className="rounded-xl bg-fuchsia-600 px-3 py-2 text-xs font-medium text-white hover:bg-fuchsia-500 disabled:bg-gray-800 disabled:text-gray-500 transition">Include in dataset</button>
-              <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(false)} className="rounded-xl bg-gray-900 px-3 py-2 text-xs text-gray-300 hover:text-white disabled:opacity-50 transition">Remove from dataset</button>
-              <button disabled={bulkBusy} onClick={bulkAddTags} className="rounded-xl bg-gray-900 px-3 py-2 text-xs text-gray-300 hover:text-white disabled:opacity-50 transition">Add tags</button>
-              <button disabled={bulkBusy} onClick={bulkDeleteSelected} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-medium text-white hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-500 transition">Delete selected</button>
-            </>
-          )}
-          <div className="flex rounded-xl border border-gray-800 bg-black/30 p-1">
-            {(["compact", "comfortable", "large"] as ViewSize[]).map((size) => (
-              <button
-                key={size}
-                onClick={() => setViewSize(size)}
-                className={`rounded-lg px-3 py-1.5 text-xs capitalize transition ${viewSize === size ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
-              >
-                {size}
-              </button>
-            ))}
+
+        {/* Selection-mode actions — own wrapped row when active */}
+        {selectionMode && (
+          <div className="w-full flex flex-wrap items-center gap-2 border-t border-gray-800/60 pt-2 mt-0.5">
+            <button onClick={selectVisible} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 hover:text-white transition">Select visible</button>
+            <button onClick={clearSelection} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-500 hover:text-white transition">Clear</button>
+            <span className="text-xs text-gray-500">{selectedItems.length} selected</span>
+            {selectedItems.length > 0 && (
+              <>
+                <select
+                  disabled={bulkBusy}
+                  defaultValue=""
+                  onChange={(event) => { const value = event.target.value; event.target.value = ""; bulkAssignCharacter(value === "__none__" ? "" : value); }}
+                  className="rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-300 focus:outline-none focus:border-rose-600 disabled:opacity-50"
+                >
+                  <option value="">Assign character…</option>
+                  <option value="__none__">No character</option>
+                  {characters.map((character) => (
+                    <option key={character.id} value={character.id}>{character.name}</option>
+                  ))}
+                </select>
+                <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(true)} className="rounded-lg bg-fuchsia-600 px-2.5 py-2 text-xs font-medium text-white hover:bg-fuchsia-500 disabled:bg-gray-800 disabled:text-gray-500 transition">Include in dataset</button>
+                <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(false)} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 hover:text-white disabled:opacity-50 transition">Remove from dataset</button>
+                <button disabled={bulkBusy} onClick={bulkAddTags} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 hover:text-white disabled:opacity-50 transition">Add tags</button>
+                <button disabled={bulkBusy} onClick={bulkDeleteSelected} className="rounded-lg bg-red-600 px-2.5 py-2 text-xs font-medium text-white hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-500 transition">Delete selected</button>
+              </>
+            )}
           </div>
-        </div>
+        )}
       </section>
 
       {importOpen && (

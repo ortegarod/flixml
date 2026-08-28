@@ -190,12 +190,12 @@ function Shell() {
             className="flex items-center gap-3 min-w-0 hover:opacity-80 transition"
             title="Studio home"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 via-fuchsia-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/20 ring-1 ring-white/10">
-              <Sparkles className="w-4 h-4 text-white" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 via-brand to-amber-600 flex items-center justify-center shadow-lg shadow-brand/25 ring-1 ring-white/10">
+              <Sparkles className="w-4 h-4 text-black" />
             </div>
             <div className="min-w-0 hidden sm:block">
-              <h1 className="text-sm font-bold tracking-tight">Nemoflix Studio</h1>
-              <p className="text-[10px] text-rose-400/60 tracking-wide">AMD MI300X</p>
+              <h1 className="font-heading text-base font-bold tracking-tight leading-none">Nemoflix<span className="text-brand"> Studio</span></h1>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">Cinematic AI Studio</p>
             </div>
           </button>
           <Link to="/" className="hidden sm:inline-flex items-center text-[11px] text-gray-600 hover:text-gray-400 transition ml-1" title="Back to home">

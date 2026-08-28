@@ -4,7 +4,18 @@
 @tailwind utilities;
 
 body {
-  @apply bg-black text-white antialiased;
+  @apply text-white antialiased;
+  font-family: var(--font-sans);
+  /* Ambient cinematic depth: warm key-light glow over true black */
+  background-color: #08080a;
+  background-image:
+    radial-gradient(120% 80% at 15% -10%, oklch(0.79 0.135 78 / 0.07), transparent 55%),
+    radial-gradient(90% 70% at 100% 0%, oklch(0.55 0.12 265 / 0.06), transparent 50%);
+  background-attachment: fixed;
+}
+
+h1, h2, h3, .font-heading {
+  font-family: var(--font-heading);
 }
 
 /* Slim, dark-mode scrollbars — replaces the chunky default */
@@ -30,7 +41,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(244, 63, 94, 0.4);
+  background: oklch(0.79 0.135 78 / 0.45);
   background-clip: content-box;
 }
 
@@ -40,10 +51,15 @@ body {
 
 @layer base {
   .theme {
-    --font-heading: var(--font-sans);
+    --font-heading: 'Space Grotesk', 'Geist Variable', sans-serif;
     --font-sans: 'Geist Variable', sans-serif;
   }
   :root {
+    --font-heading: 'Space Grotesk', 'Geist Variable', sans-serif;
+    --font-sans: 'Geist Variable', system-ui, sans-serif;
+    /* Signature accent — molten amber-gold (celluloid, not "another purple AI app") */
+    --brand: oklch(0.79 0.135 78);
+    --brand-foreground: oklch(0.16 0.01 60);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -78,37 +94,39 @@ body {
     --sidebar-ring: oklch(0.708 0 0);
   }
   .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
+    /* True cinema black with a faint warm lift on raised surfaces */
+    --background: oklch(0.115 0.004 60);
+    --foreground: oklch(0.97 0.005 80);
+    --card: oklch(0.165 0.006 65);
+    --card-foreground: oklch(0.97 0.005 80);
+    --popover: oklch(0.165 0.006 65);
+    --popover-foreground: oklch(0.97 0.005 80);
     --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --primary-foreground: oklch(0.18 0 0);
+    --secondary: oklch(0.235 0.006 65);
+    --secondary-foreground: oklch(0.97 0.005 80);
+    --muted: oklch(0.235 0.006 65);
+    --muted-foreground: oklch(0.7 0.01 75);
+    /* Accent is the brand gold */
+    --accent: oklch(0.79 0.135 78);
+    --accent-foreground: oklch(0.16 0.01 60);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
+    --border: oklch(1 0 0 / 9%);
+    --input: oklch(1 0 0 / 14%);
+    --ring: oklch(0.79 0.135 78);
+    --chart-1: oklch(0.79 0.135 78);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar: oklch(0.145 0.005 62);
+    --sidebar-foreground: oklch(0.97 0.005 80);
+    --sidebar-primary: oklch(0.79 0.135 78);
+    --sidebar-primary-foreground: oklch(0.16 0.01 60);
+    --sidebar-accent: oklch(0.235 0.006 65);
+    --sidebar-accent-foreground: oklch(0.97 0.005 80);
+    --sidebar-border: oklch(1 0 0 / 9%);
+    --sidebar-ring: oklch(0.79 0.135 78);
   }
   * {
     border-color: hsl(var(--border));
