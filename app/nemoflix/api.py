@@ -289,8 +289,9 @@ class ShotRecord(BaseModel):
 
 
 class VideoGenerateRequest(BaseModel):
-    mode: Literal["t2v", "i2v"] = Field(
+    mode: Literal["t2v", "i2v", "v2v"] = Field(
         default="i2v",
+        description="t2v/i2v/v2v. v2v (e.g. InfiniteTalk motion+lip-sync) takes a driving video instead of a still image.",
         json_schema_extra={"examples": ["i2v"]},
     )
     workflow: str = Field(
@@ -310,30 +311,41 @@ class VideoGenerateRequest(BaseModel):
         description="ComfyUI input filename for image-to-video (i2v).",
         json_schema_extra={"examples": ["projects/prj-xxx/scene-01-sht-xxx-image-v01_0001.png"]},
     )
+    audio: str | None = Field(
+        default=None,
+        description="ComfyUI input filename for audio-driven workflows (e.g. InfiniteTalk lip-sync). Staged to the run node like image.",
+        json_schema_extra={"examples": ["voice/line-01.wav"]},
+    )
+    video: str | None = Field(
+        default=None,
+        description="ComfyUI input filename for video-driven workflows (e.g. InfiniteTalk v2v). Driving motion clip, staged to the run node like image/audio.",
+        json_schema_extra={"examples": ["videos/motion-01.mp4"]},
+    )
     negative: str | None = Field(default=None, json_schema_extra={"examples": ["blurry, low quality"]})
-    width: int = 640
-    height: int = 640
-    length: int = Field(default=81, description="Frame count, not seconds")
-    fps: int = 16
+    # All generation knobs below default to None → the workflow's meta.json default applies.
+    # The workflow meta.json is the SINGLE SOURCE OF TRUTH for per-workflow defaults — do not
+    # reintroduce hardcoded numbers here. Only values the caller explicitly sets override the meta.
+    width: int | None = None
+    height: int | None = None
+    length: int | None = Field(default=None, description="Frame count, not seconds. None → workflow meta default.")
+    fps: int | None = None
     seed: int | None = None
     filename_prefix: str | None = Field(default=None, json_schema_extra={"examples": ["videos/my_clip"]})
-    steps_high: int = 2
-    steps_low: int = 2
-    cfg_high: float = 1.0
-    cfg_low: float = 1.0
-    shift: float = 5.0
-    sampler: str = "euler"
-    scheduler: str = "simple"
-
-    # I2V model overrides. Defaults target the official Comfy-Org Wan 2.2 I2V fp8 stack.
-    high_model: str = "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
-    low_model: str = "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
-    vae: str = "wan_2.1_vae.safetensors"
-    clip: str = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
-    high_lora: str | None = None
-    low_lora: str | None = None
-    high_lora_strength: float = 1.0
-    low_lora_strength: float = 1.0
+    steps_high: int | None = None
+    steps_low: int | None = None
+    cfg_high: float | None = None
+    cfg_low: float | None = None
+    shift: float | None = None
+    sampler: str | None = None
+    scheduler: str | None = None
+    workflow_params: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Passthrough for workflow-specific params (e.g. high_lora, low_lora, "
+            "high_lora_strength). Overrides built-in defaults and workflow meta. "
+            "Set a Lightning LoRA strength to 0 to restore full motion at the cost of speed."
+        ),
+    )
 
     provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-pc"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
@@ -555,6 +567,16 @@ def comfy_for_role(role: str) -> tuple[ComfyClient, ComfyNode]:
     return ComfyClient(node.comfyui.normalized_url, settings.request_timeout_seconds), node
 
 
+def comfy_node_for_provider(provider: str | None) -> ComfyNode | None:
+    """Resolve the ComfyUI node a provider maps to (provider id is `local-<node.id>`)."""
+    if not provider:
+        return None
+    return next(
+        (n for n in get_settings().comfy_nodes() if provider in (n.id, f"local-{n.id}")),
+        None,
+    )
+
+
 _WS_TASK: asyncio.Task | None = None
 _SSE_CLIENTS: set[asyncio.Queue] = set()
 
@@ -645,8 +667,10 @@ async def _comfy_ws_bridge_for_node(node: ComfyNode) -> None:
                     elif msg_type == "execution_success" and isinstance(prompt_id, str):
                         await update_job_metadata(prompt_id, {"progress_percent": 100})
                         try:
-                            history = await comfy().get(f"/history/{prompt_id}")
-                            outputs = _extract_outputs(history, comfy())
+                            # Query history from the node this bridge is bound to, not the
+                            # default node — the job ran here, so its outputs live here.
+                            history = await comfy(node).get(f"/history/{prompt_id}")
+                            outputs = _extract_outputs(history, comfy(node))
                             persisted = await _persist_outputs(prompt_id, outputs)
                         except Exception:
                             persisted = False
@@ -778,6 +802,10 @@ async def _sync_media_catalog() -> None:
         rel = path.relative_to(_OUTPUT_DIR).as_posix()
         if rel.startswith("projects/") and "render-" in rel:
             continue
+        # Skip hidden dirs (e.g. .thumbs/ poster cache) — those are internal
+        # artifacts, not gallery media, and must never appear as catalog items.
+        if any(part.startswith(".") for part in Path(rel).parts):
+            continue
         try:
             stat = path.stat()
             width, height = _read_dimensions(path)
@@ -851,15 +879,57 @@ def _character_reference_image(binding: CharacterBinding, record: dict[str, Any]
     return images[0] if images else None
 
 
-async def _ensure_comfy_input_image(image: str) -> str:
-    source = (_OUTPUT_DIR / image.lstrip("/")).resolve()
-    if not str(source).startswith(str(_OUTPUT_DIR.resolve())) or not source.is_file():
+async def _ensure_comfy_input_image(image: str, provider: str | None = None) -> str:
+    source = _OUTPUT_DIR / Path(image).name
+    if not source.is_file():
         return image
+    # Upload to the node that will run the job, not the default node. Otherwise
+    # the image lands on the wrong machine when image and video run on separate nodes.
+    node = comfy_node_for_provider(provider)
     tmp_path = Path(tempfile.gettempdir()) / source.name
     shutil.copy2(source, tmp_path)
     try:
-        result = await comfy().upload_image(tmp_path)
+        result = await comfy(node).upload_image(tmp_path)
         return result.get("name") or image
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+async def _ensure_comfy_input_audio(audio: str, provider: str | None = None) -> str:
+    """Stage an audio file into the run node's ComfyUI input dir (mirror of image staging).
+
+    Uses upload_input_file (generic /upload/image path) since audio has no dedicated
+    endpoint. Returns the input filename LoadAudio expects, or the original on miss.
+    """
+    source = _OUTPUT_DIR / Path(audio).name
+    if not source.is_file():
+        return audio
+    node = comfy_node_for_provider(provider)
+    tmp_path = Path(tempfile.gettempdir()) / source.name
+    shutil.copy2(source, tmp_path)
+    try:
+        result = await comfy(node).upload_input_file(tmp_path)
+        return result.get("name") or audio
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+async def _ensure_comfy_input_video(video: str, provider: str | None = None) -> str:
+    """Stage a driving-video file into the run node's ComfyUI input dir.
+
+    Mirror of _ensure_comfy_input_audio. Uses upload_input_file (generic /upload/image
+    path) since VHS_LoadVideo reads from the same input dir. Returns the input filename
+    VHS_LoadVideo expects, or the original on miss.
+    """
+    source = _OUTPUT_DIR / Path(video).name
+    if not source.is_file():
+        return video
+    node = comfy_node_for_provider(provider)
+    tmp_path = Path(tempfile.gettempdir()) / source.name
+    shutil.copy2(source, tmp_path)
+    try:
+        result = await comfy(node).upload_input_file(tmp_path)
+        return result.get("name") or video
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -971,7 +1041,7 @@ async def character_media(character_id: str, offset: int = 0, limit: int = 60) -
             "height": row.get("height", 0),
             "mtime": mtime,
             "url": f"/media/{filename}",
-            "thumb": f"/media/{filename}",
+            "thumb": f"/api/thumb/{filename}",
             "prompt": row.get("prompt"),
             "prompt_id": row.get("prompt_id"),
             "character_ids": row.get("character_ids") or [],
@@ -1271,7 +1341,7 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
         image = _character_reference_image(bindings[0], records[0])
     if not image:
         raise HTTPException(status_code=400, detail="Shot image_file or character reference image is required")
-    comfy_image = await _ensure_comfy_input_image(image)
+    comfy_image = await _ensure_comfy_input_image(image, body.provider)
 
     project = await get_project(project_id)
     width, height = _wan_resolution(project.get("aspect_ratio") if project else None)
@@ -1676,24 +1746,28 @@ async def comfy_get(path: str) -> Any:
 
 @app.post("/api/images/upload")
 async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
-    """Upload an image to the local ComfyUI input folder so workflows can reference it."""
+    """Persist an uploaded image into the output dir so any workflow can reference it.
+
+    Deliberately does NOT push to a ComfyUI node here. Node placement is decided at
+    generate time by `_ensure_comfy_input_image`, which ships the file to the exact
+    node running the job. Uploading to a node up front only works when image and job
+    share a node — it silently breaks multi-node setups (e.g. i2v on a separate GPU).
+    Landing the file in the output dir makes uploads behave like any gallery image.
+    """
     suffix = Path(file.filename or "upload.png").suffix or ".png"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp_path = Path(tmp.name)
-        tmp.write(await file.read())
-    try:
-        result = await comfy().upload_image(tmp_path)
-        return {"ok": True, "comfy": result, "image": result.get("name")}
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    name = f"upload_{uuid.uuid4().hex}{suffix}"
+    target = _OUTPUT_DIR / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(await file.read())
+    return {"ok": True, "image": name}
 
 
 @app.post("/api/video/generate", response_model=VideoGenerateResponse)
 async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
-    """Submit a single video generation job (t2v or i2v)."""
+    """Submit a single video generation job (t2v, i2v, or v2v)."""
     # Character resolution only supplies a fallback reference image for i2v.
     # Wan video takes identity from the image, so character triggers and character LoRAs
-    # are not injected here - pass body.high_lora/body.low_lora explicitly to override.
+    # are not injected here. Model/LoRA names come from the workflow meta (override via a local/ meta).
     resolved = await _resolve_characters(body.character, body.characters)
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
@@ -1703,12 +1777,8 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
     if body.mode == "i2v" and not image and resolved:
         image = _character_reference_image(bindings[0], character_records[0])
     if image:
-        image = await _ensure_comfy_input_image(image)
+        image = await _ensure_comfy_input_image(image, body.provider)
 
-    high_lora = body.high_lora
-    low_lora = body.low_lora
-    high_lora_strength = body.high_lora_strength
-    low_lora_strength = body.low_lora_strength
     filename_prefix = _resolve_filename_prefix(body.filename_prefix, "videos")
 
     if body.mode == "i2v" and not image:
@@ -1716,33 +1786,36 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
 
     service = GenerationService()
 
-    workflow_params = {
-        "length": body.length,
-        "fps": body.fps,
-        "steps_high": body.steps_high,
-        "steps_low": body.steps_low,
-        "cfg_high": body.cfg_high,
-        "cfg_low": body.cfg_low,
-        "shift": body.shift,
-        "sampler": body.sampler,
-        "scheduler": body.scheduler,
-    }
+    # Only forward knobs the caller explicitly set. Anything left None falls through to the
+    # workflow meta.json default (the single source of truth) — see WorkflowRegistry.build_workflow.
+    workflow_params: dict[str, Any] = {}
+    for _key in ("length", "fps", "steps_high", "steps_low", "cfg_high", "cfg_low", "shift", "sampler", "scheduler"):
+        _val = getattr(body, _key)
+        if _val is not None:
+            workflow_params[_key] = _val
     if body.negative is not None:
         workflow_params["negative"] = body.negative
 
     workflow_name = body.workflow
     if body.mode == "i2v":
-        workflow_params.update({
-            "image": image,
-            "high_model": body.high_model,
-            "low_model": body.low_model,
-            "vae": body.vae,
-            "clip": body.clip,
-            "high_lora": high_lora,
-            "low_lora": low_lora,
-            "high_lora_strength": high_lora_strength,
-            "low_lora_strength": low_lora_strength,
-        })
+        workflow_params["image"] = image
+
+    # Video-driven workflows (InfiniteTalk v2v: motion + lip-sync): stage the driving clip
+    # to the run node the same way the image is staged, then hand VHS_LoadVideo the filename.
+    if body.mode == "v2v":
+        if not body.video:
+            raise HTTPException(status_code=400, detail="video is required for v2v mode. Upload the driving motion clip first, then pass its filename.")
+        workflow_params["video"] = await _ensure_comfy_input_video(body.video, body.provider)
+
+    # Audio-driven workflows (InfiniteTalk lip-sync): stage the wav to the run node the
+    # same way the image is staged, then hand LoadAudio the resolved input filename.
+    if body.audio:
+        workflow_params["audio"] = await _ensure_comfy_input_audio(body.audio, body.provider)
+
+    # Caller passthrough — overrides built-ins and workflow meta. Lets you swap or
+    # neutralize workflow LoRAs (e.g. Lightning speed LoRA) per request without a new workflow.
+    if body.workflow_params is not None:
+        workflow_params.update(body.workflow_params)
 
     try:
         result = await service.generate(
@@ -1786,11 +1859,17 @@ def _extract_outputs(history: dict[str, Any], client: ComfyClient) -> list[JobOu
         for node_output in node_outputs.values():
             if not isinstance(node_output, dict):
                 continue
-            for key, output_type in (("video", "video"), ("videos", "video"), ("gifs", "video"), ("images", "image")):
+            for key in ("video", "videos", "gifs", "images"):
                 for item in node_output.get(key, []) or []:
                     filename = item.get("filename")
                     if not filename:
                         continue
+                    # Type is determined solely by the file extension — the
+                    # ComfyUI output slot name is NOT trusted (e.g. SaveVideo
+                    # returns .mp4 under the "images" slot). No fallback: an
+                    # unrecognized extension is labeled by _media_type_from_path
+                    # as-is, so any mismatch surfaces loudly instead of hiding.
+                    output_type = _media_type_from_path(Path(filename))
                     subfolder = item.get("subfolder", "")
                     folder_type = item.get("type", "output")
                     outputs.append(JobOutput(
@@ -1912,28 +1991,63 @@ async def _queue_position(client: ComfyClient, prompt_id: str) -> int | None:
 async def jobs(include_completed: bool = True) -> dict[str, Any]:
     """Return jobs submitted through this API from durable Postgres state."""
     db_jobs = await list_jobs(limit=100)
-    client = comfy()
 
-    running_ids: set[str] = set()
-    pending_positions: dict[str, int] = {}
-    queue_error: str | None = None
+    # Reconcile each job against the node that actually ran it. Jobs can span GPUs
+    # (image on one node, video on another) — polling a single default node leaves
+    # every job on any other node stuck at its last DB status forever. Resolve the
+    # node per job via its provider, and fetch each node's /queue only once.
+    node_clients: dict[str, ComfyClient] = {}
+    node_queues: dict[str, tuple[set[str], dict[str, int], str | None]] = {}
+    node_histories: dict[str, dict[str, Any]] = {}
 
-    try:
-        queue = await client.get("/queue")
-    except Exception as exc:  # noqa: BLE001
-        queue_error = str(exc)
-    else:
-        for item in queue.get("queue_running", []) if isinstance(queue, dict) else []:
-            if isinstance(item, list) and len(item) > 1 and isinstance(item[1], str):
-                running_ids.add(item[1])
+    def _client_for(provider: str | None) -> tuple[str, ComfyClient]:
+        node = comfy_node_for_provider(provider)
+        key = node.id if node else "__default__"
+        if key not in node_clients:
+            node_clients[key] = comfy(node)
+        return key, node_clients[key]
 
-        for position, item in enumerate(queue.get("queue_pending", []) if isinstance(queue, dict) else [], start=1):
-            if isinstance(item, list) and len(item) > 1 and isinstance(item[1], str):
-                pending_positions[item[1]] = position
+    async def _history_for(key: str, client: ComfyClient) -> dict[str, Any]:
+        # Fetch each node's full history ONCE, not once per job. This endpoint is
+        # polled every few seconds by the gallery with a short client timeout, so
+        # N per-prompt round-trips (especially to a busy video node) blow past it
+        # and the whole jobs list fails to load — no pending placeholders appear.
+        if key not in node_histories:
+            try:
+                hist = await client.get("/history")
+                node_histories[key] = hist if isinstance(hist, dict) else {}
+            except Exception:  # noqa: BLE001
+                node_histories[key] = {}
+        return node_histories[key]
 
+    async def _queue_for(key: str, client: ComfyClient) -> tuple[set[str], dict[str, int], str | None]:
+        if key in node_queues:
+            return node_queues[key]
+        running: set[str] = set()
+        pending: dict[str, int] = {}
+        err: str | None = None
+        try:
+            queue = await client.get("/queue")
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)
+        else:
+            for item in queue.get("queue_running", []) if isinstance(queue, dict) else []:
+                if isinstance(item, list) and len(item) > 1 and isinstance(item[1], str):
+                    running.add(item[1])
+            for position, item in enumerate(queue.get("queue_pending", []) if isinstance(queue, dict) else [], start=1):
+                if isinstance(item, list) and len(item) > 1 and isinstance(item[1], str):
+                    pending[item[1]] = position
+        node_queues[key] = (running, pending, err)
+        return node_queues[key]
+
+    errors: set[str] = set()
     job_values: list[dict[str, Any]] = []
     for job in db_jobs:
         prompt_id = job["prompt_id"]
+        key, client = _client_for(job.get("provider"))
+        running_ids, pending_positions, queue_error = await _queue_for(key, client)
+        if queue_error:
+            errors.add(queue_error)
         if job.get("status") not in {"completed", "failed"} and queue_error is None:
             if prompt_id in running_ids:
                 job["status"] = "running"
@@ -1945,24 +2059,22 @@ async def jobs(include_completed: bool = True) -> dict[str, Any]:
                 await update_job_status(prompt_id, "pending")
             else:
                 job["queue_position"] = None
-                try:
-                    history = await client.get(f"/history/{prompt_id}")
-                    outputs = _extract_outputs(history, client)
-                except Exception as exc:  # noqa: BLE001
-                    job["error"] = f"Unable to read Comfy history: {exc}"
-                    job["_missing_from_comfy"] = True
+                history = await _history_for(key, client)
+                entry = history.get(prompt_id)
+                outputs = _extract_outputs({prompt_id: entry}, client) if entry else []
+                if outputs:
+                    persisted = await _persist_outputs(prompt_id, outputs)
+                    job["status"] = "completed" if persisted else "running"
+                    if persisted:
+                        job["output_filename"] = outputs[0].filename
                 else:
-                    if outputs:
-                        persisted = await _persist_outputs(prompt_id, outputs)
-                        job["status"] = "completed" if persisted else "running"
-                        if persisted:
-                            job["output_filename"] = outputs[0].filename
-                    else:
-                        # Comfy is the source of truth. If a job is neither in
-                        # /queue nor /history, do not invent a status for it.
-                        job["_missing_from_comfy"] = True
+                    # Comfy is the source of truth. If a job is neither in
+                    # /queue nor /history, do not invent a status for it.
+                    job["_missing_from_comfy"] = True
 
         job_values.append(job)
+
+    queue_error = "; ".join(sorted(errors)) if errors else None
 
     if not include_completed:
         job_values = [
@@ -1983,7 +2095,9 @@ async def jobs(include_completed: bool = True) -> dict[str, Any]:
 @app.get("/api/jobs/{prompt_id}", response_model=JobStatusResponse)
 async def job(prompt_id: str) -> JobStatusResponse:
     """Get status, outputs, and queue position for a single job."""
-    client = comfy()
+    record = await get_job(prompt_id)
+    provider = (record or {}).get("provider")  # _job_row flattens metadata keys to top level
+    client = comfy(comfy_node_for_provider(provider))
 
     # ComfyUI's normalized jobs endpoint reports pending/in_progress/completed.
     # It is the right polling surface for UI status. Raw /history only exists after completion.
@@ -2550,7 +2664,7 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
     if resolved_model is not None:
         workflow_params["checkpoint"] = resolved_model
     if body.image is not None:
-        workflow_params["image"] = await _ensure_comfy_input_image(body.image)
+        workflow_params["image"] = await _ensure_comfy_input_image(body.image, body.provider)
     if body.workflow_params is not None:
         workflow_params.update(body.workflow_params)
 
@@ -2755,7 +2869,7 @@ async def listing(
             "height": row.get("height", 0),
             "mtime": mtime,
             "url": f"/media/{filename}",
-            "thumb": f"/media/{filename}",
+            "thumb": f"/api/thumb/{filename}",
             "prompt": row.get("prompt"),
             "prompt_id": row.get("prompt_id"),
             "character_ids": row.get("character_ids") or [],
@@ -2796,6 +2910,42 @@ async def media(path: str) -> FileResponse:
         target,
         headers={"Cache-Control": "private, max-age=604800, immutable", "ETag": etag},
     )
+
+
+_THUMB_DIR = _OUTPUT_DIR / ".thumbs"
+_VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".gif", ".avi"}
+
+
+@app.get("/api/thumb/{path:path}")
+async def media_thumb(path: str) -> FileResponse:
+    """Serve a still poster image for a media file.
+
+    Images are served as-is. Videos get a cached JPEG poster (first frame,
+    which for i2v is the source image) extracted once with ffmpeg — rendering
+    135 <video> tags to paint frame 0 client-side is what left the gallery full
+    of blank tiles.
+    """
+    target = _safe_output_path(path)
+    if not target or not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if target.suffix.lower() not in _VIDEO_SUFFIXES:
+        return FileResponse(target, headers={"Cache-Control": "private, max-age=604800, immutable"})
+
+    rel = target.resolve().relative_to(_OUTPUT_DIR.resolve())
+    thumb = _THUMB_DIR / rel.with_suffix(rel.suffix + ".jpg")
+    if not thumb.is_file() or thumb.stat().st_mtime < target.stat().st_mtime:
+        thumb.parent.mkdir(parents=True, exist_ok=True)
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error", "-ss", "0", "-i", str(target),
+            "-frames:v", "1", "-vf", "scale=512:-2", "-q:v", "4", str(thumb),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+    if not thumb.is_file():
+        # Fall back to the video itself rather than 500 — the tile can still try.
+        return FileResponse(target, headers={"Cache-Control": "private, max-age=3600"})
+    return FileResponse(thumb, headers={"Cache-Control": "private, max-age=604800, immutable"})
 
 
 @app.post("/api/delete")
