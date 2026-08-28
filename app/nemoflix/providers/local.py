@@ -480,8 +480,13 @@ class LocalComfyUIProvider(GPUProvider):
             raise ValueError(f"Node {node.id} has no ComfyUI configuration")
         
         return cls(
+            # Use the node's resolved client_id (with the stable `nemoflix-<id>`
+            # fallback), NOT the raw comfyui.client_id which is usually unset. The
+            # progress WS bridge subscribes as `node.comfy_client_id`; ComfyUI routes
+            # progress/execution events only to the submitting client_id, so submit
+            # and bridge MUST use the same value or live progress never arrives.
             node_id=node.id,
             base_url=node.comfyui.url,
             roles=node.roles,
-            client_id=node.comfyui.client_id,
+            client_id=node.comfy_client_id,
         )

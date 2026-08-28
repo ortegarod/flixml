@@ -13,10 +13,15 @@ export default {
         secondary: { DEFAULT: "var(--secondary)", foreground: "var(--secondary-foreground)" },
         muted: { DEFAULT: "var(--muted)", foreground: "var(--muted-foreground)" },
         accent: { DEFAULT: "var(--accent)", foreground: "var(--accent-foreground)" },
+        brand: { DEFAULT: "var(--brand)", foreground: "var(--brand-foreground)" },
         destructive: { DEFAULT: "var(--destructive)" },
         border: "var(--border)",
         input: "var(--input)",
         ring: "var(--ring)",
+      },
+      fontFamily: {
+        sans: ["var(--font-sans)"],
+        heading: ["var(--font-heading)"],
       },
       borderRadius: {
         lg: "var(--radius)",
