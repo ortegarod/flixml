@@ -1,0 +1,40 @@
+{
+  "id": "infinitetalk_i2v",
+  "name": "InfiniteTalk Image-to-Video (lip-sync)",
+  "description": "Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 2.1 I2V backbone + InfiniteTalk/MultiTalk). Talking-head motion only, not big body motion.",
+  "task": "image-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "wanvideo_wrapper",
+    "supports_lora": false,
+    "requires_audio": true
+  },
+  "params": {
+    "prompt": {"type": "str", "required": true, "default": "a woman is talking", "description": "Drives expression/motion. InfiniteTalk is talking-head; keep it simple."},
+    "image": {"type": "str", "required": true, "description": "Input image filename (staged to ComfyUI input)"},
+    "audio": {"type": "str", "required": true, "description": "Input audio filename (wav) staged to ComfyUI input. Drives lip-sync + clip length."},
+    "negative_prompt": {"type": "str", "default": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"},
+    "width": {"type": "int", "default": 640, "description": "Resize target width (divisible by 16)"},
+    "height": {"type": "int", "default": 640, "description": "Resize target height (divisible by 16)"},
+    "length": {"type": "int", "default": 81, "description": "Frame count. At 25fps: 81 frames ~= 3.2s. Keep short — long renders choke 12GB/16GB RAM."},
+    "fps": {"type": "int", "default": 25, "description": "InfiniteTalk is trained at 25fps; do not change unless you know why."},
+    "seed": {"type": "int", "default": 2, "required": false},
+    "steps": {"type": "int", "default": 6, "description": "Sampler steps. 6 with the lightx2v speed LoRA is the tuned default."},
+    "cfg": {"type": "float", "default": 1.0},
+    "shift": {"type": "float", "default": 11.0},
+    "scheduler": {"type": "str", "default": "dpm++_sde"},
+    "blocks_to_swap": {"type": "int", "default": 12, "description": "Block-swap count for low-VRAM. 12 is the proven sweet spot on a 12GB card with the Q3_K_S GGUF: ~10GB VRAM used, GPU at 95%, no OOM. Higher = less VRAM but GPU-starved/slow; lower risks OOM."},
+    "model": {"type": "str", "default": "wan2.1-i2v-14b-480p-Q3_K_S.gguf", "description": "GGUF-quantized Wan2.1 I2V 14B backbone (~7.9GB). Fits 12GB card with block-swap. fp8 safetensors OOMs a 12GB card."},
+    "multitalk_model": {"type": "str", "default": "Wan2_1-InfiniteTalk_Single_Q4_K_M.gguf", "description": "GGUF-quantized InfiniteTalk module (~1.3GB). Must be GGUF to pair with the GGUF backbone."},
+    "wav2vec_model": {"type": "str", "default": "wav2vec2-chinese-base_fp16.safetensors"},
+    "t5": {"type": "str", "default": "umt5-xxl-enc-fp8_e4m3fn.safetensors"},
+    "vae": {"type": "str", "default": "Wan2.1_VAE.safetensors"},
+    "clip_vision": {"type": "str", "default": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"},
+    "speed_lora": {"type": "str", "default": "WanVideo\\Lightx2v\\lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"},
+    "speed_lora_strength": {"type": "float", "default": 1.0},
+    "filename_prefix": {"type": "str", "default": "infinitetalk_i2v"}
+  },
+  "compatible_providers": ["local"],
+  "examples": []
+}

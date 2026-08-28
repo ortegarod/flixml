@@ -1,0 +1,42 @@
+{
+  "id": "infinitetalk_v2v",
+  "name": "InfiniteTalk Video-to-Video (motion + lip-sync)",
+  "description": "Audio-driven lip-sync applied on top of a driving motion clip. Loads a source video (e.g. a subject dancing/twirling from a t2v/i2v run), encodes its motion, and re-samples it to lip-sync a voice line while preserving the body motion (Wan 2.1 I2V backbone + InfiniteTalk/MultiTalk). Use this instead of infinitetalk_i2v when you want real body motion, not just a talking head.",
+  "task": "video-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "wanvideo_wrapper",
+    "supports_lora": false,
+    "requires_audio": true,
+    "requires_video": true
+  },
+  "params": {
+    "prompt": {"type": "str", "required": true, "default": "a woman is talking", "description": "Drives expression. The body motion comes from the driving video, so keep this simple."},
+    "video": {"type": "str", "required": true, "description": "Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement."},
+    "audio": {"type": "str", "required": true, "description": "Input audio filename (wav) staged to ComfyUI input. Drives lip-sync + clip length."},
+    "negative_prompt": {"type": "str", "default": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"},
+    "denoise_strength": {"type": "float", "default": 0.5, "description": "V2V motion-adherence knob — THE key dial. At 1.0 the driving video is noised to pure noise and InfiniteTalk regenerates a talking head from the first frame, DISCARDING the body motion (the subject won't bend/dance). Lower preserves the driving motion: the sampler starts the denoise partway and keeps the driving latents. 0.5 mirrors Kijai's V2V example (start denoise ~halfway) — keeps body motion while still re-animating the mouth. Go lower (0.3-0.4) to lock motion harder, higher (0.6-0.7) for stronger lip-sync at the cost of motion fidelity."},
+    "width": {"type": "int", "default": 832, "description": "Resize target width (divisible by 16). Motion clips are usually landscape; 832x480 is the tuned default."},
+    "height": {"type": "int", "default": 480, "description": "Resize target height (divisible by 16)."},
+    "length": {"type": "int", "default": 81, "description": "Frame count, also caps how many frames are read from the driving video. At 25fps: 81 frames ~= 3.2s. Keep short — long renders choke 12GB/16GB RAM."},
+    "fps": {"type": "int", "default": 25, "description": "InfiniteTalk is trained at 25fps. Also re-times the driving video to this rate (force_rate). Do not change unless you know why."},
+    "seed": {"type": "int", "default": 2, "required": false},
+    "steps": {"type": "int", "default": 6, "description": "Sampler steps. 6 with the lightx2v speed LoRA is the tuned default."},
+    "cfg": {"type": "float", "default": 1.0},
+    "shift": {"type": "float", "default": 11.0},
+    "scheduler": {"type": "str", "default": "dpm++_sde"},
+    "blocks_to_swap": {"type": "int", "default": 12, "description": "Block-swap count for low-VRAM. 12 is the proven sweet spot on a 12GB card with the Q3_K_S GGUF: ~10GB VRAM used, GPU at 95%, no OOM. Higher = less VRAM but GPU-starved/slow; lower risks OOM."},
+    "model": {"type": "str", "default": "wan2.1-i2v-14b-480p-Q3_K_S.gguf", "description": "GGUF-quantized Wan2.1 I2V 14B backbone (~7.9GB). Fits 12GB card with block-swap. fp8 safetensors OOMs a 12GB card."},
+    "multitalk_model": {"type": "str", "default": "Wan2_1-InfiniteTalk_Single_Q4_K_M.gguf", "description": "GGUF-quantized InfiniteTalk module (~1.3GB). Must be GGUF to pair with the GGUF backbone."},
+    "wav2vec_model": {"type": "str", "default": "wav2vec2-chinese-base_fp16.safetensors"},
+    "t5": {"type": "str", "default": "umt5-xxl-enc-fp8_e4m3fn.safetensors"},
+    "vae": {"type": "str", "default": "Wan2.1_VAE.safetensors"},
+    "clip_vision": {"type": "str", "default": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"},
+    "speed_lora": {"type": "str", "default": "WanVideo\\Lightx2v\\lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"},
+    "speed_lora_strength": {"type": "float", "default": 1.0},
+    "filename_prefix": {"type": "str", "default": "infinitetalk_v2v"}
+  },
+  "compatible_providers": ["local"],
+  "examples": []
+}

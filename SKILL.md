@@ -200,6 +200,45 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/video/generate" \
   -d '{"mode":"i2v","workflow":"<workflow-id>","provider":"<provider-id>","image":"source.png","prompt":"subject walking through neon rain","width":640,"height":640,"length":81,"fps":16}'
 ```
 
+## Audio-driven lip-sync (talking-head)
+
+Some `i2v` workflows are **audio-driven**: you feed a still image *and* an audio file, and the subject is animated to lip-sync the speech (talking-head motion — face and subtle upper body, not big body motion). Check `GET /api/workflows` for a workflow whose meta declares `requires_audio: true` (e.g. an InfiniteTalk-style workflow).
+
+These take one extra field — `audio` — alongside the usual `image`. Both are staged to the run node automatically, mirroring how `image` is handled. Upload the audio the same way you upload an image, then reference the filename:
+
+```bash
+curl -sS -X POST "$NEMOFLIX_API_URL/api/images/upload" -F "file=@/path/to/portrait.png"
+# stage the wav into the output dir (any Studio output path works as the audio filename)
+
+curl -sS -X POST "$NEMOFLIX_API_URL/api/video/generate" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"i2v","workflow":"<audio-workflow-id>","provider":"<provider-id>","image":"portrait.png","audio":"line.wav","prompt":"a person talking, subtle natural expression"}'
+```
+
+Notes:
+- The `audio` clip drives both the lip motion and the clip length. Keep `prompt` simple — it only nudges expression, not big motion.
+- **Low-VRAM (≤12GB) provider:** audio-driven 14B video models need the **GGUF-quantized** model files (both the backbone *and* the lip-sync module must be GGUF — you can't mix a GGUF module with a full-precision backbone) plus block-swap tuned so the model fits with headroom. The workflow meta ships proven low-VRAM defaults; override per request via `workflow_params` (e.g. `blocks_to_swap`) only if a different card needs it.
+- To generate the voice first, see **TTS & Voiceovers** below, then feed the produced wav in as `audio`.
+
+## Motion + lip-sync (video-to-video)
+
+The talking-head path above only animates a still (face + subtle upper body). For **real body motion** (dancing, bending, big movement) *plus* lip-sync, use a **`v2v`** workflow (e.g. an InfiniteTalk-style one whose meta declares `requires_video: true` and `requires_audio: true`). You feed a **driving motion video** + an **audio** file: the subject keeps the driving clip's body motion while its mouth is re-animated to the speech.
+
+```bash
+curl -sS -X POST "$NEMOFLIX_API_URL/api/video/generate" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"v2v","workflow":"<v2v-workflow-id>","provider":"<provider-id>","video":"motion_clip.mp4","audio":"line.wav","prompt":"a woman is talking","width":480,"height":480,"length":81}'
+```
+
+`mode:"v2v"` takes a `video` (the driving motion clip) instead of an `image` — it's staged to the run node automatically, same as image/audio. No separate start image needed; the driving clip supplies the first frame.
+
+Notes:
+- **`denoise_strength` is THE dial (default 0.5) — do not leave it at 1.0.** At 1.0 the driving video is noised to pure noise and the model regenerates a talking head from the first frame, **discarding the body motion** (the subject won't dance/bend). Lower preserves motion: **0.5** keeps body motion while re-animating the mouth; **0.3–0.4** locks motion harder; **0.6–0.7** = stronger lip-sync but weaker motion fidelity. Override per request via `workflow_params:{"denoise_strength":0.4}`.
+- **Keep `prompt` a generic placeholder** like `"a woman is talking"`. Motion comes from the driving video, identity/appearance from that same video (preserved at denoise 0.5), lip-sync from the audio. The prompt only lightly nudges expression — describing the motion or the character just fights the driving clip.
+- **Resolution is the speed lever.** On a 12GB card, 480×480×81 ≈ 3 min; 640×640×81 ≈ 19 min — same pipeline. Iterate tests at 480, only go big once the clip + denoise are locked.
+- Same GGUF/block-swap low-VRAM rules as the audio-driven talking-head above.
+- **Editing a workflow's `*.meta.json` default requires a registry reload** — uvicorn `--reload` watches `.py` only, not meta files. After a meta edit, `touch app/nemoflix/api.py` (or restart the API), then verify with a `submit:false` dry-run that the value actually landed in the graph before spending GPU time.
+
 ## Track jobs
 
 ```bash
