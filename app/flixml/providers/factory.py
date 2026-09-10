@@ -11,7 +11,7 @@ from .local import LocalComfyUIProvider
 from .runpod import RunPodServerlessProvider
 
 
-logger = logging.getLogger("nemoflix.providers")
+logger = logging.getLogger("flixml.providers")
 
 
 # Provider registry - add new providers here

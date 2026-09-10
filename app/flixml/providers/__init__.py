@@ -3,7 +3,7 @@
 Provider abstraction layer for multi-GPU, multi-cloud orchestration.
 
 Usage:
-    from nemoflix.providers import LocalComfyUIProvider, RunPodServerlessProvider
+    from flixml.providers import LocalComfyUIProvider, RunPodServerlessProvider
     
     # Local provider (your own GPUs)
     local = LocalComfyUIProvider(base_url="http://127.0.0.1:8188", node_id="gpu0")

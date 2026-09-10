@@ -16,5 +16,8 @@
         "url": "http://localhost:8189"
       }
     }
-  ]
+  ],
+  "security": {
+    "require_api_key": false
+  }
 }

@@ -19,9 +19,9 @@ import websockets
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi import Response
 from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
+from .auth import Agent, bearer_scheme, resolve_agent
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_metadata, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
@@ -108,7 +108,7 @@ def _load_guide_html() -> str:
     if _GUIDE_HTML is not None:
         return _GUIDE_HTML
     # Resolve SKILL.md relative to the project root. The package lives under
-    # app/nemoflix/, so the project root is three directories up.
+    # app/flixml/, so the project root is three directories up.
     project_root = Path(__file__).resolve().parents[3]
     skill_path = project_root / "SKILL.md"
     if not skill_path.is_file():
@@ -123,22 +123,26 @@ API_DESCRIPTION = """Agent-native API for driving ComfyUI image and video genera
 
 **Agent guide:** read `SKILL.md` or `GET /api/guide` for the full agent workflow.
 
-Nemoflix has two modes:
-- **Studio mode** — single images or clips (`/api/image/generate`, `/api/video/generate`).
-- **Projects mode** — structured stories: projects → scenes → shots → images → videos → final render.
+Core surfaces:
+- **Studio** — generate single images or clips (`/api/image/generate`, `/api/video/generate`).
+- **Projects** — structured stories: projects → scenes → shots → images → videos → final render.
+- **Characters** — reusable identities with base prompts, LoRAs, and voices (`/api/characters`).
+- **LoRA training** — train and manage custom models: datasets, start/status, checkpoints, samples (`/api/lora-training/*`).
 
 Workflows and providers are discovered live (`GET /api/workflows`, `GET /api/providers`).
 
-Security is currently optional: include an `Authorization: Bearer <token>` header if you have one.
+**Agent identity:** include `Authorization: Bearer <key>` to attribute your jobs to an agent
+identity (see `scripts/manage_agent_keys.py`). Enforcement is off by default
+(`config.json` `security.require_api_key`) — a request with no key still works, it just isn't
+attributed. Once enforced, a key can also carry a character/workflow allowlist and a
+concurrent-job cap, checked on `/api/image/generate` and `/api/video/generate`.
 """
 
-security = HTTPBearer(auto_error=False, scheme_name="bearerAuth", description="Optional Bearer token. Not enforced yet, but included for agent compatibility.")
-
 app = FastAPI(
-    title="Nemoflix Studio API",
+    title="FlixML API",
     description=API_DESCRIPTION,
     version="0.1.0",
-    dependencies=[Depends(security)],
+    dependencies=[Depends(bearer_scheme)],
 )
 
 
@@ -1869,7 +1873,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
 
 
 @app.post("/api/video/generate", response_model=VideoGenerateResponse)
-async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
+async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depends(resolve_agent)) -> VideoGenerateResponse:
     """Submit a single video generation job (t2v, i2v, or v2v)."""
     # Character resolution only supplies a fallback reference image for i2v.
     # Wan video takes identity from the image, so character triggers and character LoRAs
@@ -1878,6 +1882,11 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
     prompt = body.prompt
+
+    if agent is not None:
+        agent.require_workflow(body.workflow)
+        agent.require_characters([r.get("id") for r in character_records if r.get("id")])
+        await agent.require_capacity()
 
     image = body.image
     if body.mode == "i2v" and not image and resolved:
@@ -1912,23 +1921,11 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
         if not body.video:
             raise HTTPException(status_code=400, detail="video is required for v2v mode. Upload the driving motion clip first, then pass its filename.")
         workflow_params["video"] = await _ensure_comfy_input_video(body.video, body.provider)
-        # Output length (num_frames for the audio embeds) must cover the whole
-        # driving clip, or the motion + lip-sync get truncated. The graph now
-        # loads the full clip (frame_load_cap=0) and windows across it, matching
-        # Kijai's reference — so when the caller doesn't pin length, derive it
-        # from the driving clip's duration at the target fps.
-        if body.length is None:
-            _src = _resolve_output_file(body.video)
-            if _src is not None:
-                _fps = body.fps or 25
-                _dur = await _probe_duration(_src)
-                if _dur > 0:
-                    _frames = max(1, round(_dur * _fps))
-                    _CAP = 201  # ~8s at 25fps — bound RAM on 12GB nodes
-                    if _frames > _CAP:
-                        print(f"[v2v] auto-length {_frames} capped to {_CAP} frames", flush=True)
-                        _frames = _CAP
-                    workflow_params["length"] = _frames
+        # Length is handled the author's way: the `length` meta default is a
+        # generous frame cap, and MultiTalkWav2VecEmbeds internally clamps it to
+        # the actual audio duration (min(num_frames, audio_frames)). The video is
+        # then trimmed back to the audio track by VHS_VideoCombine's trim_to_audio.
+        # No API-side derive needed — the graph + audio are the source of truth.
 
     # Audio-driven workflows (InfiniteTalk lip-sync): stage the wav to the run node the
     # same way the image is staged, then hand LoadAudio the resolved input filename.
@@ -1950,6 +1947,7 @@ async def generate_video(body: VideoGenerateRequest) -> VideoGenerateResponse:
             seed=body.seed,
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
+            owner_id=agent.id if agent else None,
             extra_metadata={
                 **body.model_dump(),
                 "resolved_image": image,
@@ -2112,107 +2110,27 @@ async def _queue_position(client: ComfyClient, prompt_id: str) -> int | None:
 
 @app.get("/api/jobs")
 async def jobs(include_completed: bool = True) -> dict[str, Any]:
-    """Return jobs submitted through this API from durable Postgres state."""
+    """Return jobs from durable Postgres state — a pure DB read, no live ComfyUI calls.
+
+    The per-node WebSocket bridge (`_comfy_ws_bridge_for_node`) keeps job status and
+    progress_percent current in Postgres in real time. This endpoint is polled every
+    few seconds by the gallery to render the "generating" lane, so it must never make a
+    synchronous call into a ComfyUI node: a saturated node (mid model-load) stops
+    answering HTTP, and per-job /queue + /history round-trips then hang the whole
+    endpoint until it times out — blanking the lane even though jobs are actively
+    running. Live reconciliation for a specific job still happens on demand in
+    GET /api/jobs/{prompt_id}.
+    """
     db_jobs = await list_jobs(limit=100)
 
-    # Reconcile each job against the node that actually ran it. Jobs can span GPUs
-    # (image on one node, video on another) — polling a single default node leaves
-    # every job on any other node stuck at its last DB status forever. Resolve the
-    # node per job via its provider, and fetch each node's /queue only once.
-    node_clients: dict[str, ComfyClient] = {}
-    node_queues: dict[str, tuple[set[str], dict[str, int], str | None]] = {}
-    node_histories: dict[str, dict[str, Any]] = {}
-
-    def _client_for(provider: str | None) -> tuple[str, ComfyClient]:
-        node = comfy_node_for_provider(provider)
-        key = node.id if node else "__default__"
-        if key not in node_clients:
-            node_clients[key] = comfy(node)
-        return key, node_clients[key]
-
-    async def _history_for(key: str, client: ComfyClient) -> dict[str, Any]:
-        # Fetch each node's full history ONCE, not once per job. This endpoint is
-        # polled every few seconds by the gallery with a short client timeout, so
-        # N per-prompt round-trips (especially to a busy video node) blow past it
-        # and the whole jobs list fails to load — no pending placeholders appear.
-        if key not in node_histories:
-            try:
-                hist = await client.get("/history")
-                node_histories[key] = hist if isinstance(hist, dict) else {}
-            except Exception:  # noqa: BLE001
-                node_histories[key] = {}
-        return node_histories[key]
-
-    async def _queue_for(key: str, client: ComfyClient) -> tuple[set[str], dict[str, int], str | None]:
-        if key in node_queues:
-            return node_queues[key]
-        running: set[str] = set()
-        pending: dict[str, int] = {}
-        err: str | None = None
-        try:
-            queue = await client.get("/queue")
-        except Exception as exc:  # noqa: BLE001
-            err = str(exc)
-        else:
-            for item in queue.get("queue_running", []) if isinstance(queue, dict) else []:
-                if isinstance(item, list) and len(item) > 1 and isinstance(item[1], str):
-                    running.add(item[1])
-            for position, item in enumerate(queue.get("queue_pending", []) if isinstance(queue, dict) else [], start=1):
-                if isinstance(item, list) and len(item) > 1 and isinstance(item[1], str):
-                    pending[item[1]] = position
-        node_queues[key] = (running, pending, err)
-        return node_queues[key]
-
-    errors: set[str] = set()
-    job_values: list[dict[str, Any]] = []
-    for job in db_jobs:
-        prompt_id = job["prompt_id"]
-        key, client = _client_for(job.get("provider"))
-        running_ids, pending_positions, queue_error = await _queue_for(key, client)
-        if queue_error:
-            errors.add(queue_error)
-        if job.get("status") not in {"completed", "failed"} and queue_error is None:
-            if prompt_id in running_ids:
-                job["status"] = "running"
-                job["queue_position"] = None
-                await update_job_status(prompt_id, "running")
-            elif prompt_id in pending_positions:
-                job["status"] = "pending"
-                job["queue_position"] = pending_positions[prompt_id]
-                await update_job_status(prompt_id, "pending")
-            else:
-                job["queue_position"] = None
-                history = await _history_for(key, client)
-                entry = history.get(prompt_id)
-                outputs = _extract_outputs({prompt_id: entry}, client) if entry else []
-                if outputs:
-                    persisted = await _persist_outputs(prompt_id, outputs)
-                    job["status"] = "completed" if persisted else "running"
-                    if persisted:
-                        job["output_filename"] = outputs[0].filename
-                else:
-                    # Comfy is the source of truth. If a job is neither in
-                    # /queue nor /history, do not invent a status for it.
-                    job["_missing_from_comfy"] = True
-
-        job_values.append(job)
-
-    queue_error = "; ".join(sorted(errors)) if errors else None
-
     if not include_completed:
-        job_values = [
-            job
-            for job in job_values
-            if job.get("status") not in {"completed", "failed"} and not job.get("_missing_from_comfy")
-        ]
+        db_jobs = [job for job in db_jobs if job.get("status") not in {"completed", "failed"}]
+
     jobs_list = sorted(
-        job_values,
+        db_jobs,
         key=lambda j: (j.get("status") != "running", j.get("queue_position") or 0, str(j.get("created_at") or "")),
     )
-    result = {"jobs": jobs_list, "count": len(jobs_list)}
-    if queue_error:
-        result["error"] = queue_error
-    return result
+    return {"jobs": jobs_list, "count": len(jobs_list)}
 
 
 @app.get("/api/jobs/{prompt_id}", response_model=JobStatusResponse)
@@ -2709,11 +2627,16 @@ def _comfy_lora_name_for_checkpoint(path: Path) -> str:
 
 
 @app.post("/api/image/generate", response_model=ImageGenerateResponse)
-async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
+async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depends(resolve_agent)) -> ImageGenerateResponse:
     """Submit a single image generation job."""
     resolved = await _resolve_characters(body.character, body.characters)
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
+
+    if agent is not None:
+        agent.require_workflow(body.workflow)
+        agent.require_characters([r.get("id") for r in character_records if r.get("id")])
+        await agent.require_capacity()
 
     # Character presets (checkpoint, cfg/steps/sampler/scheduler, negative prompt,
     # resolution, look description) apply whenever the request doesn't explicitly
@@ -2801,6 +2724,7 @@ async def generate_image(body: ImageGenerateRequest) -> ImageGenerateResponse:
             seed=body.seed,
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
+            owner_id=agent.id if agent else None,
             submit=body.submit,
         )
     except WorkflowNotFoundError as e:

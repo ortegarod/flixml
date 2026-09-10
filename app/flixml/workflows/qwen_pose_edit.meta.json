@@ -1,0 +1,32 @@
+{
+  "id": "qwen_pose_edit",
+  "name": "Qwen Pose/Position Edit (instruction)",
+  "description": "Edit an existing image from a plain-English instruction — change a subject's pose, position, or what they're doing while holding their identity, clothing, the room, and lighting. Powered by Qwen-Image-Edit-2511; the source image is the reference (no LoRA).",
+  "task": "image-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "qwen_image_edit",
+    "supports_lora": false,
+    "requires_image": true
+  },
+  "params": {
+    "image": {
+      "type": "string",
+      "required": true,
+      "description": "Source image filename or Studio output path to edit"
+    },
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Plain-English edit instruction."
+    },
+    "seed": {
+      "type": "integer",
+      "default": 42
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ]
+}

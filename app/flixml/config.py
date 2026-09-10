@@ -61,6 +61,12 @@ class GpuNode(BaseModel):
 ComfyNode = GpuNode
 
 
+class SecurityConfig(BaseModel):
+    """Agent API key enforcement. Off by default so a fresh clone isn't locked out."""
+
+    require_api_key: bool = False
+
+
 class Settings(BaseSettings):
     """Runtime settings for the agent-native API wrapper."""
 
@@ -112,6 +118,11 @@ class Settings(BaseSettings):
         if nodes:
             return nodes[0]
         raise ValueError(f"No ComfyUI node configured for role: {role}")
+
+    def security_config(self) -> SecurityConfig:
+        """Return the security block from config.json (agent API key enforcement)."""
+        cfg_file = _load_config_file()
+        return SecurityConfig.model_validate(cfg_file.get("security", {}))
 
 
 @lru_cache

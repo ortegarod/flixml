@@ -1,0 +1,40 @@
+{
+  "id": "qwen_multiangle",
+  "name": "Qwen Multi-Angle (re-angle a still)",
+  "description": "Re-shoot an existing image of the same subject from a new camera angle. Qwen-Image-Edit-2511 + multi-angle LoRA holds identity, clothing, and lighting while changing the camera viewpoint. Produces a sibling of the source still at a different angle.",
+  "task": "image-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "qwen_image_edit",
+    "supports_lora": false,
+    "requires_image": true
+  },
+  "params": {
+    "image": {
+      "type": "string",
+      "required": true,
+      "description": "Source image filename or Studio output path to re-angle"
+    },
+    "prompt": {
+      "type": "string",
+      "required": true,
+      "description": "Camera-angle spec only (the <sks> trigger is prepended automatically; do NOT pass a character/scene prompt here). Format: '<azimuth> view <elevation> shot <distance>'. Azimuth: front | front-right quarter | right side | back-right quarter | back | back-left quarter | left side | front-left quarter. Elevation: low-angle | eye-level | elevated | high-angle. Distance: wide shot | medium shot | close-up. Example: 'front-right quarter view eye-level shot medium shot'"
+    },
+    "seed": {
+      "type": "integer",
+      "default": 42
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "examples": [
+    {
+      "image": "images/portrait_still_00001_.png",
+      "prompt": "left side view eye-level shot medium shot",
+      "provider": "local-pc"
+    }
+  ],
+  "notes": "Output resolution auto-derives from the source via FluxKontextImageScale. Models live only on the 12GB PC node — always submit with provider=local-pc. Runs 4-step Lightning (steps/cfg/sampler baked in). Do not attach a character; pass only the angle spec as prompt."
+}

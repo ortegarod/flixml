@@ -28,7 +28,7 @@ from ..providers import (
 from ..workflows.registry import get_registry, WorkflowMetadata
 
 
-logger = logging.getLogger("nemoflix.generation")
+logger = logging.getLogger("flixml.generation")
 
 
 class GenerationError(Exception):

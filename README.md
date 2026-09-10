@@ -49,6 +49,14 @@ Role-based routing prevents video jobs from landing on image-only nodes.
 
 Register persistent characters with LoRA associations, trigger words, and reference images. Reference them by name in any generation — the Studio resolves the right LoRA and injects the trigger words automatically.
 
+### Agent Identity & API Keys
+
+Multiple callers — AI agents, scripts, humans — can share one Studio instance's generation queue. Send `Authorization: Bearer <key>` on `/api/image/generate` or `/api/video/generate` to attribute a job to an agent identity, optionally scoped to specific characters/workflows or capped on concurrent jobs.
+
+Provision keys with `scripts/manage_agent_keys.py` (`create`, `list`, `rotate`, `revoke`, `enable`) — there's no HTTP endpoint for minting them, so only someone with shell access to the box can create one. Keys are stored as SHA-256 hashes, never plaintext.
+
+Enforcement is off by default (`config.json` `security.require_api_key: false`): requests with no key, or an unrecognized one, still work — they just aren't attributed. Set it to `true` once every caller you care about has a key; unscoped/anonymous requests then get rejected with 401.
+
 ## Getting Started
 
 ### Prerequisites

@@ -1,0 +1,33 @@
+{
+  "1": {
+    "class_type": "EmptyImage",
+    "inputs": {
+      "width": "{{width}}",
+      "height": "{{height}}",
+      "batch_size": 1,
+      "color": "{{bg_color}}"
+    }
+  },
+  "2": {
+    "class_type": "AddLabel",
+    "inputs": {
+      "image": ["1", 0],
+      "text_x": "{{text_x}}",
+      "text_y": "{{text_y}}",
+      "height": -1,
+      "font_size": "{{font_size}}",
+      "font_color": "{{font_color}}",
+      "label_color": "black",
+      "font": "{{font}}",
+      "text": "{{text}}",
+      "direction": "overlay"
+    }
+  },
+  "3": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "{{filename_prefix}}",
+      "images": ["2", 0]
+    }
+  }
+}

@@ -26,7 +26,7 @@ import httpx
 from ..config import GpuNode, get_settings
 
 
-logger = logging.getLogger("nemoflix.provider.local")
+logger = logging.getLogger("flixml.provider.local")
 from .base import (
     GPUProvider,
     GPURequirements,
