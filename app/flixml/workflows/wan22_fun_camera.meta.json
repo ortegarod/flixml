@@ -1,0 +1,138 @@
+{
+  "id": "wan22_fun_camera",
+  "name": "Wan 2.2 Fun Camera (orbit / angles)",
+  "description": "Move the camera around a single still — orbit, pan, zoom — to get real new angles as a video clip. Uses the Wan2.2-Fun-A14B-Control-Camera model.",
+  "task": "image-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 12,
+    "workflow_type": "wan22",
+    "supports_lora": true
+  },
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "description": "Scene/subject prompt. Keep it a generic description of the subject; the camera move comes from camera_pose, not the prompt."
+    },
+    "image": {
+      "type": "str",
+      "required": true,
+      "description": "Input still filename — the frame the camera moves around."
+    },
+    "camera_pose": {
+      "type": "str",
+      "default": "ClockWise (CW)",
+      "description": "Camera trajectory. One of: Static, Pan Up, Pan Down, Pan Left, Pan Right, Zoom In, Zoom Out, Anti Clockwise (ACW), ClockWise (CW). CW/ACW orbit the camera around the subject."
+    },
+    "speed": {
+      "type": "float",
+      "default": 1.0,
+      "description": "Trajectory speed / amount of camera travel (0-10). Higher = bigger angle swing across the clip."
+    },
+    "negative_prompt": {
+      "type": "str",
+      "default": "bright colors, overexposed, static, blurred details"
+    },
+    "width": {
+      "type": "int",
+      "default": 480,
+      "description": "Keep modest for 12GB; 480x832 portrait test, go bigger once locked."
+    },
+    "height": {
+      "type": "int",
+      "default": 832
+    },
+    "length": {
+      "type": "int",
+      "default": 81,
+      "description": "Frame count (4k+1). More frames = more of the orbit."
+    },
+    "fps": {
+      "type": "int",
+      "default": 16
+    },
+    "seed": {
+      "type": "int",
+      "required": false
+    },
+    "steps_high": {
+      "type": "int",
+      "default": 15
+    },
+    "steps_low": {
+      "type": "int",
+      "default": 15
+    },
+    "total_steps": {
+      "type": "int",
+      "default": 30,
+      "description": "steps_high + steps_low; passed to KSamplerAdvanced.steps"
+    },
+    "cfg_high": {
+      "type": "float",
+      "default": 1.0
+    },
+    "cfg_low": {
+      "type": "float",
+      "default": 1.0
+    },
+    "shift": {
+      "type": "float",
+      "default": 5.0
+    },
+    "sampler": {
+      "type": "str",
+      "default": "euler"
+    },
+    "scheduler": {
+      "type": "str",
+      "default": "simple"
+    },
+    "vae": {
+      "type": "str",
+      "default": "Wan2.1_VAE.safetensors"
+    },
+    "clip": {
+      "type": "str",
+      "default": "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    },
+    "clip_vision": {
+      "type": "str",
+      "default": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "description": "Image conditioning to preserve the subject's likeness through the camera move."
+    },
+    "high_model": {
+      "type": "str",
+      "default": "HighNoise\\Wan2.2-Fun-A14B-Control-Camera-HighNoise-Q4_K_M.gguf",
+      "description": "GGUF Fun Camera Control UNet (UnetLoaderGGUF)"
+    },
+    "low_model": {
+      "type": "str",
+      "default": "LowNoise\\Wan2.2-Fun-A14B-Control-Camera-LowNoise-Q4_K_M.gguf",
+      "description": "GGUF Fun Camera Control UNet (UnetLoaderGGUF)"
+    },
+    "high_lora": {
+      "type": "str",
+      "default": "Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors",
+      "description": "Lightning speed LoRA (high-noise)"
+    },
+    "low_lora": {
+      "type": "str",
+      "default": "Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors",
+      "description": "Lightning speed LoRA (low-noise)"
+    },
+    "high_lora_strength": {
+      "type": "float",
+      "default": 1.0
+    },
+    "low_lora_strength": {
+      "type": "float",
+      "default": 1.0
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "examples": []
+}

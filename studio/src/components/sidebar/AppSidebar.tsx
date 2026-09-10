@@ -21,6 +21,7 @@ interface CharacterSummary {
 
 interface AppSidebarProps {
   activeTab: SidebarTab;
+  collapsed?: boolean;
   onTabChange: (tab: SidebarTab) => void;
   onClose: () => void;
   checkpoints: LoraCheckpoint[];
@@ -29,7 +30,7 @@ interface AppSidebarProps {
   projectMode?: ProjectModeData;
 }
 
-export function AppSidebar({ activeTab, onTabChange, onClose, checkpoints, onQueued, onSelectCharacter, projectMode }: AppSidebarProps) {
+export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose, checkpoints, onQueued, onSelectCharacter, projectMode }: AppSidebarProps) {
   const topTabs: { id: SidebarTab; icon: React.ReactNode; label: string; visible: boolean }[] = [
     { id: "generate", icon: <Image className="w-4 h-4" />, label: "Generate", visible: true },
     { id: "characters", icon: <Users className="w-4 h-4" />, label: "Characters & LoRA Training", visible: true },
@@ -50,7 +51,7 @@ export function AppSidebar({ activeTab, onTabChange, onClose, checkpoints, onQue
   const visibleTabs = [...visibleTopTabs, ...visibleBottomTabs];
 
   return (
-    <div className="h-full flex flex-shrink-0 border-r border-gray-800/60" style={{ width: `${SIDEBAR_WIDTH}px` }}>
+    <div className="h-full flex flex-shrink-0 border-r border-gray-800/60 transition-[width] duration-200 absolute inset-y-0 left-0 z-50 max-w-[85vw] shadow-2xl shadow-black/50 md:static md:z-auto md:max-w-none md:shadow-none" style={{ width: `${collapsed ? 48 : SIDEBAR_WIDTH}px` }}>
       {/* Icon rail */}
       <div className="w-12 flex-shrink-0 bg-gray-950/60 border-r border-gray-800/40 flex flex-col items-center py-3 gap-1">
         {visibleTopTabs.map((tab) => (
@@ -97,6 +98,7 @@ export function AppSidebar({ activeTab, onTabChange, onClose, checkpoints, onQue
       </div>
 
       {/* Content panel */}
+      {!collapsed && (
       <div className="flex-1 flex flex-col min-w-0 bg-gray-950/40 overflow-hidden">
         <div className="flex items-center px-4 py-2.5 border-b border-gray-800/40 flex-shrink-0">
           <span className="text-sm font-semibold text-gray-300 tracking-tight">
@@ -106,7 +108,7 @@ export function AppSidebar({ activeTab, onTabChange, onClose, checkpoints, onQue
 
         <div className="flex-1 min-h-0 overflow-hidden">
           {activeTab === "characters" && <CharactersTab onSelectCharacter={onSelectCharacter} />}
-          {activeTab === "generate" && <GenerateTab checkpoints={checkpoints} onQueued={onQueued} />}
+          {activeTab === "generate" && <GenerateTab />}
           {activeTab === "agents" && <AgentsTab />}
           {activeTab === "projects" && (projectMode ? <ProjectSidebar data={projectMode} onDeleteScene={(id) => projectMode.onDeleteScene(id)} /> : <ProjectsGuide compact />)}
           {activeTab === "guide" && <GuideTab />}
@@ -116,6 +118,7 @@ export function AppSidebar({ activeTab, onTabChange, onClose, checkpoints, onQue
           {activeTab === "dev" && <PlaceholderTab title="Logs" body="Recent backend and generation events." />}
         </div>
       </div>
+      )}
     </div>
   );
 }

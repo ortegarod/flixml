@@ -1,0 +1,60 @@
+{
+  "id": "text_logo",
+  "name": "Text Logo / Wordmark",
+  "description": "Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion. Use this whenever the output must spell an exact string (a handle, brand, wordmark) that diffusion models garble. Renders instantly, GPU-light, lands in the gallery like any generation.",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 1,
+    "workflow_type": "text_logo",
+    "supports_lora": false
+  },
+  "params": {
+    "text": {
+      "type": "string",
+      "required": true,
+      "description": "Exact text to typeset (spelled precisely, e.g. 'R404')"
+    },
+    "font_color": {
+      "type": "string",
+      "default": "gold",
+      "description": "Text color — PIL color name ('gold', 'white', 'red') or hex ('#D4AF37')"
+    },
+    "font": {
+      "type": "string",
+      "default": "TTNorms-Black.otf",
+      "description": "Font filename available on the ComfyUI node (e.g. TTNorms-Black.otf, FreeMonoBold.ttf)"
+    },
+    "font_size": {
+      "type": "integer",
+      "default": 200,
+      "description": "Font size in px"
+    },
+    "text_x": {
+      "type": "integer",
+      "default": 125,
+      "description": "Text left position. Default centers a 4-char string at font_size 200 on an 800px canvas"
+    },
+    "text_y": {
+      "type": "integer",
+      "default": 280,
+      "description": "Text top position. Default vertically centers at font_size 200 on an 800px canvas"
+    },
+    "width": {
+      "type": "integer",
+      "default": 800
+    },
+    "height": {
+      "type": "integer",
+      "default": 800
+    },
+    "bg_color": {
+      "type": "integer",
+      "default": 0,
+      "description": "Background color as a packed RGB int (0 = black, 16777215 = white)"
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ]
+}

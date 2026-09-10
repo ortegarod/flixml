@@ -1,6 +1,6 @@
 ---
-name: nemoflix
-description: Read this when your human asks for AI image or video generation. Nemoflix is an HTTP API backed by ComfyUI on GPU infrastructure. It gives you two ways to work — Studio (freeform single-shot generation, output lands in a gallery) and Projects (structured directorial work where you write a script, break it into scenes and shots, generate images per shot, animate approved shots, and assemble a final video). Use this skill to interpret your human's creative request, decide between a quick shot or a multi-shot storyboard pipeline, and drive the API on their behalf.
+name: flixml
+description: Read this whenever your human wants to generate images or video, or mentions Studio, workflows, or models. FlixML (formerly Nemoflix) is a self-hosted HTTP API — Studio — backed by ComfyUI, running open-source image/video/TTS models on the user's own GPUs. Use it to pick the right workflow for the request, drive the generate API, and land results in the gallery. Installed model/workflow catalog with what each is good for: docs/WORKFLOWS.md (served live at GET /api/workflows).
 ---
 
 # Nemoflix Skill
@@ -37,7 +37,39 @@ Always check health first. If it fails, tell your human the backend is unavailab
 
 Studio is for one-off generations. Whatever you make lands in the gallery (`/api/listing`) where your human can see it.
 
-**Never ask before submitting a Studio job.** These run on idle local GPUs (srv01, PC) — cheap, minutes not hours, trivially redone. Don't end a turn with "want me to run this?" or "should I submit or adjust the prompt?" — decide, submit, show the result. If the first attempt has a problem (bad composition, wrong pose, weak prompt), fix it and resubmit yourself in the same turn — don't stop to ask permission to try again. Only pause for real ambiguity (which character, which of two very different concepts) — never for "is this good enough to try." (This is Studio-specific — Projects mode has its own approval gates below, since a project commits to a full multi-shot run.)
+**Never ask before submitting a Studio job.** These run on your idle local GPU — cheap, minutes not hours, trivially redone. Don't end a turn with "want me to run this?" or "should I submit or adjust the prompt?" — decide, submit, show the result. If the first attempt has a problem (bad composition, wrong pose, weak prompt), fix it and resubmit yourself in the same turn — don't stop to ask permission to try again. Only pause for real ambiguity (which character, which of two very different concepts) — never for "is this good enough to try." (This is Studio-specific — Projects mode has its own approval gates below, since a project commits to a full multi-shot run.)
+
+**Caveat for video:** the "resubmit freely" freedom above is about *images* (seconds, cheap). Video is slow and serial — the one-render-at-a-time rule under "Video generation" governs. "Fix and resubmit" for video means *after* the first finishes and you've seen it, never a second job fired alongside the first.
+
+## Working from a copied asset (the card → agent handshake)
+
+Every media card in the Studio gallery has a **"Copy context for agent"** button (the 🤖 icon on a tile, or the button in the lightbox). It copies a plain-text block describing exactly what the human is looking at:
+
+```
+[Nemoflix asset]
+file: portrait_still_0421.png
+id: prm_ab12cd34
+type: image
+url: http://.../media/portrait_still_0421.png
+dimensions: 832x1216
+character: my_character
+workflow: pony_base
+seed: 1234567
+prompt: cinematic movie still, ...
+```
+
+When the human pastes one of these and says something casual — "make angles from this," "animate it," "give it a voice," "put this in the scene" — **you already know how.** They are NOT going to hand you API steps; the how lives here in this skill. Map their intent to the pipeline and execute, using the pasted `file`/`id`/`character`/`prompt` as your source asset:
+
+| They say (about a pasted asset) | What you're doing | Task to pick from the registry |
+|---|---|---|
+| "more angles / different angles / other shots of this" | re-shoot the same subject from a new camera viewpoint | `image-to-image` — pick the workflow whose description is about re-angling / holding identity while moving the camera |
+| "change the pose / put them in a different position / make them do X" | edit the still from a plain-English instruction | `image-to-image` — pick the instruction/pose-edit workflow |
+| "restyle this / a variation of this" | same composition, new treatment | `image-to-image` — pick the variation workflow (prompt guidance + denoise) |
+| "animate this / add motion / make it move" | animate the still into a clip | `image-to-video` with a motion prompt |
+| "give it a voice / make her talk / lip-sync" | add speech + lip-sync | audio-driven video — pick the workflow that declares it needs audio (still → talking-head, or driving-video → keeps body motion) |
+| "use this in a scene / add to the project / build a scene from this" | bring it into structured directorial work | attach as a Project shot, then generate/animate/render |
+
+**Never hard-code workflow IDs — pick by task + description from the live registry.** `GET /api/workflows` returns every available workflow with its `task`, `description`, `requirements` (e.g. `requires_image`/`requires_audio`/`requires_video`), and params. Match the human's intent to the `task`, then read the descriptions and choose the best fit — that way you always route to the current best tool, and workflows can be added or replaced without touching this skill. (Human-browseable catalog of the shipped set: `docs/WORKFLOWS.md`, generated from the same meta.) The source asset's `file`/`url` is the `image` (or `video`) you feed the next step; carry the `character` and reuse or evolve the `prompt` unless they redirect. The whole point: the human copies context and speaks plainly; you own the mechanics.
 
 ## Use a character in Studio
 
@@ -123,11 +155,13 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
   -d '{"workflow":"<workflow-id>","provider":"<provider-id>","checkpoint":"latest","prompt":"portrait of a woman, natural window light, sharp focus"}'
 ```
 
-## Image-to-image and face-reference workflows
+## Image-to-image: working from a source image
 
-Some workflows accept a source `image` and need a base `model` (SDXL checkpoint, not LoRA). Use `workflow_params` to override any workflow-specific defaults.
+Image-to-image workflows take a source `image` and reshape it — restyle it, re-angle it, change a pose, or preserve an identity into a new scene. **Which specific workflow to use is a registry lookup, not a fixed name:** `GET /api/workflows`, filter to `task: "image-to-image"`, and read the descriptions to pick the right tool for the intent (e.g. re-angle vs. instruction pose-edit vs. plain variation). The example below shows the *mechanics*; the concrete workflow ID always comes from the live registry.
 
-### `sdxl_img2img` — same composition, restyled
+Any field a workflow declares in its `.meta.json` `params` can be overridden per request via `workflow_params` — so a workflow's own knobs are discoverable from its meta, and you never need an API change to pass a new one.
+
+### Example — a source-image variation (`sdxl_img2img`)
 
 ```bash
 curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
@@ -148,35 +182,31 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
 - `model` — base SDXL checkpoint filename on the provider
 - `denoise` — 0.25 preserves more of the source; 0.5–0.7 allows more change
 
-### `sdxl_faceid` — same face, new pose/scene
+### Re-angle, pose-edit, and identity-preserving edits
 
-```bash
-curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow": "<workflow-id>",
-    "provider": "<provider-id>",
-    "image": "source.png",
-    "model": "cyberrealisticPony_v160.safetensors",
-    "prompt": "woman leaning against a bar counter, warm ambient light, confident smile",
-    "width": 832,
-    "height": 1216,
-    "workflow_params": {
-      "faceid_weight": 1.0,
-      "faceid_v2_weight": 2.0,
-      "faceid_end_at": 1.0
-    }
-  }'
-```
+For "more angles," "change the pose," or "same person, new scene," pick the image-to-image workflow whose description matches the intent (`GET /api/workflows`). Feed the source `image`, keep the `character`/`prompt` intent, and pass any workflow-specific knobs via `workflow_params` (each workflow declares its own in its meta `params` — read them there rather than memorizing them here). Install-specific workflows in `app/nemoflix/workflows/local/` also show up in the live registry, so always trust the API over any list.
 
-- `faceid_weight` — identity strength (0.8 default, 1.0+ for stronger likeness)
-- `faceid_v2_weight` — v2 adapter boost (2.0 gives strong face match)
-- `faceid_end_at` — when to stop enforcing identity (1.0 = full generation)
-- Best results when the reference is a clean headshot, not full body
+# Video generation — read before submitting any video
 
-### `workflow_params` passthrough
+**ONE video render at a time per GPU node. Do not submit a second job until the first finishes.** Video is slow and serial — each render is **several minutes**, and a GPU processes one at a time. Queuing a second doesn't parallelize anything; it just makes your human wait longer for the result they actually want, and clogs the node the whole time. This is the default rule, not a suggestion.
 
-Any field declared in the workflow's `.meta.json` `params` can be passed through `workflow_params` to override defaults. This avoids needing API model changes for every new workflow knob.
+- **No parallel submits, no A/B batches, no "I'll fire two and compare."** If you want to compare settings, run the first, look at it, *then* run the second. One in flight at a time.
+- **Exception — only with a stated good reason:** e.g. your human explicitly asks for a batch, or two nodes are genuinely free and you're deliberately splitting one job per node. Say why before you do it.
+- Submit → report the `prompt_id` → **stop**. Don't poll or babysit the render. Your human watches results on the Studio UI. (See "Track jobs" only if a status check is explicitly needed.)
+- This is stricter than, and sits on top of, the "don't interleave different-model workflows" rule under video-to-video below.
+
+## Writing motion prompts — "motion" means REAL motion
+
+When your human asks for **motion**, they mean **real, full-body, dynamic action** — not ambient animation. Default to big, physical, unmistakable movement:
+
+- **walking, running, dancing, jumping, workouts, exercises, squats, stretching, sports** — the body clearly *doing something* across the frame.
+- Use strong action verbs and describe the full movement. The `steps_high`/`steps_low` split is the physical lever (see below) — real motion needs the full step count, not a 4-step preview.
+
+**Banned-by-default for motion shots** (these produce the "breathing photo" nothing-happens result your human hates): `subtle`, `slightly`, `gently`, `slowly`, `drifting`, `soft breeze`, `sways`, `barely`. Don't reach for this vocabulary when motion is the goal — it's the opposite of what's wanted.
+
+**When subtle/ambient IS correct:** only for shots where you deliberately *don't* want body motion — a **talking-head / character-just-speaking** clip (lip-sync workflows), or a near-still atmospheric hold. There, "subtle expression, slight movement" is right. That's the *only* time.
+
+Rule of thumb: **motion requested → real physical action + full steps. Talking/still → subtle is fine.** Know which one you're doing before you write the prompt.
 
 ## Text-to-video
 
@@ -235,8 +265,12 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/video/generate" \
 **Staging gotcha (video & audio): reference by basename, and the file must live directly in the output root** (`NEMOFLIX_OUTPUT_DIR`, e.g. `outputs/`), NOT a subfolder. The stager resolves `<output_root>/<basename>` — a clip sitting in `outputs/images/imports/...` resolves to `outputs/<basename>`, misses, and passes the raw name through, so ComfyUI can't load it. Copy the driving clip and the wav up to the output root first, then pass just the filename. (Images have their own `/api/images/upload` endpoint; video/audio do not — hence the manual copy.)
 
 Notes:
-- **`denoise_strength` is THE dial (default 0.5) — do not leave it at 1.0.** At 1.0 the driving video is noised to pure noise and the model regenerates a talking head from the first frame, **discarding the body motion** (the subject won't dance/bend). Lower preserves motion: **0.5** keeps body motion while re-animating the mouth; **0.3–0.4** locks motion harder; **0.6–0.7** = stronger lip-sync but weaker motion fidelity. Override per request via `workflow_params:{"denoise_strength":0.4}`.
-- **Keep `prompt` a generic placeholder** like `"a woman is talking"`. Motion comes from the driving video, identity/appearance from that same video (preserved at denoise 0.5), lip-sync from the audio. The prompt only lightly nudges expression — describing the motion or the character just fights the driving clip.
+- **`denoise_strength` is THE dial (default 0.4) — do not leave it at 1.0.** At 1.0 the driving video is noised to pure noise and the model regenerates a talking head from the first frame, **discarding the body motion** (the subject won't dance/bend). Lower preserves motion: **0.4** (our verified default) holds body motion while re-animating the mouth; **0.35** locks motion harder; **0.5–0.7** = stronger lip-sync but weaker motion fidelity. Override per request via `workflow_params:{"denoise_strength":0.5}`.
+  - **Why 0.4 is the default:** on a real POV-ride driving clip, 0.4 held the hip/glute motion noticeably better than Kijai's 0.5 reference while lip-sync stayed clean (verified 2026-08-28). Use **0.4** as the go-to for motion-heavy driving clips; raise to 0.5 when the driving motion is subtle and you want max sync. Drop to 0.35 only if you need even more motion and can accept slightly softer mouth sync.
+- **Windowing overshoot → dead/rapid-motion tail is handled NATIVELY — do not add custom trim code.** InfiniteTalk generates in fixed **81-frame windows** (`frame_window_size=81`, `motion_frame=9` → 72 new frames/window: valid counts are **81, 153, 225…** = 3.24s, 6.12s, 9.0s at 25fps). A clip whose audio lands between boundaries (e.g. 5.06s) renders up to the next full window (6.12s); the unanchored tail would show a "rapid motion then freeze" artifact. **Kijai's graph already fixes this two ways, and both are wired in — this was verified from the node source, not guessed:** (a) `MultiTalkWav2VecEmbeds` internally clamps `num_frames` to the audio (`actual = min(num_frames, audio_dur*fps)`), so the AUDIO drives real length; (b) `VHS_VideoCombine` has `trim_to_audio: true`, which cuts the windowed overshoot back to the audio track on output. Net: no custom Python, no post-render ffmpeg trim. An earlier session reinvented both with an API length-derive block and an `_trim_v2v_to_motion` ffmpeg helper — **both were reverted; do not reintroduce them.** If a tail freeze ever reappears, check `trim_to_audio` didn't get flipped off in `infinitetalk_v2v.json`, don't add trimming code.
+- **`tiled_vae` must stay ON (`true`) for 12GB nodes.** The VAE *decode* memory scales with output frame count — an 81-frame clip decodes fine, but a longer one (e.g. 127 frames for a 5s line at 25fps) OOMs the decode on a 12GB card (~10GB already resident + the full-frame decode tensor). Tiled VAE decodes in tiles so decode memory stays flat regardless of length. It's now `true` in `infinitetalk_v2v.json` node 192 (`WanVideoImageToVideoMultiTalk`). If a long v2v ever OOMs specifically at `wan_video_vae.py` decode, verify `tiled_vae` didn't get flipped back off; next lever after that is bumping `blocks_to_swap` 12→16.
+- **Keep `prompt` a generic placeholder** like `"a woman is talking"`. Motion comes from the driving video, identity/appearance from that same video (preserved at denoise 0.4), lip-sync from the audio. The prompt only lightly nudges expression — describing the motion or the character just fights the driving clip.
+- **`length` on v2v is a generous CAP, not an exact length — leave it at the 201 default.** It feeds `num_frames` into `MultiTalkWav2VecEmbeds`, which clamps it down to the audio (`actual = min(num_frames, audio_dur*fps)`), so the **audio** drives real clip length. 201 ≈ 8s at 25fps, bounding RAM on a 12GB node; any audio shorter than that (the usual case) clamps below it automatically. This is Kijai's own mechanism (his reference sets a big cap and lets the audio govern) — matched, not reinvented. Output is **25fps regardless of the driving clip's fps**, and `force_rate: 25` re-times the driving video to match, so the motion covers the whole clip. Only lower `length` to force a hard *shorter* clip. Match the staged wav's length to the driving clip so audio and motion end together.
 - **Resolution is the speed lever.** On a 12GB card, 480×480×81 ≈ 3 min; 640×640×81 ≈ 19 min — same pipeline. Iterate tests at 480, only go big once the clip + denoise are locked.
 - Same GGUF/block-swap low-VRAM rules as the audio-driven talking-head above.
 - **Model swaps are EXPENSIVE on a shared low-VRAM node — do not interleave workflows that use different models.** Each workflow family (`wan22_i2v`, `wan22_t2v`, `infinitetalk_i2v`, `infinitetalk_v2v`, …) loads its own model set. On a 12GB card only one fits, so switching families forces a full unload + reload — minutes of dead GPU time each way, and it happens again when you switch back. Rules: (1) **Batch all jobs of the same workflow together** before moving to another; don't alternate. (2) **Never reorder or kill a running job to slot in a different-model job** — you pay for the reload you interrupt *and* the reload to come back. Once a model is warm, ride it. (3) If you must run two different families, finish one family completely, then the other — never ping-pong. You can't load models on the fly for free.

@@ -694,6 +694,76 @@ async def list_jobs_by_character(
     return matching[offset:offset + limit]
 
 
+async def count_active_jobs_for_agent(agent_id: str) -> int:
+    """Count an agent's in-flight jobs, for enforcing max_concurrent_jobs."""
+    return await get_pool().fetchval(
+        "SELECT COUNT(*) FROM jobs WHERE status IN ('pending', 'running') AND metadata->>'owner_id' = $1",
+        agent_id,
+    )
+
+
+def _agent_row(row: asyncpg.Record) -> dict[str, Any]:
+    data = dict(row)
+    for key in ("allowed_characters", "allowed_workflows"):
+        if data.get(key) is None:
+            data[key] = []
+    return data
+
+
+async def create_agent(
+    *,
+    id: str,
+    name: str,
+    key_hash: str,
+    allowed_characters: list[str] | None = None,
+    allowed_workflows: list[str] | None = None,
+    max_concurrent_jobs: int | None = None,
+) -> dict[str, Any]:
+    row = await get_pool().fetchrow(
+        """
+        INSERT INTO agents (id, name, key_hash, allowed_characters, allowed_workflows, max_concurrent_jobs)
+        VALUES ($1, $2, $3, $4::text[], $5::text[], $6)
+        RETURNING *
+        """,
+        id,
+        name,
+        key_hash,
+        allowed_characters or None,
+        allowed_workflows or None,
+        max_concurrent_jobs,
+    )
+    return _agent_row(row)
+
+
+async def list_agents() -> list[dict[str, Any]]:
+    rows = await get_pool().fetch("SELECT * FROM agents ORDER BY created_at")
+    return [_agent_row(row) for row in rows]
+
+
+async def get_agent(agent_id: str) -> dict[str, Any] | None:
+    row = await get_pool().fetchrow("SELECT * FROM agents WHERE id=$1", agent_id)
+    return _agent_row(row) if row else None
+
+
+async def get_agent_by_key_hash(key_hash: str) -> dict[str, Any] | None:
+    row = await get_pool().fetchrow("SELECT * FROM agents WHERE key_hash=$1", key_hash)
+    return _agent_row(row) if row else None
+
+
+async def set_agent_enabled(agent_id: str, enabled: bool) -> bool:
+    result = await get_pool().execute("UPDATE agents SET enabled=$2 WHERE id=$1", agent_id, enabled)
+    return result != "UPDATE 0"
+
+
+async def set_agent_key_hash(agent_id: str, key_hash: str) -> bool:
+    result = await get_pool().execute("UPDATE agents SET key_hash=$2 WHERE id=$1", agent_id, key_hash)
+    return result != "UPDATE 0"
+
+
+async def touch_agent_last_used(agent_id: str) -> None:
+    await get_pool().execute("UPDATE agents SET last_used_at=NOW() WHERE id=$1", agent_id)
+
+
 async def upsert_media(row: dict[str, Any]) -> None:
     async with get_pool().acquire() as conn:
         await conn.execute(

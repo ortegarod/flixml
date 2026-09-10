@@ -1,722 +1,255 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import type { LoraCheckpoint } from "../../types";
+import { useEffect, useMemo, useState } from "react";
+import { copyText } from "../../lib/agentContext";
 
-interface GenerateTabProps {
-  checkpoints: LoraCheckpoint[];
-  onQueued?: () => void;
-}
-
-type GenerateMode = "image" | "t2v" | "i2v";
-type ImageModel = string;
-
-interface GenerateResponse {
-  ok: boolean;
-  prompt_id?: string | null;
-  checkpoint?: string | null;
-  lora_name?: string | null;
-  mode?: string;
-  node_errors?: Record<string, unknown> | null;
-}
-
-interface CharacterSummary {
-  id: string;
-  name: string;
-  trigger: string | null;
-  base_prompt?: string | null;
-  defaults?: Record<string, unknown>;
-  loras: { workflow?: string; name?: string; strength?: number }[];
-  source_images: string[];
-}
-
-interface Provider {
-  id: string;
-  type: string;
-  roles?: string[];
-}
-
-function providerForRole(providers: Provider[], role: string): string {
-  const match = providers.find((p) => (p.roles ?? []).includes(role));
-  if (match) return match.id;
-  const fallback = providers.find((p) => (p.roles ?? []).includes("default"));
-  if (fallback) return fallback.id;
-  return providers[0]?.id ?? "";
-}
-
-interface WorkflowParamSchema {
-  type: string;
-  default?: unknown;
-  required?: boolean;
-}
-
+// Shape of a registry workflow as served by GET /api/workflows. Everything the
+// docs below render is derived live from this — no static workflow doc to drift.
 interface WorkflowMeta {
   id: string;
+  name?: string;
+  description?: string;
   task?: string;
-  output_type?: string;
-  requirements?: { workflow_type?: string; supports_lora?: boolean };
-  params: Record<string, WorkflowParamSchema>;
+  output_type?: "image" | "video";
+  requirements?: {
+    vram_gb?: number;
+    workflow_type?: string;
+    supports_lora?: boolean;
+    requires_image?: boolean;
+    requires_audio?: boolean;
+  };
 }
 
-type WorkflowDefaults = Record<string, Record<string, unknown>>;
+// ── Presentation maps ───────────────────────────────────────────────────────
+// The registry speaks in machine tokens (task strings, workflow_type). These
+// turn them into the words an end user thinks in, and fix the display order.
 
-function getImageWorkflowTypes(workflows: WorkflowMeta[]): string[] {
-  const types = new Set<string>();
-  for (const w of workflows) {
-    if (w.task === "text-to-image" && w.requirements?.workflow_type) {
-      types.add(w.requirements.workflow_type);
-    }
-  }
-  return Array.from(types);
+type GroupKey = "Images" | "Videos";
+const GROUP_ORDER: GroupKey[] = ["Images", "Videos"];
+
+// Each task = one subgroup. Order within a group, plus its in→out framing and a
+// copyable "paste to your agent" example so a newcomer has somewhere to start.
+const TASKS: Record<
+  string,
+  { group: GroupKey; label: string; input: string; output: string; order: number; example: string }
+> = {
+  "text-to-image": {
+    group: "Images",
+    label: "Text → Image",
+    input: "Text",
+    output: "Image",
+    order: 0,
+    example: "Generate an image of me on a rainy neon rooftop at night, cinematic.",
+  },
+  "image-to-image": {
+    group: "Images",
+    label: "Image → Image",
+    input: "Image",
+    output: "Image",
+    order: 1,
+    example: "From this image, give me three new camera angles of the same shot.",
+  },
+  "face-reference-to-image": {
+    group: "Images",
+    label: "Face → Image",
+    input: "Face",
+    output: "Image",
+    order: 2,
+    example: "Use this face as the reference and make a portrait in golden-hour light.",
+  },
+  "text-to-video": {
+    group: "Videos",
+    label: "Text → Video",
+    input: "Text",
+    output: "Video",
+    order: 0,
+    example: "A short cinematic clip of a woman walking through neon rain at night.",
+  },
+  "image-to-video": {
+    group: "Videos",
+    label: "Image → Video",
+    input: "Image",
+    output: "Video",
+    order: 1,
+    example: "Animate this image — slow push-in, hair moving in the wind.",
+  },
+  "first-last-frame-to-video": {
+    group: "Videos",
+    label: "Start + End → Video",
+    input: "2 frames",
+    output: "Video",
+    order: 2,
+    example: "Blend from this first frame to this last frame into one smooth clip.",
+  },
+  "video-to-video": {
+    group: "Videos",
+    label: "Video → Video",
+    input: "Clip + voice",
+    output: "Video",
+    order: 3,
+    example: "Take this clip and sync it to this voice line: 'You found me.'",
+  },
+};
+
+// Model family badge, derived from the workflow id (more human than workflow_type,
+// which lumps Pony under sdxl and lip-sync under wanvideo_wrapper).
+function modelFamily(id: string): { label: string; cls: string } {
+  if (id.startsWith("flux2")) return { label: "FLUX.2", cls: "bg-amber-500/15 text-amber-200" };
+  if (id === "pony_base") return { label: "Pony", cls: "bg-fuchsia-500/15 text-fuchsia-200" };
+  if (id.startsWith("sdxl")) return { label: "SDXL", cls: "bg-sky-500/15 text-sky-200" };
+  if (id.startsWith("qwen")) return { label: "Qwen", cls: "bg-violet-500/15 text-violet-200" };
+  if (id.startsWith("infinitetalk")) return { label: "InfiniteTalk", cls: "bg-emerald-500/15 text-emerald-200" };
+  if (id.startsWith("wan22")) return { label: "Wan 2.2", cls: "bg-rose-500/15 text-rose-200" };
+  return { label: "Model", cls: "bg-white/10 text-gray-300" };
 }
 
-function isFluxLike(type: string): boolean {
-  return type.toLowerCase().includes("flux");
-}
-
-function displayNameForType(type: string): string {
-  if (type === "flux2") return "Flux";
-  if (type === "sdxl") return "SDXL";
-  if (type === "pony") return "Pony";
-  return type;
-}
-
-// Resolve a workflow id from the registry by capability instead of hardcoding names.
-function resolveWorkflowId(
-  workflows: WorkflowMeta[],
-  mode: GenerateMode,
-  imageModel: string,
-): string {
-  const selector: { task: string; workflowType?: string; preferLora?: boolean } =
-    mode === "image"
-      ? { task: "text-to-image", workflowType: imageModel, preferLora: imageModel !== "sdxl" }
-      : mode === "t2v"
-        ? { task: "text-to-video" }
-        : { task: "image-to-video" };
-
-  const candidates = workflows.filter(
-    (w) =>
-      w.task === selector.task &&
-      (selector.workflowType ? w.requirements?.workflow_type === selector.workflowType : true),
-  );
-  if (candidates.length === 0) return "";
-  if (selector.preferLora != null) {
-    const exact = candidates.find(
-      (w) => Boolean(w.requirements?.supports_lora) === selector.preferLora,
-    );
-    if (exact) return exact.id;
-  }
-  return candidates[0].id;
-}
-
-const VIDEO_LENGTHS = [33, 49, 65, 81] as const;
-
-function checkpointLabel(checkpoint: LoraCheckpoint) {
-  if (checkpoint.step == null) return `${checkpoint.name} · final`;
-  return `${checkpoint.name} · step ${checkpoint.step.toLocaleString()}`;
-}
-
-function slugPrompt(prompt: string) {
-  const slug = prompt
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 36);
-  return slug || "generation";
-}
-
-function outputPrefix(mode: GenerateMode, prompt: string) {
-  const bucket = mode === "image" ? "images" : "videos";
-  return `${bucket}/${slugPrompt(prompt)}-${Date.now()}`;
-}
-
-export function GenerateTab({ checkpoints, onQueued }: GenerateTabProps) {
-  const latestCheckpoint = useMemo(() => {
-    const final = checkpoints.find((checkpoint) => checkpoint.step == null);
-    return final?.name || checkpoints[checkpoints.length - 1]?.name || "latest";
-  }, [checkpoints]);
-
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [mode, setMode] = useState<GenerateMode>("image");
-  const [imageModel, setImageModel] = useState<ImageModel>("");
-  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [availableCheckpoints, setAvailableCheckpoints] = useState<string[]>([]);
-  const [characterId, setCharacterId] = useState("none");
-  const [checkpoint, setCheckpoint] = useState("base");
-  const [prompt, setPrompt] = useState("");
-  const [promptDirty, setPromptDirty] = useState(false);
-  const [negativePrompt, setNegativePrompt] = useState("");
-  const [sourceImage, setSourceImage] = useState("");
-  const [width, setWidth] = useState(1248);
-  const [height, setHeight] = useState(832);
-  const [steps, setSteps] = useState(20);
-  const [guidance, setGuidance] = useState(4);
-  const [cfg, setCfg] = useState(5);
-  const [sdxlCheckpoint, setSdxlCheckpoint] = useState("");
-  const [loraStrength, setLoraStrength] = useState(1);
-  const [provider, setProvider] = useState("");
-  // Video output
-  const [videoLength, setVideoLength] = useState(49);
-  const [videoFps, setVideoFps] = useState(16);
-  // Advanced
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [seed, setSeed] = useState<string>("");
-  const [stepsHigh, setStepsHigh] = useState(4);
-  const [stepsLow, setStepsLow] = useState(4);
-  const [cfgHigh, setCfgHigh] = useState(1.0);
-  const [cfgLow, setCfgLow] = useState(1.0);
-  const [shift, setShift] = useState(5.0);
-  const [sampler, setSampler] = useState("euler");
-  const [scheduler, setScheduler] = useState("simple");
-
-  const [workflows, setWorkflows] = useState<WorkflowMeta[]>([]);
-  const [workflowDefaults, setWorkflowDefaults] = useState<WorkflowDefaults>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/characters")
-      .then((r) => r.json())
-      .then((data) => setCharacters(data.characters || []))
-      .catch(() => setCharacters([]));
-
-    fetch("/api/providers")
-      .then((r) => r.json())
-      .then((data: Provider[]) => {
-        const list = data || [];
-        setProviders(list);
-        setProvider((current) => current || providerForRole(list, mode === "image" ? "image" : "video"));
-      })
-      .catch(() => setProviders([]));
-
-    fetch("/api/workflows")
-      .then((r) => r.json())
-      .then((data: WorkflowMeta[]) => {
-        setWorkflows(data);
-        const defaults: WorkflowDefaults = {};
-        for (const wf of data) {
-          defaults[wf.id] = {};
-          for (const [key, schema] of Object.entries(wf.params ?? {})) {
-            if ("default" in schema) defaults[wf.id][key] = schema.default;
-          }
-        }
-        setWorkflowDefaults(defaults);
-        const imageTypes = getImageWorkflowTypes(data);
-        setImageModel((current) => (imageTypes.includes(current) ? current : imageTypes[0] || ""));
-      })
-      .catch(() => {});
-
-    fetch("/api/comfy/object_info/CheckpointLoaderSimple")
-      .then((r) => r.json())
-      .then((data) => {
-        const names: string[] = data?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] ?? [];
-        setAvailableCheckpoints(names);
-        setSdxlCheckpoint((current) => current || names[0] || "");
-      })
-      .catch(() => setAvailableCheckpoints([]));
-  }, []);
-
-  useEffect(() => {
-    const preselect = searchParams.get("character");
-    if (preselect) {
-      setCharacterId(preselect);
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams.get("character")]);
-
-  const selectedCharacter = characters.find((character) => character.id === characterId);
-
-  // Update prompt when character selection changes
-  useEffect(() => {
-    if (promptDirty) return;
-    if (selectedCharacter?.base_prompt) {
-      setPrompt(selectedCharacter.base_prompt);
-    } else if (characterId === "none") {
-      setPrompt("");
-    }
-  }, [characterId, selectedCharacter, mode, imageModel, promptDirty]);
-
-  // Update defaults (negative prompt) from character — overrides workflow default
-  useEffect(() => {
-    if (selectedCharacter?.defaults && typeof selectedCharacter.defaults.negative_prompt === "string") {
-      setNegativePrompt(selectedCharacter.defaults.negative_prompt);
-    } else if (characterId === "none") {
-      setNegativePrompt(workflowDefaultNegative.current);
-    }
-  }, [selectedCharacter, characterId]);
-  const availableImageTypes = useMemo(() => getImageWorkflowTypes(workflows), [workflows]);
-  const currentImageWorkflowId = resolveWorkflowId(workflows, "image", imageModel);
-  const selectedCharacterHasImageLora = Boolean(
-    selectedCharacter?.loras?.some((lora) => lora.workflow === currentImageWorkflowId),
-  );
-  const isVideoMode = mode !== "image";
-
-  const workflowDefaultNegative = useRef("");
-
-  function applyWorkflowDefaults(workflowId: string) {
-    const d = workflowDefaults[workflowId];
-    if (!d) return;
-    if (d.width != null) setWidth(d.width as number);
-    if (d.height != null) setHeight(d.height as number);
-    if (d.steps != null) setSteps(d.steps as number);
-    if (d.cfg != null) setCfg(d.cfg as number);
-    if (d.guidance != null) setGuidance(d.guidance as number);
-    if (d.lora_strength != null) setLoraStrength(d.lora_strength as number);
-    if (d.sampler != null) setSampler(d.sampler as string);
-    if (d.scheduler != null) setScheduler(d.scheduler as string);
-    if (d.length != null) setVideoLength(d.length as number);
-    if (d.fps != null) setVideoFps(d.fps as number);
-    if (d.steps_high != null) setStepsHigh(d.steps_high as number);
-    if (d.steps_low != null) setStepsLow(d.steps_low as number);
-    if (d.cfg_high != null) setCfgHigh(d.cfg_high as number);
-    if (d.cfg_low != null) setCfgLow(d.cfg_low as number);
-    if (d.shift != null) setShift(d.shift as number);
-    if (d.negative_prompt != null) {
-      setNegativePrompt(d.negative_prompt as string);
-      workflowDefaultNegative.current = d.negative_prompt as string;
-    }
-  }
-
-  function selectMode(nextMode: GenerateMode) {
-    setMode(nextMode);
-    setPromptDirty(false);
-    setProvider(providerForRole(providers, nextMode !== "image" ? "video" : "image"));
-    applyWorkflowDefaults(resolveWorkflowId(workflows, nextMode, imageModel));
-    setResult(null);
-    setError(null);
-  }
-
-  function selectImageModel(model: ImageModel) {
-    setImageModel(model);
-    setPromptDirty(false);
-    applyWorkflowDefaults(resolveWorkflowId(workflows, "image", model));
-    setResult(null);
-    setError(null);
-  }
-
-  async function submit() {
-    const cleanPrompt = prompt.trim();
-    if (!cleanPrompt) {
-      setError("Prompt is required.");
-      return;
-    }
-    if (mode === "i2v" && !sourceImage.trim()) {
-      setError("Image-to-video needs a source image path from the gallery, like images/example.png.");
-      return;
-    }
-    if (mode === "image" && imageModel === "sdxl" && !sdxlCheckpoint) {
-      setError("Choose a checkpoint discovered from your ComfyUI node.");
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const filenamePrefix = outputPrefix(mode, cleanPrompt);
-      const endpoint = mode === "image" ? "/api/image/generate" : "/api/video/generate";
-      const useCharacter = characterId !== "none";
-      const useCheckpoint = !useCharacter && checkpoint !== "base";
-      const parsedSeed = seed.trim() ? parseInt(seed, 10) : null;
-
-      const imageWorkflow = resolveWorkflowId(workflows, "image", imageModel);
-
-      const body = mode === "image"
-        ? {
-            workflow: imageWorkflow,
-            provider,
-            character: useCharacter ? characterId : undefined,
-            checkpoint: isFluxLike(imageModel) && useCheckpoint ? (checkpoint || latestCheckpoint) : undefined,
-            prompt: cleanPrompt,
-            negative: negativePrompt.trim() || undefined,
-            width,
-            height,
-            seed: parsedSeed ?? undefined,
-            steps,
-            lora_strength: loraStrength,
-            ...(isFluxLike(imageModel) ? { guidance } : { cfg, checkpoint: sdxlCheckpoint }),
-            filename_prefix: filenamePrefix,
-            submit: true,
-          }
-        : {
-            mode,
-            workflow: resolveWorkflowId(workflows, mode, imageModel),
-            provider,
-            character: useCharacter ? characterId : undefined,
-            image: mode === "i2v" ? sourceImage.trim() : undefined,
-            prompt: cleanPrompt,
-            negative: negativePrompt.trim() || undefined,
-            width: width || undefined,
-            height: height || undefined,
-            length: videoLength,
-            fps: videoFps,
-            seed: parsedSeed ?? undefined,
-            steps_high: stepsHigh,
-            steps_low: stepsLow,
-            cfg_high: cfgHigh,
-            cfg_low: cfgLow,
-            shift,
-            sampler,
-            scheduler,
-            filename_prefix: filenamePrefix,
-            submit: true,
-          };
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.detail || `${response.status}: failed to queue generation`);
-      }
-
-      setResult(data);
-      onQueued?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
+function InOut({ input, output }: { input: string; output: string }) {
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-5">
-      <section className="rounded-2xl border border-rose-600/30 bg-gradient-to-b from-rose-950/25 to-gray-950/70 p-4 space-y-3 shadow-lg shadow-rose-950/10">
-        <h2 className="text-lg font-semibold">Tell your agent what to make</h2>
-        <p className="text-sm text-gray-300 leading-relaxed">
-          Describe the result. The agent chooses the character, workflow, endpoint, and settings.
-        </p>
-        <div className="rounded-xl border border-gray-800 bg-black/35 p-3">
-          <p className="text-xs text-gray-300 leading-relaxed">"Generate an image of me walking through a rainy cyberpunk street."</p>
-        </div>
-      </section>
+    <span className="shrink-0 inline-flex items-center gap-1 text-[9px] font-mono">
+      <span className="rounded bg-white/[0.05] px-1 py-0.5 text-gray-400">{input}</span>
+      <span className="text-gray-600">→</span>
+      <span className="rounded bg-rose-600/15 px-1 py-0.5 text-rose-200">{output}</span>
+    </span>
+  );
+}
 
-      {/* Mode selector */}
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          ["image", "Image"],
-          ["t2v", "Text → Video"],
-          ["i2v", "Image → Video"],
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => selectMode(id as GenerateMode)}
-            className={`rounded-lg border px-2 py-2 text-xs font-medium transition ${
-              mode === id
-                ? "border-rose-500/60 bg-rose-600/15 text-rose-200"
-                : "border-gray-800 bg-gray-950/60 text-gray-500 hover:text-gray-300"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+function Chip({ children, cls }: { children: React.ReactNode; cls?: string }) {
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${cls ?? "bg-white/[0.06] text-gray-400"}`}>
+      {children}
+    </span>
+  );
+}
+
+// One workflow row. The factual, workflow-authored description is always visible —
+// that's what makes two same-family workflows legibly different — alongside
+// objective spec chips only (model, VRAM, LoRA, needs-image/voice). No opinions.
+function WorkflowCard({ w }: { w: WorkflowMeta }) {
+  const req = w.requirements ?? {};
+  const fam = modelFamily(w.id);
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-2.5 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-gray-100 truncate">{w.name ?? w.id}</span>
+        <span className="shrink-0 font-mono text-[9px] text-gray-600">{w.id}</span>
       </div>
-
-      {/* Image model selector */}
-      {mode === "image" && availableImageTypes.length > 0 && (
-        <div className="space-y-2">
-          <span className="text-xs font-medium text-gray-400">Model</span>
-          <div className="grid grid-cols-2 gap-2">
-            {availableImageTypes.map((m) => (
-              <button
-                key={m}
-                onClick={() => selectImageModel(m)}
-                className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                  imageModel === m
-                    ? "border-rose-500/60 bg-rose-600/15 text-rose-200"
-                    : "border-gray-800 bg-gray-950/60 text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                {displayNameForType(m)}
-              </button>
-            ))}
-          </div>
-        </div>
+      {w.description && (
+        <p className="text-[11px] text-gray-400 leading-snug">{w.description}</p>
       )}
-
-      {/* SDXL checkpoint */}
-      {mode === "image" && imageModel === "sdxl" && (
-        <label className="block space-y-2">
-          <span className="text-xs font-medium text-gray-400">Checkpoint</span>
-          <select
-            value={sdxlCheckpoint}
-            onChange={(e) => setSdxlCheckpoint(e.target.value)}
-            className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-          >
-            {availableCheckpoints.length === 0 && <option value="">No checkpoints discovered</option>}
-            {availableCheckpoints.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-          <p className="text-[10px] text-gray-600 leading-relaxed">
-            Checkpoints discovered from your connected ComfyUI node.
-          </p>
-        </label>
-      )}
-
-      {/* Character */}
-      <label className="block space-y-2">
-        <span className="text-xs font-medium text-gray-400">Character</span>
-        <select
-          value={characterId}
-          onChange={(event) => setCharacterId(event.target.value)}
-          className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-        >
-          <option value="none">No character / raw workflow</option>
-          {characters.map((character) => (
-            <option key={character.id} value={character.id}>
-              {character.name}{character.trigger ? ` · trigger: ${character.trigger}` : ""}
-            </option>
-          ))}
-        </select>
-        {selectedCharacter && (
-          <p className="text-[10px] text-gray-600 leading-relaxed">
-            Uses this character's LoRA when available. Trigger word <span className="text-gray-400">{selectedCharacter.trigger || "none"}</span> added automatically.
-          </p>
-        )}
-      </label>
-
-      {/* Provider */}
-      <label className="block space-y-2">
-        <span className="text-xs font-medium text-gray-400">Provider</span>
-        <select
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-          className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-        >
-          {providers.length === 0 && <option value={provider}>{provider}</option>}
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>{p.id}</option>
-          ))}
-        </select>
-      </label>
-
-      {/* Prompt */}
-      <label className="block space-y-2">
-        <span className="text-xs font-medium text-gray-400">Prompt</span>
-        <textarea
-          value={prompt}
-          onChange={(event) => {
-            setPrompt(event.target.value);
-            setPromptDirty(true);
-          }}
-          rows={8}
-          className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white leading-relaxed resize-y focus:outline-none focus:border-rose-600"
-        />
-      </label>
-
-      {/* Negative prompt — SDXL and video */}
-      {(isVideoMode || (mode === "image" && imageModel === "sdxl")) && (
-        <label className="block space-y-2">
-          <span className="text-xs font-medium text-gray-400">Negative prompt</span>
-          <textarea
-            value={negativePrompt}
-            onChange={(e) => setNegativePrompt(e.target.value)}
-            rows={3}
-            placeholder={isVideoMode ? "Default WAN negative prompt applied when empty" : ""}
-            className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white leading-relaxed resize-y focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
-          />
-        </label>
-      )}
-
-      {/* Flux raw checkpoint */}
-      {mode === "image" && isFluxLike(imageModel) && characterId === "none" && (
-        <label className="block space-y-2">
-          <span className="text-xs font-medium text-gray-400">Raw image checkpoint</span>
-          <select
-            value={checkpoint}
-            onChange={(event) => setCheckpoint(event.target.value)}
-            className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-          >
-            <option value="base">Base Flux2 model — no LoRA</option>
-            <option value="latest">Latest available LoRA checkpoint</option>
-            {checkpoints.map((item) => (
-              <option key={item.name} value={item.name}>
-                {checkpointLabel(item)}
-              </option>
-            ))}
-          </select>
-          <p className="text-[10px] text-gray-600 leading-relaxed">
-            Raw image mode bypasses character selection.
-          </p>
-        </label>
-      )}
-
-      {mode === "image" && isFluxLike(imageModel) && characterId !== "none" && selectedCharacter && !selectedCharacterHasImageLora && (
-        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3 text-xs text-amber-200">
-          This character does not have an image LoRA registered for the current workflow yet.
-        </div>
-      )}
-
-      {/* I2V source image */}
-      {mode === "i2v" && (
-        <label className="block space-y-2">
-          <span className="text-xs font-medium text-gray-400">Source image from gallery</span>
-          <input
-            value={sourceImage}
-            onChange={(event) => setSourceImage(event.target.value)}
-            placeholder="images/example.png"
-            className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-          />
-          <p className="text-[10px] text-gray-600">Open a gallery item and use its filename as the source.</p>
-        </label>
-      )}
-
-      {/* Width / Height / Image params */}
-      <div className="grid grid-cols-2 gap-3">
-        <NumberField label="Width" value={width} onChange={setWidth} min={512} max={2048} step={64} />
-        <NumberField label="Height" value={height} onChange={setHeight} min={512} max={2048} step={64} />
-        {mode === "image" && <NumberField label="Steps" value={steps} onChange={setSteps} min={1} max={60} step={1} />}
-        {mode === "image" && isFluxLike(imageModel) && <NumberField label="Guidance" value={guidance} onChange={setGuidance} min={1} max={10} step={0.5} />}
-        {mode === "image" && imageModel === "sdxl" && <NumberField label="CFG" value={cfg} onChange={setCfg} min={1} max={15} step={0.5} />}
+      <div className="flex flex-wrap items-center gap-1">
+        <Chip cls={fam.cls}>{fam.label}</Chip>
+        {typeof req.vram_gb === "number" && <Chip>{req.vram_gb} GB VRAM</Chip>}
+        {req.supports_lora && <Chip cls="bg-rose-600/15 text-rose-200">LoRA</Chip>}
+        {req.requires_image && <Chip>needs image</Chip>}
+        {req.requires_audio && <Chip cls="bg-emerald-500/15 text-emerald-200">needs voice</Chip>}
       </div>
-
-      {mode === "image" && (
-        <NumberField
-          label="LoRA strength"
-          value={loraStrength}
-          onChange={setLoraStrength}
-          min={0}
-          max={2}
-          step={0.05}
-        />
-      )}
-
-      {/* Video output controls */}
-      {isVideoMode && (
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block space-y-2">
-            <span className="text-xs font-medium text-gray-400">Length (frames)</span>
-            <select
-              value={videoLength}
-              onChange={(e) => setVideoLength(Number(e.target.value))}
-              className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-            >
-              {VIDEO_LENGTHS.map((n) => (
-                <option key={n} value={n}>{n} frames (~{(n / videoFps).toFixed(1)}s)</option>
-              ))}
-            </select>
-          </label>
-          <NumberField label="FPS" value={videoFps} onChange={setVideoFps} min={8} max={30} step={1} />
-        </div>
-      )}
-
-      {/* Advanced toggle */}
-      <button
-        onClick={() => setShowAdvanced((v) => !v)}
-        className="w-full flex items-center justify-between rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-2 text-xs font-medium text-gray-500 hover:text-gray-300 transition"
-      >
-        <span>Advanced</span>
-        <span>{showAdvanced ? "▲" : "▼"}</span>
-      </button>
-
-      {showAdvanced && (
-        <div className="space-y-3 rounded-lg border border-gray-800/60 bg-gray-950/40 p-3">
-          {/* Seed */}
-          <label className="block space-y-2">
-            <span className="text-xs font-medium text-gray-400">Seed</span>
-            <input
-              type="number"
-              value={seed}
-              onChange={(e) => setSeed(e.target.value)}
-              placeholder="Leave empty for random"
-              className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
-            />
-          </label>
-
-          {/* Video sampling params */}
-          {isVideoMode && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <NumberField label="Steps high" value={stepsHigh} onChange={setStepsHigh} min={1} max={50} step={1} />
-                <NumberField label="Steps low" value={stepsLow} onChange={setStepsLow} min={1} max={50} step={1} />
-                <NumberField label="CFG high" value={cfgHigh} onChange={setCfgHigh} min={0} max={10} step={0.1} />
-                <NumberField label="CFG low" value={cfgLow} onChange={setCfgLow} min={0} max={10} step={0.1} />
-              </div>
-              <NumberField label="Shift" value={shift} onChange={setShift} min={0} max={20} step={0.5} />
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block space-y-2">
-                  <span className="text-xs font-medium text-gray-400">Sampler</span>
-                  <input
-                    value={sampler}
-                    onChange={(e) => setSampler(e.target.value)}
-                    className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-                  />
-                </label>
-                <label className="block space-y-2">
-                  <span className="text-xs font-medium text-gray-400">Scheduler</span>
-                  <input
-                    value={scheduler}
-                    onChange={(e) => setScheduler(e.target.value)}
-                    className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-                  />
-                </label>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      <button
-        onClick={submit}
-        disabled={submitting}
-        className="w-full rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-gray-800 disabled:text-gray-500 px-4 py-2.5 text-sm font-semibold transition"
-      >
-        {submitting ? "Queueing..." : mode === "image" ? "Generate image" : "Generate video"}
-      </button>
-
-      {error && (
-        <div className="rounded-lg border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-200">
-          {error}
-        </div>
-      )}
-
-      {result && (
-        <div className="rounded-lg border border-emerald-900/60 bg-emerald-950/30 p-3 space-y-2">
-          <p className="text-sm font-medium text-emerald-200">Queued successfully</p>
-          <div className="text-xs text-emerald-100/80 space-y-1 break-all">
-            <p>Prompt ID: {result.prompt_id}</p>
-            {result.checkpoint && <p>Checkpoint: {result.checkpoint}</p>}
-            {result.lora_name && <p>LoRA: {result.lora_name}</p>}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-}) {
+export function GenerateTab() {
+  const [workflows, setWorkflows] = useState<WorkflowMeta[]>([]);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/workflows")
+      .then((r) => r.json())
+      .then((data: WorkflowMeta[]) => setWorkflows(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
+
+  const copyExample = (key: string, text: string) => {
+    copyText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+  };
+
+  // Group → task → workflows[], all live from the registry so it stays in sync.
+  const tree = useMemo(() => {
+    const byTask = new Map<string, WorkflowMeta[]>();
+    for (const w of workflows) {
+      const t = w.task ?? "";
+      if (!TASKS[t]) continue; // skip anything we don't have a framing for
+      if (!byTask.has(t)) byTask.set(t, []);
+      byTask.get(t)!.push(w);
+    }
+    return GROUP_ORDER.map((group) => {
+      const tasks = [...byTask.entries()]
+        .filter(([t]) => TASKS[t].group === group)
+        .sort((a, b) => TASKS[a[0]].order - TASKS[b[0]].order)
+        .map(([t, ws]) => ({ task: t, meta: TASKS[t], workflows: ws }));
+      return { group, tasks };
+    }).filter((g) => g.tasks.length > 0);
+  }, [workflows]);
+
   return (
-    <label className="block space-y-2">
-      <span className="text-xs font-medium text-gray-400">{label}</span>
-      <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full rounded-lg bg-gray-950 border border-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-rose-600"
-      />
-    </label>
+    <div className="h-full overflow-y-auto p-4 space-y-5">
+      <section className="rounded-2xl border border-rose-600/30 bg-gradient-to-b from-rose-950/25 to-gray-950/70 p-4 space-y-2 shadow-lg shadow-rose-950/10">
+        <h2 className="text-lg font-semibold">Start here</h2>
+        <p className="text-sm text-gray-300 leading-relaxed">
+          Nemoflix Studio is an AI image &amp; video studio you run by talking to your agent. You say
+          what you want; your agent makes it through the API and it lands in your gallery. Below is
+          every workflow you have installed — what it makes, what it needs, and which model it runs.
+        </p>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-white">What can you make here?</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Grouped by what goes in and what comes out. Tap a workflow for details, or copy an example
+            and paste it to your agent.
+          </p>
+        </div>
+
+        {workflows.length === 0 && (
+          <p className="text-xs text-gray-600">Loading workflows…</p>
+        )}
+
+        {tree.map(({ group, tasks }) => (
+          <div key={group} className="space-y-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{group}</p>
+            {tasks.map(({ task, meta, workflows: ws }) => (
+              <div key={task} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-gray-200">{meta.label}</span>
+                  <InOut input={meta.input} output={meta.output} />
+                </div>
+                <div className="space-y-1.5">
+                  {ws.map((w) => (
+                    <WorkflowCard key={w.id} w={w} />
+                  ))}
+                </div>
+                <button
+                  onClick={() => copyExample(task, meta.example)}
+                  className="w-full text-left rounded-lg border border-gray-800 bg-black/35 px-2.5 py-1.5 text-[11px] text-gray-400 hover:border-rose-600/50 hover:text-gray-200 transition"
+                  title="Copy this instruction to give your agent"
+                >
+                  {copiedKey === task ? "Copied ✓" : `Try: "${meta.example}"`}
+                </button>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {/* Movies — lives in the Projects tab, not a single workflow */}
+        <div className="space-y-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Movies</p>
+          <div className="rounded-xl border border-gray-800 bg-gray-950/50 p-3 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-gray-100">Stitch shots into a film</span>
+              <InOut input="Many shots" output="Movie" />
+            </div>
+            <p className="text-[10px] text-gray-500">
+              Script, scenes, shots, voiceover and subtitles — that's the{" "}
+              <span className="text-gray-300">Projects</span> tab.
+            </p>
+          </div>
+        </div>
+
+        <p className="text-[10px] text-gray-600 leading-relaxed">
+          Want it to always look like a specific person? Train a character under{" "}
+          <span className="text-gray-400">Characters</span>, then just name them in your prompt.
+        </p>
+      </section>
+    </div>
   );
 }

@@ -69,7 +69,7 @@
   },
   "131": {
     "class_type": "VHS_VideoCombine",
-    "inputs": {"images": ["309", 0], "frame_rate": "{{fps}}", "loop_count": 0, "filename_prefix": "{{filename_prefix}}", "format": "video/h264-mp4", "pingpong": false, "save_output": true, "audio": ["125", 0]}
+    "inputs": {"images": ["309", 0], "frame_rate": "{{fps}}", "loop_count": 0, "filename_prefix": "{{filename_prefix}}", "format": "video/h264-mp4", "pingpong": false, "save_output": true, "trim_to_audio": true, "audio": ["125", 0]}
   },
   "309": {
     "class_type": "WanVideoPassImagesFromSamples",
@@ -85,7 +85,7 @@
   },
   "192": {
     "class_type": "WanVideoImageToVideoMultiTalk",
-    "inputs": {"vae": ["129", 0], "width": ["291", 1], "height": ["291", 2], "frame_window_size": 81, "motion_frame": 9, "force_offload": false, "colormatch": "disabled", "start_image": ["291", 0], "tiled_vae": false, "clip_embeds": ["237", 0], "mode": "infinitetalk", "output_path": ""}
+    "inputs": {"vae": ["129", 0], "width": ["291", 1], "height": ["291", 2], "frame_window_size": 81, "motion_frame": 9, "force_offload": false, "colormatch": "disabled", "start_image": ["291", 0], "tiled_vae": true, "clip_embeds": ["237", 0], "mode": "infinitetalk", "output_path": ""}
   },
   "128": {
     "class_type": "WanVideoSampler",

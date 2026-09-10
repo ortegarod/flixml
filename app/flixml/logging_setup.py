@@ -106,7 +106,7 @@ def setup_logging(level: str = "INFO") -> None:
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
 
     _CONFIGURED = True
-    logging.getLogger("nemoflix").info(
+    logging.getLogger("flixml").info(
         "logging configured",
         extra={"event": "logging.configured", "level": level.upper()},
     )

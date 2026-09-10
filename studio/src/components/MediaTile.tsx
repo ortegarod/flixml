@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { Trash2, X, Play, Wand2, ArrowRight, Expand, Check } from "lucide-react";
+import { Trash2, X, Play, Wand2, ArrowRight, Expand, Check, Bot } from "lucide-react";
 import type { MediaItem } from "../types";
+import { buildAgentContext, copyText } from "../lib/agentContext";
 
 interface MediaTileProps {
   item: MediaItem;
@@ -21,6 +22,7 @@ export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFro
   const [removingDataset, setRemovingDataset] = useState(false);
   const [showI2VInput, setShowI2VInput] = useState(false);
   const [motionPrompt, setMotionPrompt] = useState("");
+  const [copied, setCopied] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   function handleMouseEnter() {
@@ -137,6 +139,19 @@ export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFro
 
       {/* Top-right buttons */}
       <div className={`absolute top-2 right-2 z-10 flex gap-1 transition-all ${selectionMode ? "hidden" : deleteOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+        {/* Copy context for agent */}
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            copyText(buildAgentContext(item));
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1600);
+          }}
+          className="w-8 h-8 rounded-lg bg-black/60 text-white/80 backdrop-blur-sm flex items-center justify-center hover:bg-violet-600 hover:text-white transition-all"
+          title="Copy context for agent"
+        >
+          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Bot className="w-4 h-4" />}
+        </button>
         {/* Expand to lightbox */}
         <button
           onClick={(event) => { event.stopPropagation(); onOpen(); }}

@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 
-logger = logging.getLogger("nemoflix.comfy")
+logger = logging.getLogger("flixml.comfy")
 
 
 class ComfyClient:

@@ -70,6 +70,8 @@ interface AppContextType {
   setSelected: (url: string | null) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (v: boolean) => void;
   activeSidebarTab: SidebarTab;
   setActiveSidebarTab: (tab: SidebarTab) => void;
   training: LoraTrainingStatus | null;
@@ -244,15 +246,34 @@ function Shell() {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+        {/* Mobile backdrop — tap to dismiss the overlay drawer (desktop shows sidebar inline, no backdrop) */}
+        {ctx.sidebarOpen && (
+          <div
+            className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+            onClick={() => ctx.setSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         {ctx.sidebarOpen && (
           <AppSidebar
             activeTab={ctx.activeSidebarTab}
+            collapsed={ctx.sidebarCollapsed}
             onTabChange={(tab) => {
+              // Clicking the already-active icon collapses the panel (VS Code style)
+              if (tab === ctx.activeSidebarTab && !ctx.sidebarCollapsed) {
+                ctx.setSidebarCollapsed(true);
+                return;
+              }
+              ctx.setSidebarCollapsed(false);
               ctx.setActiveSidebarTab(tab);
               if (tab === "generate") navigate("/studio");
               if (tab === "projects") navigate("/studio/projects");
               if (tab === "characters") navigate("/studio/lora-training");
+              // On mobile the sidebar is an overlay — close it after picking a destination
+              if (typeof window !== "undefined" && window.innerWidth < 768) {
+                ctx.setSidebarOpen(false);
+              }
             }}
             onClose={() => ctx.setSidebarOpen(false)}
             checkpoints={ctx.checkpoints}
@@ -440,7 +461,12 @@ function AppRoutes() {
 
   const jobsQuery = useQuery({
     queryKey: jobsKey,
-    queryFn: () => fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 3500),
+    // The jobs poll must outlast a busy GPU node: /api/jobs reconciles every job
+    // against its node's /queue + /history, which crawls while that node is mid-render.
+    // A short abort (3.5s) killed every poll during generation, so in-progress cards —
+    // especially video, whose node stays saturated the whole time — never entered the
+    // cache and never rendered. Give the poll room to complete against a busy node.
+    queryFn: () => fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 20000),
     refetchInterval: 5000,
   });
 
@@ -466,7 +492,11 @@ function AppRoutes() {
   const [checkpoints, setCheckpoints] = useState<LoraCheckpoint[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<any[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Open by default on desktop, closed on mobile (the sidebar is an overlay drawer there)
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 768 : true
+  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>("generate");
   const [projectData, setProjectData] = useState<{
     project: Project;
@@ -759,6 +789,8 @@ function AppRoutes() {
     setSelected,
     sidebarOpen,
     setSidebarOpen,
+    sidebarCollapsed,
+    setSidebarCollapsed,
     activeSidebarTab,
     setActiveSidebarTab,
     training,
