@@ -50,5 +50,8 @@ training/
 outputs/
 studio/public/demos/*.mp4
 
-# Local workflow overrides
+# Local workflow overrides — private, never committed.
+# This path must track the backend module name. The app/nemoflix -> app/flixml
+# rename left it pointing at the old path, which silently un-ignored the dir.
+app/flixml/workflows/local/
 app/nemoflix/workflows/local/
