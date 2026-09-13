@@ -412,8 +412,8 @@ class ImageGenerateRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description="Base checkpoint model filename for SDXL workflows (e.g. sdxl_checkpoint.safetensors).",
-        json_schema_extra={"examples": ["sdxl_checkpoint.safetensors"]},
+        description="Base checkpoint model filename for SDXL workflows (e.g. sd_xl_base_1.0.safetensors).",
+        json_schema_extra={"examples": ["sd_xl_base_1.0.safetensors"]},
     )
     workflow_params: dict[str, Any] | None = Field(
         default=None,
@@ -2648,7 +2648,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
     # Prepend base_prompt (the character's look description) first, then run
     # trigger-word injection on the combined text — base_prompt already names
     # the character, so this stops the trigger word from being duplicated as
-    # an orphaned "Name," fragment between base_prompt and the scene prompt.
+    # an orphaned trigger-word fragment between base_prompt and the scene prompt.
     prompt = body.prompt
     if character_base_prompt and character_base_prompt.lower() not in prompt.lower():
         prompt = f"{character_base_prompt}, {prompt}"
