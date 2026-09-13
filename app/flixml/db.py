@@ -680,6 +680,14 @@ async def list_jobs(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
     return [_job_row(row) for row in rows]
 
 
+async def list_active_jobs() -> list[dict[str, Any]]:
+    """Return every job that has not reached a terminal state, oldest first."""
+    rows = await get_pool().fetch(
+        "SELECT * FROM jobs WHERE status NOT IN ('completed', 'failed') ORDER BY created_at ASC"
+    )
+    return [_job_row(row) for row in rows]
+
+
 async def list_jobs_by_character(
     character_id: str, limit: int = 60, offset: int = 0
 ) -> list[dict[str, Any]]:

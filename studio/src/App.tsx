@@ -532,59 +532,11 @@ function AppRoutes() {
   const loadRef = useRef(load);
   loadRef.current = load;
 
+  // Job state arrives through the /api/jobs and /api/listing polls above, which the
+  // server-side reconciler keeps current. There is no push channel to fall out of sync.
   useEffect(() => {
     loadRef.current();
-
-    const es = new EventSource("/api/events");
-    es.addEventListener("job_update", (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (!msg.prompt_id) return;
-
-        const status = msg.status;
-        const promptId = msg.prompt_id;
-
-        if (status === "running" && msg.progress_percent !== undefined) {
-          // Smooth in-place progress update — no full refresh
-          queryClient.setQueryData<{ jobs?: JobItem[] }>(jobsKey, (current) => ({
-            jobs: (current?.jobs || []).map((j) =>
-              j.prompt_id === promptId
-                ? { ...j, status: "running", progress_percent: msg.progress_percent }
-                : j
-            ),
-          }));
-        } else if (status === "completed") {
-          // Mark as completed in-place first so user sees "Done"
-          queryClient.setQueryData<{ jobs?: JobItem[] }>(jobsKey, (current) => ({
-            jobs: (current?.jobs || []).map((j) =>
-              j.prompt_id === promptId
-                ? { ...j, status: "completed", progress_percent: 100 }
-                : j
-            ),
-          }));
-          // Refresh after a brief delay so the transition is visible
-          window.setTimeout(() => loadRef.current(), 2000);
-        } else if (status === "failed") {
-          // Show failed state
-          queryClient.setQueryData<{ jobs?: JobItem[] }>(jobsKey, (current) => ({
-            jobs: (current?.jobs || []).map((j) =>
-              j.prompt_id === promptId
-                ? { ...j, status: "failed", error: msg.error || "Generation failed" }
-                : j
-            ),
-          }));
-        }
-      } catch {
-        // If we can't parse, fall back to full refresh
-        loadRef.current();
-      }
-    });
-    es.onerror = () => {};
-
-    return () => {
-      es.close();
-    };
-  }, [queryClient]);
+  }, []);
 
   const loadProject = useCallback(async (id: string) => {
     setProjectId(id);

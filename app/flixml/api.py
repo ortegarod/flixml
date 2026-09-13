@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -11,20 +12,18 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote
 
 import httpx
-import websockets
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi import Response
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import Agent, bearer_scheme, resolve_agent
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_metadata, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
 from .workflows.registry import init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
@@ -581,121 +580,93 @@ def comfy_node_for_provider(provider: str | None) -> ComfyNode | None:
     )
 
 
-_WS_TASK: asyncio.Task | None = None
-_SSE_CLIENTS: set[asyncio.Queue] = set()
+logger = logging.getLogger("flixml.reconcile")
+
+_RECONCILE_TASK: asyncio.Task | None = None
+_RECONCILE_INTERVAL_SECONDS = 3.0
+# How long a job may be unknown to its node before we call it abandoned. Covers the
+# window between our DB insert and the node registering the prompt.
+_ABANDON_AFTER_SECONDS = 600
 
 
-async def _sse_broadcast(event: str, data: dict[str, Any]) -> None:
-    if not _SSE_CLIENTS:
-        return
-    payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
-    dead = set()
-    for q in _SSE_CLIENTS:
-        try:
-            q.put_nowait(payload)
-        except asyncio.QueueFull:
-            dead.add(q)
-    _SSE_CLIENTS.difference_update(dead)
+async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]:
+    """Bring one job's DB row in line with its ComfyUI node.
+
+    The single reconciliation path in the app: both the polling loop and
+    GET /api/jobs/{prompt_id} go through here, so a job's status can only ever be
+    decided in one place.
+    """
+    client = comfy(comfy_node_for_provider(provider))
+    error: str | None = None
+    comfy_job = await client.get_optional(f"/api/jobs/{prompt_id}")
+    if comfy_job is not None:
+        raw = comfy_job
+        outputs = _extract_outputs_from_comfy_job(comfy_job, client)
+        status = comfy_job.get("status", "unknown")
+        execution = comfy_job.get("execution_status") or {}
+        if isinstance(execution, dict) and execution.get("status_str") == "error":
+            status = "failed"
+            error = "ComfyUI reported execution error"
+    else:
+        # Either the node has no record of this job, or it is an older build with no
+        # /api/jobs/{id} route. /history answers both: it holds the job once it has
+        # finished. Empty means the node cannot account for the job at all — "unknown",
+        # never "running". Reading an empty history as still-running is what let dead
+        # jobs sit in the generating lane forever.
+        raw = await client.get_optional(f"/history/{prompt_id}") or {}
+        outputs = _extract_outputs(raw, client)
+        status = "completed" if outputs else "unknown"
+
+    # ComfyUI saying "completed" means generation finished, not that we hold the files.
+    # Only report completed once _persist_outputs has actually imported them.
+    if status == "completed" and outputs:
+        status = "completed" if await _persist_outputs(prompt_id, outputs) else "running"
+
+    if status in {"pending", "running", "completed", "failed"}:
+        await update_job_status(prompt_id, status, error=error)
+    return {"status": status, "outputs": outputs if status == "completed" else [], "raw": raw}
 
 
-def _ws_url(base_url: str, client_id: str) -> str:
-    parsed = urlparse(base_url)
-    scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunparse((scheme, parsed.netloc, "/ws", "", f"clientId={client_id}", ""))
+def _abandoned(job: dict[str, Any]) -> bool:
+    """True if a job the node has no record of is old enough to write off."""
+    created = job.get("created_at")
+    if not isinstance(created, datetime):
+        return False
+    age = (datetime.now(UTC) - created).total_seconds()
+    return age > _ABANDON_AFTER_SECONDS
 
 
-def _progress_state_metadata(nodes: dict[str, Any]) -> dict[str, Any]:
-    total = len(nodes)
-    finished = 0
-    running = 0
-    current_node = None
-    step_value = 0
-    step_max = 0
-    for node_id, node in nodes.items():
-        if not isinstance(node, dict):
-            continue
-        state = node.get("state")
-        if state == "finished":
-            finished += 1
-        elif state == "running":
-            running += 1
-            if current_node is None:
-                current_node = node.get("display_node_id") or node.get("node_id") or node_id
-                step_value = int(node.get("value") or 0)
-                step_max = int(node.get("max") or 0)
-    percent = round((finished / total) * 100, 1) if total else None
-    return {
-        "nodes_total": total,
-        "nodes_finished": finished,
-        "nodes_running": running,
-        "current_node": current_node,
-        "step_value": step_value,
-        "step_max": step_max,
-        "progress_percent": percent,
-    }
+async def _reconcile_loop() -> None:
+    """Poll every unfinished job against its node until it reaches a terminal state.
 
-
-async def _comfy_ws_bridge_for_node(node: ComfyNode) -> None:
-    """WebSocket bridge for a single ComfyUI node."""
-    url = _ws_url(node.comfyui.normalized_url, node.comfy_client_id)
+    This is the only thing that imports generated files. It replaced a per-node
+    WebSocket bridge: ComfyUI evicts an existing socket when a new client claims the
+    same clientId but leaves the TCP connection open, so the bridge stayed connected,
+    silently received nothing, and jobs sat at "pending" forever with no error logged
+    anywhere. A poll has no equivalent failure mode — a bad cycle is simply retried on
+    the next one, and anything that goes wrong is logged.
+    """
     while True:
         try:
-            async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
-                async for raw in ws:
-                    if isinstance(raw, bytes):
-                        continue
-                    try:
-                        msg = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    msg_type = msg.get("type")
-                    data = msg.get("data", {}) if isinstance(msg.get("data"), dict) else {}
-                    prompt_id = data.get("prompt_id") or data.get("prompt")
-                    if msg_type == "execution_start" and isinstance(prompt_id, str):
-                        await update_job_status(prompt_id, "running")
-                        await _sse_broadcast("job_update", {"prompt_id": prompt_id, "status": "running"})
-                    elif msg_type == "progress_state" and isinstance(prompt_id, str):
-                        nodes = data.get("nodes", {})
-                        if isinstance(nodes, dict):
-                            await update_job_metadata(prompt_id, _progress_state_metadata(nodes))
-                    elif msg_type == "progress" and isinstance(prompt_id, str):
-                        value = int(data.get("value") or 0)
-                        max_value = int(data.get("max") or 0)
-                        pct = round((value / max_value) * 100, 1) if max_value else None
-                        await update_job_metadata(prompt_id, {
-                            "step_value": value,
-                            "step_max": max_value,
-                            "progress_percent": pct,
-                        })
-                        await _sse_broadcast("job_update", {"prompt_id": prompt_id, "status": "running", "progress_percent": pct})
-                    elif msg_type == "execution_success" and isinstance(prompt_id, str):
-                        await update_job_metadata(prompt_id, {"progress_percent": 100})
-                        try:
-                            # Query history from the node this bridge is bound to, not the
-                            # default node — the job ran here, so its outputs live here.
-                            history = await comfy(node).get(f"/history/{prompt_id}")
-                            outputs = _extract_outputs(history, comfy(node))
-                            persisted = await _persist_outputs(prompt_id, outputs)
-                        except Exception:
-                            persisted = False
-                        status = "completed" if persisted else "running"
-                        await _sse_broadcast("job_update", {"prompt_id": prompt_id, "status": status})
-                    elif msg_type in {"execution_error", "execution_interrupted"} and isinstance(prompt_id, str):
-                        error = data.get("exception_message") or msg_type
-                        await update_job_status(prompt_id, "failed", error=error)
-                        await _sse_broadcast("job_update", {"prompt_id": prompt_id, "status": "failed", "error": error})
+            for job in await list_active_jobs():
+                prompt_id = job.get("prompt_id")
+                if not isinstance(prompt_id, str):
+                    continue
+                try:
+                    result = await _reconcile_job(prompt_id, job.get("provider"))
+                except Exception:
+                    logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
+                    continue
+                if result["status"] == "unknown" and _abandoned(job):
+                    logger.warning("job %s abandoned: node has no record of it", prompt_id)
+                    await update_job_status(
+                        prompt_id, "failed", error="Abandoned — the GPU node has no record of this job."
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:
-            await asyncio.sleep(3)
-
-
-async def _comfy_ws_bridge() -> None:
-    """Start WebSocket bridges for ALL configured ComfyUI nodes."""
-    settings = get_settings()
-    nodes = settings.comfy_nodes()
-    tasks = [asyncio.create_task(_comfy_ws_bridge_for_node(node)) for node in nodes]
-    await asyncio.gather(*tasks, return_exceptions=True)
+            logger.warning("reconcile cycle failed", exc_info=True)
+        await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
 
 
 @app.get("/api/workflows")
@@ -721,51 +692,25 @@ async def list_registered_providers() -> list[dict]:
     return list_providers()
 
 
-@app.get("/api/events")
-async def sse_events(request: Request) -> StreamingResponse:
-    """Server-sent events stream for job progress, training updates, and lifecycle pings."""
-    q: asyncio.Queue[str] = asyncio.Queue(maxsize=50)
-    _SSE_CLIENTS.add(q)
-
-    async def stream():
-        try:
-            yield "data: {\"type\": \"connected\"}\n\n"
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
-                    yield msg
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            _SSE_CLIENTS.discard(q)
-
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    })
-
-
 @app.on_event("startup")
-async def start_comfy_bridge() -> None:
-    global _WS_TASK
+async def start_reconciler() -> None:
+    global _RECONCILE_TASK
     await init_db()
     init_default_providers()  # Register GPU providers
     init_registry(Path(__file__).parent / "workflows")  # Load workflow metadata
     await _sync_media_catalog()
-    if _WS_TASK is None or _WS_TASK.done():
-        _WS_TASK = asyncio.create_task(_comfy_ws_bridge())
+    if _RECONCILE_TASK is None or _RECONCILE_TASK.done():
+        _RECONCILE_TASK = asyncio.create_task(_reconcile_loop())
 
 
 @app.on_event("shutdown")
-async def stop_comfy_bridge() -> None:
-    global _WS_TASK
-    if _WS_TASK:
-        _WS_TASK.cancel()
+async def stop_reconciler() -> None:
+    global _RECONCILE_TASK
+    if _RECONCILE_TASK:
+        _RECONCILE_TASK.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await _WS_TASK
-        _WS_TASK = None
+            await _RECONCILE_TASK
+        _RECONCILE_TASK = None
     await close_db()
 
 
@@ -2099,27 +2044,15 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
     return False
 
 
-async def _queue_position(client: ComfyClient, prompt_id: str) -> int | None:
-    queue = await client.get("/queue")
-    pending = queue.get("queue_pending", []) if isinstance(queue, dict) else []
-    for index, item in enumerate(pending, start=1):
-        if isinstance(item, list) and len(item) > 1 and item[1] == prompt_id:
-            return index
-    return None
-
-
 @app.get("/api/jobs")
 async def jobs(include_completed: bool = True) -> dict[str, Any]:
     """Return jobs from durable Postgres state — a pure DB read, no live ComfyUI calls.
 
-    The per-node WebSocket bridge (`_comfy_ws_bridge_for_node`) keeps job status and
-    progress_percent current in Postgres in real time. This endpoint is polled every
-    few seconds by the gallery to render the "generating" lane, so it must never make a
-    synchronous call into a ComfyUI node: a saturated node (mid model-load) stops
-    answering HTTP, and per-job /queue + /history round-trips then hang the whole
-    endpoint until it times out — blanking the lane even though jobs are actively
-    running. Live reconciliation for a specific job still happens on demand in
-    GET /api/jobs/{prompt_id}.
+    `_reconcile_loop` keeps these rows current in the background. This endpoint is
+    polled every few seconds by the gallery to render the "generating" lane, so it must
+    never call into a ComfyUI node itself: a saturated node (mid model-load) stops
+    answering HTTP, and per-job round-trips would then hang the whole endpoint until it
+    times out — blanking the lane even though jobs are actively running.
     """
     db_jobs = await list_jobs(limit=100)
 
@@ -2135,60 +2068,26 @@ async def jobs(include_completed: bool = True) -> dict[str, Any]:
 
 @app.get("/api/jobs/{prompt_id}", response_model=JobStatusResponse)
 async def job(prompt_id: str) -> JobStatusResponse:
-    """Get status, outputs, and queue position for a single job."""
+    """Get status and outputs for a single job, reconciled live against its node."""
     record = await get_job(prompt_id)
     provider = (record or {}).get("provider")  # _job_row flattens metadata keys to top level
-    client = comfy(comfy_node_for_provider(provider))
-
-    # ComfyUI's normalized jobs endpoint reports pending/in_progress/completed.
-    # It is the right polling surface for UI status. Raw /history only exists after completion.
-    try:
-        comfy_job = await client.get(f"/api/jobs/{prompt_id}")
-        outputs = _extract_outputs_from_comfy_job(comfy_job, client)
-        comfy_status = comfy_job.get("status", "unknown")
-
-        # Do NOT trust ComfyUI's "completed" until we've actually imported the files.
-        # "completed" here means generation finished; we need to download before
-        # we tell the frontend the job is truly done.
-        if comfy_status == "completed" and outputs:
-            persisted = await _persist_outputs(prompt_id, outputs)
-            status = "completed" if persisted else "running"
-        else:
-            status = comfy_status
-
-        if status in {"pending", "running", "completed", "failed", "unknown"}:
-            await update_job_status(prompt_id, status)
-        progress = 100.0 if status == "completed" else None
-        position = await _queue_position(client, prompt_id) if status == "pending" else None
-        return JobStatusResponse(
-            ok=True,
-            prompt_id=prompt_id,
-            status=status,
-            progress=progress,
-            queue_position=position,
-            outputs_count=comfy_job.get("outputs_count"),
-            outputs=outputs if status == "completed" else [],
-            raw=comfy_job,
-        )
-    except Exception:
-        # Older ComfyUI builds may not have /api/jobs/{id}; fall back to history.
-        history = await client.get(f"/history/{prompt_id}")
-        outputs = _extract_outputs(history, client)
-        if outputs:
-            persisted = await _persist_outputs(prompt_id, outputs)
-            status = "completed" if persisted else "running"
-        else:
-            status = "running" if history == {} else "unknown"
-        await update_job_status(prompt_id, status)
-        progress = 100.0 if status == "completed" else None
-        return JobStatusResponse(ok=True, prompt_id=prompt_id, status=status, progress=progress, outputs=outputs if status == "completed" else [], raw=history)
+    result = await _reconcile_job(prompt_id, provider)
+    status = result["status"]
+    return JobStatusResponse(
+        ok=True,
+        prompt_id=prompt_id,
+        status=status,
+        progress=100.0 if status == "completed" else None,
+        outputs=result["outputs"],
+        raw=result["raw"],
+    )
 
 
 import os
 
 import yaml
 
-from fastapi.responses import FileResponse, Response  # StreamingResponse imported at top
+from fastapi.responses import FileResponse, Response
 
 _OUTPUT_DIR = Path(get_settings().output_dir)
 _ALLOW_EXT = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".gif"}

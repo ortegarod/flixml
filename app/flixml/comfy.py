@@ -35,6 +35,20 @@ class ComfyClient:
             )
             raise
 
+    async def get_optional(self, path: str) -> Any | None:
+        """GET that treats 404 as an answer rather than a failure.
+
+        The reconciler asks a node about every unfinished job it owns. A node with no
+        record of one replies 404 — that is information, not an error, and logging it
+        as an exception buried the real failures in stack traces.
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(f"{self.base_url}{path}")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
     async def post(self, path: str, payload: dict[str, Any] | None = None) -> Any:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

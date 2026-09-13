@@ -119,7 +119,6 @@ SUPPRESS_ACCESS_LOG_PATHS: frozenset[str] = frozenset({
     "/api/nodes",
     "/api/projects",
     "/api/characters",
-    "/api/events",
     "/api/health",
     "/api/lora-training/jobs",
     "/api/lora-training/status",
