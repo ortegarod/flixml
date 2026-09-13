@@ -13,7 +13,7 @@ required at all (default: false, i.e. attribution only).
 
 Usage (run from the repo root, with .env's DATABASE_URL available):
     python scripts/manage_agent_keys.py create <id> <name> \\
-        [--characters ciri,rigo] [--workflows flux2_lora] [--max-concurrent 1]
+        [--characters my_character] [--workflows sdxl_lora] [--max-concurrent 1]
     python scripts/manage_agent_keys.py list
     python scripts/manage_agent_keys.py rotate <id>
     python scripts/manage_agent_keys.py revoke <id>
@@ -108,7 +108,7 @@ async def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_create = sub.add_parser("create", help="Provision a new agent + API key")
-    p_create.add_argument("id", help="Slug, e.g. 'ciri'")
+    p_create.add_argument("id", help="Slug, e.g. 'my-agent'")
     p_create.add_argument("name", help="Display name")
     p_create.add_argument("--characters", help="Comma-separated character id allowlist (default: unrestricted)")
     p_create.add_argument("--workflows", help="Comma-separated workflow id allowlist (default: unrestricted)")

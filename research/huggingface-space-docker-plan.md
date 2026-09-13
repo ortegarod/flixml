@@ -201,7 +201,7 @@ The Docker server owns backend routing.
    ```
 
 3. **Verify locally in browser**
-   - Open `http://100.69.225.61:7860` or local exposed URL.
+   - Open `http://<host>:7860` or local exposed URL.
    - Check backend health.
    - Confirm LoRA status.
    - Confirm checkpoints.

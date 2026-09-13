@@ -90,10 +90,10 @@ const TASKS: Record<
 };
 
 // Model family badge, derived from the workflow id (more human than workflow_type,
-// which lumps Pony under sdxl and lip-sync under wanvideo_wrapper).
+// which lumps lip-sync under wanvideo_wrapper). Workflows from the private local/
+// tier fall through to the generic badge — the public build knows nothing about them.
 function modelFamily(id: string): { label: string; cls: string } {
   if (id.startsWith("flux2")) return { label: "FLUX.2", cls: "bg-amber-500/15 text-amber-200" };
-  if (id === "pony_base") return { label: "Pony", cls: "bg-fuchsia-500/15 text-fuchsia-200" };
   if (id.startsWith("sdxl")) return { label: "SDXL", cls: "bg-sky-500/15 text-sky-200" };
   if (id.startsWith("qwen")) return { label: "Qwen", cls: "bg-violet-500/15 text-violet-200" };
   if (id.startsWith("infinitetalk")) return { label: "InfiniteTalk", cls: "bg-emerald-500/15 text-emerald-200" };

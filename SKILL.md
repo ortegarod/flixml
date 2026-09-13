@@ -53,7 +53,7 @@ type: image
 url: http://.../media/portrait_still_0421.png
 dimensions: 832x1216
 character: my_character
-workflow: pony_base
+workflow: sdxl_lora
 seed: 1234567
 prompt: cinematic movie still, ...
 ```
@@ -170,7 +170,7 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
     "workflow": "<workflow-id>",
     "provider": "<provider-id>",
     "image": "source.png",
-    "model": "cyberrealisticPony_v160.safetensors",
+    "model": "<checkpoint>.safetensors",
     "prompt": "portrait, soft light",
     "denoise": 0.5,
     "width": 1024,
