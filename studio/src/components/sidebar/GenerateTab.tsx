@@ -185,7 +185,7 @@ export function GenerateTab() {
       <section className="rounded-2xl border border-rose-600/30 bg-gradient-to-b from-rose-950/25 to-gray-950/70 p-4 space-y-2 shadow-lg shadow-rose-950/10">
         <h2 className="text-lg font-semibold">Start here</h2>
         <p className="text-sm text-gray-300 leading-relaxed">
-          Nemoflix Studio is an AI image &amp; video studio you run by talking to your agent. You say
+          FlixML Studio is an AI image &amp; video studio you run by talking to your agent. You say
           what you want; your agent makes it through the API and it lands in your gallery. Below is
           every workflow you have installed — what it makes, what it needs, and which model it runs.
         </p>

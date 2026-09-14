@@ -333,7 +333,7 @@ function GuideTab() {
     <div className="h-full overflow-y-auto p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-500 leading-relaxed">
-          Paste into your agent to drive the full Nemoflix workflow.
+          Paste into your agent to drive the full FlixML workflow.
         </p>
         <button
           onClick={handleCopy}
@@ -376,7 +376,7 @@ function AgentsTab() {
     },
     {
       n: "03",
-      title: "Nemoflix runs the job",
+      title: "FlixML runs the job",
       body: "The backend handles API calls, configured GPU nodes, output paths, and job tracking.",
     },
     {
@@ -395,12 +395,12 @@ function AgentsTab() {
           <span className="text-[10px] uppercase tracking-wider text-amber-300/80 border border-amber-500/20 bg-amber-500/5 rounded-full px-2 py-0.5 ml-auto">Coming soon</span>
         </div>
         <p className="text-xs text-gray-500 leading-relaxed">
-          Nemoflix is designed for AI agents that create media, manage characters, generate scenes, and publish work through an API-first studio.
+          FlixML is designed for AI agents that create media, manage characters, generate scenes, and publish work through an API-first studio.
         </p>
       </section>
 
       <div className="rounded-2xl border border-violet-600/20 bg-gradient-to-b from-violet-950/10 to-gray-950 p-4 space-y-3">
-        <p className="text-xs font-semibold text-violet-300 uppercase tracking-wider">How agents use Nemoflix</p>
+        <p className="text-xs font-semibold text-violet-300 uppercase tracking-wider">How agents use FlixML</p>
         <div className="space-y-3">
           {workflow.map((step) => (
             <div key={step.n} className="flex gap-3">
@@ -431,7 +431,7 @@ function AgentsTab() {
       <div className="rounded-xl border border-gray-800/60 bg-gray-900/30 p-3 space-y-2">
         <p className="text-[11px] font-semibold text-gray-300">Backend direction</p>
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          The agent endpoint should eventually execute real Nemoflix tools behind the scenes: character lookup, generation queueing, project updates, node checks, and training jobs.
+          The agent endpoint should eventually execute real FlixML tools behind the scenes: character lookup, generation queueing, project updates, node checks, and training jobs.
         </p>
       </div>
     </div>
