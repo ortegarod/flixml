@@ -7,7 +7,7 @@ trap 'echo "ERROR: setup failed at line $LINENO"' ERR
 
 APT_GET="apt-get -o DPkg::Lock::Timeout=300"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
-APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/nemoflix-studio.git}"
+APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/flixml.git}"
 APP_DIR="${APP_DIR:-/root/nemoflix-studio}"
 
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:8188}"

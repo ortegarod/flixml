@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     training_cloud_size: str = Field(default="gpu-mi300x1-192gb", validation_alias="TRAINING_CLOUD_SIZE")
     training_cloud_image: str = Field(default="gpu-amd-base", validation_alias="TRAINING_CLOUD_IMAGE")
     training_cloud_ttl_hours: int = Field(default=12, validation_alias="TRAINING_CLOUD_TTL_HOURS")
-    training_cloud_repo_url: str = Field(default="https://github.com/ortegarod/nemoflix-studio.git", validation_alias="TRAINING_CLOUD_REPO_URL")
+    training_cloud_repo_url: str = Field(default="https://github.com/ortegarod/flixml.git", validation_alias="TRAINING_CLOUD_REPO_URL")
     training_cloud_ssh_keys: str | None = Field(default=None, validation_alias="TRAINING_CLOUD_SSH_KEYS")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
