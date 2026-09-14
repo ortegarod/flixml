@@ -113,7 +113,7 @@ def _load_guide_html() -> str:
     if not skill_path.is_file():
         # Last-ditch: look for a sibling install directory called nemoflix-studio.
         skill_path = project_root.parent / "nemoflix-studio" / "SKILL.md"
-    md = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "# Nemoflix Skill\n\nSKILL.md not found."
+    md = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "# FlixML Skill\n\nSKILL.md not found."
     _GUIDE_HTML = md
     return _GUIDE_HTML
 
@@ -933,7 +933,7 @@ async def agent_chat(payload: dict[str, Any]) -> dict[str, Any]:
         break
 
     text = (
-        "I'm the built-in Nemoflix agent surface. I can use the same API shape OpenClaw uses: "
+        "I'm the built-in FlixML agent surface. I can use the same API shape OpenClaw uses: "
         "characters, image/video generation, projects, GPU nodes, and ai-toolkit LoRA training. "
         "For this hackathon demo I'm wired through assistant-ui; the next step is enabling tool execution for requests like"
         f" '{last_text or 'generate an image'}'."
@@ -2771,7 +2771,7 @@ async def listing(
     """List generated media from the media table.
 
     This is the source-of-truth catalog for all images and videos managed by
-    Nemoflix Studio. Filters are applied in the database and support pagination,
+    FlixML Studio. Filters are applied in the database and support pagination,
     type filtering, free-text search, character/tag scoping, and training
     dataset selection.
     """
