@@ -6,6 +6,7 @@
   "output_type": "video",
   "requirements": {
     "vram_gb": 12,
+    "model_files_gb": 21.2,
     "workflow_type": "wan22",
     "supports_lora": true
   },
@@ -13,7 +14,7 @@
     "prompt": {
       "type": "str",
       "required": true,
-      "description": "Motion prompt"
+      "description": "Motion prompt. Describe big physical action with strong verbs (walks, jumps, turns). Words like subtle, slowly, or gently produce a near-still clip."
     },
     "image": {
       "type": "str",

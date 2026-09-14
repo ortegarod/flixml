@@ -1,8 +1,9 @@
 {
   "108": {
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "qwen-image-edit-2511-Q4_K_M.gguf"
+      "unet_name": "qwen_image_edit_2511_fp8mixed.safetensors",
+      "weight_dtype": "default"
     }
   },
   "109": {

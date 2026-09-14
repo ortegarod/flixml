@@ -6,9 +6,11 @@
   "output_type": "image",
   "requirements": {
     "vram_gb": 12,
+    "model_files_gb": 30.2,
     "workflow_type": "qwen_image_edit",
     "supports_lora": false,
-    "requires_image": true
+    "requires_image": true,
+    "notes": "TESTED 2026-09-14 on RTX 4070 Ti (12 GB) + 16 GB system RAM, 20 steps at 832x1248, same prompt and seed: the fp8 file (20.5 GB) sampled at 5.8 s per step, the Q4_K_M .gguf (13.2 GB) at 9.7 s per step, with near-identical output. The fp8 file is larger but the card does fp8 math natively and ComfyUI's Dynamic VRAM streams it from disk. A Q3_K_L .gguf (10.6 GB) was no faster than Q4_K_M and drew worse anatomy."
   },
   "params": {
     "image": {
@@ -19,7 +21,7 @@
     "prompt": {
       "type": "string",
       "required": true,
-      "description": "Plain-English edit instruction."
+      "description": "Plain-English edit instruction. Describe only what changes; the model keeps everything else. Name each body part and where it goes ('left hand on her left hip'). Place the subject against named objects with an exact position ('on the path, one step left of the bench, not touching it'). 'Next to the bench' is too loose and can put the subject in front of the bench instead."
     },
     "seed": {
       "type": "integer",
