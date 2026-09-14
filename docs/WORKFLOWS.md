@@ -1,12 +1,12 @@
 <!-- GENERATED FILE — do not edit by hand.
-     Source: app/nemoflix/workflows/*.meta.json
+     Source: app/flixml/workflows/*.meta.json
      Regenerate: python scripts/gen_workflows_doc.py -->
 
 # Nemoflix Workflows
 
-The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` — that endpoint is the source of truth and may include extra per-install workflows kept in `app/nemoflix/workflows/local/` (not listed here).
+The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` — that endpoint is the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**12 workflows** across 5 task types.
+**13 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -14,6 +14,7 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `flux2_lora` | Text → Image | Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt |
 | `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint |
 | `sdxl_lora` | Text → Image | Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt |
+| `text_logo` | Text → Image | Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion |
 | `qwen_multiangle` | Image → Image | Re-shoot an existing image of the same subject from a new camera angle |
 | `qwen_pose_edit` | Image → Image | Edit an existing image from a plain-English instruction — change a subject's pose, position, or what they're doing while holding their identity, clothing, the room, and lighting |
 | `sdxl_img2img` | Image → Image | Generate SDXL image variations from a source image using prompt guidance and denoise strength |
@@ -105,6 +106,24 @@ Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consiste
   - `checkpoint` · _string_ · **required** — SDXL checkpoint model filename
   - `lora_name` · _string_ · **required** — LoRA filename
   - `lora_strength` · _float_ · default `0.8` — LoRA strength (model and clip)
+
+### `text_logo` — Text Logo / Wordmark
+
+Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion. Use this whenever the output must spell an exact string (a handle, brand, wordmark) that diffusion models garble. Renders instantly, GPU-light, lands in the gallery like any generation.
+
+- **Output:** image
+- **Requirements:** ~1 GB VRAM
+- **Providers:** local
+- **Params:**
+  - `text` · _string_ · **required** — Exact text to typeset (spelled precisely, e.g. 'R404')
+  - `font_color` · _string_ · default `gold` — Text color — PIL color name ('gold', 'white', 'red') or hex ('#D4AF37')
+  - `font` · _string_ · default `TTNorms-Black.otf` — Font filename available on the ComfyUI node (e.g. TTNorms-Black.otf, FreeMonoBold.ttf)
+  - `font_size` · _integer_ · default `200` — Font size in px
+  - `text_x` · _integer_ · default `125` — Text left position. Default centers a 4-char string at font_size 200 on an 800px canvas
+  - `text_y` · _integer_ · default `280` — Text top position. Default vertically centers at font_size 200 on an 800px canvas
+  - `width` · _integer_ · default `800`
+  - `height` · _integer_ · default `800`
+  - `bg_color` · _integer_ · default `0` — Background color as a packed RGB int (0 = black, 16777215 = white)
 
 ## Image → Image
 

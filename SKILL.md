@@ -184,7 +184,7 @@ curl -sS -X POST "$NEMOFLIX_API_URL/api/image/generate" \
 
 ### Re-angle, pose-edit, and identity-preserving edits
 
-For "more angles," "change the pose," or "same person, new scene," pick the image-to-image workflow whose description matches the intent (`GET /api/workflows`). Feed the source `image`, keep the `character`/`prompt` intent, and pass any workflow-specific knobs via `workflow_params` (each workflow declares its own in its meta `params` — read them there rather than memorizing them here). Install-specific workflows in `app/nemoflix/workflows/local/` also show up in the live registry, so always trust the API over any list.
+For "more angles," "change the pose," or "same person, new scene," pick the image-to-image workflow whose description matches the intent (`GET /api/workflows`). Feed the source `image`, keep the `character`/`prompt` intent, and pass any workflow-specific knobs via `workflow_params` (each workflow declares its own in its meta `params` — read them there rather than memorizing them here). Install-specific workflows in `app/flixml/workflows/local/` also show up in the live registry, so always trust the API over any list.
 
 # Video generation — read before submitting any video
 
@@ -274,7 +274,7 @@ Notes:
 - **Resolution is the speed lever.** On a 12GB card, 480×480×81 ≈ 3 min; 640×640×81 ≈ 19 min — same pipeline. Iterate tests at 480, only go big once the clip + denoise are locked.
 - Same GGUF/block-swap low-VRAM rules as the audio-driven talking-head above.
 - **Model swaps are EXPENSIVE on a shared low-VRAM node — do not interleave workflows that use different models.** Each workflow family (`wan22_i2v`, `wan22_t2v`, `infinitetalk_i2v`, `infinitetalk_v2v`, …) loads its own model set. On a 12GB card only one fits, so switching families forces a full unload + reload — minutes of dead GPU time each way, and it happens again when you switch back. Rules: (1) **Batch all jobs of the same workflow together** before moving to another; don't alternate. (2) **Never reorder or kill a running job to slot in a different-model job** — you pay for the reload you interrupt *and* the reload to come back. Once a model is warm, ride it. (3) If you must run two different families, finish one family completely, then the other — never ping-pong. You can't load models on the fly for free.
-- **Editing a workflow's `*.meta.json` default requires a registry reload** — uvicorn `--reload` watches `.py` only, not meta files. After a meta edit, `touch app/nemoflix/api.py` (or restart the API), then verify with a `submit:false` dry-run that the value actually landed in the graph before spending GPU time.
+- **Editing a workflow's `*.meta.json` default requires a registry reload** — uvicorn `--reload` watches `.py` only, not meta files. After a meta edit, `touch app/flixml/api.py` (or restart the API), then verify with a `submit:false` dry-run that the value actually landed in the graph before spending GPU time.
 
 ## Track jobs
 
