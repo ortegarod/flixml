@@ -125,7 +125,7 @@ on:
 ### Camera language & emotional intent (from the guide)
 The guide maps camera moves to intent — use professional cinematography vocabulary for
 predictable results:
-- **Push-in** → intimacy / tension
+- **Push-in** → narrows attention onto the subject
 - **Pull-out** → scale / isolation / reveal
 - **Tracking shot** → viewer moves alongside the subject
 - **Orbit** → emphasizes the subject's importance
