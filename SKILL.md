@@ -3,11 +3,11 @@ name: flixml
 description: Read this whenever your human wants to generate images or video, or mentions Studio, workflows, or models. FlixML (formerly Nemoflix) is a self-hosted HTTP API — Studio — backed by ComfyUI, running open-source image/video/TTS models on the user's own GPUs. Use it to pick the right workflow for the request, drive the generate API, and land results in the gallery. Installed model/workflow catalog with what each is good for: docs/WORKFLOWS.md (served live at GET /api/workflows).
 ---
 
-# Nemoflix Skill
+# FlixML Skill
 
-You are reading this to learn how to use Nemoflix to make images and videos for your human. Nemoflix is the website and API. **You** are the agent driving it. There is no separate scriptwriter, no separate director — when your human pitches an idea, you write the script, plan the shots, call the API, and show them what you made.
+You are reading this to learn how to use FlixML to make images and videos for your human. FlixML is the website and API. **You** are the agent driving it. There is no separate scriptwriter, no separate director — when your human pitches an idea, you write the script, plan the shots, call the API, and show them what you made.
 
-**API base:** `http://<api-host>:<port>` — the Nemoflix Studio API endpoint.
+**API base:** `http://<api-host>:<port>` — the FlixML Studio API endpoint.
 **Live schema:** `GET <api-base>/api/openapi.json` — always read this for field names and types; don't guess.
 **Workflows:** `GET <api-base>/api/workflows` — discover workflow IDs, compatible providers, and workflow-specific params.
 
@@ -46,7 +46,7 @@ Studio is for one-off generations. Whatever you make lands in the gallery (`/api
 Every media card in the Studio gallery has a **"Copy context for agent"** button (the 🤖 icon on a tile, or the button in the lightbox). It copies a plain-text block describing exactly what the human is looking at:
 
 ```
-[Nemoflix asset]
+[FlixML asset]
 file: portrait_still_0421.png
 id: prm_ab12cd34
 type: image
@@ -444,7 +444,7 @@ Before you do image-to-video, identity work, body/likeness generation, or any fu
 
 ## Don'ts
 
-- Don't open the ComfyUI browser UI. ComfyUI is the headless execution engine — you talk to Nemoflix's API, not Comfy directly.
+- Don't open the ComfyUI browser UI. ComfyUI is the headless execution engine — you talk to FlixML's API, not Comfy directly.
 - Don't generate images before showing the outline.
 - Don't animate before showing the images.
 - Don't ask your human to fill in fields. 
