@@ -172,6 +172,7 @@ Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no 
   - `seed` · _int_
   - `steps_high` · _int_ · default `2`
   - `steps_low` · _int_ · default `2`
+  - `total_steps` · _int_ · default `4` — steps_high + steps_low; passed to KSamplerAdvanced.steps
   - `cfg_high` · _float_ · default `1.0`
   - `cfg_low` · _float_ · default `1.0`
   - `shift` · _float_ · default `5.0`

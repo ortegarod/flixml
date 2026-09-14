@@ -48,6 +48,11 @@
       "type": "int",
       "default": 2
     },
+    "total_steps": {
+      "type": "int",
+      "default": 4,
+      "description": "steps_high + steps_low; passed to KSamplerAdvanced.steps"
+    },
     "cfg_high": {
       "type": "float",
       "default": 1.0
