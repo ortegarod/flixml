@@ -31,7 +31,8 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 Text-to-image with the FLUX.2 base model. High-fidelity stills from a prompt — no LoRA, no source image.
 
 - **Output:** image
-- **Requirements:** ~24 GB VRAM
+- **Requirements:** ~24 GB VRAM, loads ~48.1 GB of model files (VRAM + system RAM)
+- **Notes:** TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Untested with more system RAM or a 24 GB+ GPU (e.g. RunPod); both reduce spilling. For fast local iteration use SDXL and composite text separately.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Text prompt
@@ -50,7 +51,8 @@ Text-to-image with the FLUX.2 base model. High-fidelity stills from a prompt —
 Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt.
 
 - **Output:** image
-- **Requirements:** supports LoRA, ~24 GB VRAM
+- **Requirements:** supports LoRA, ~24 GB VRAM, loads ~48.1 GB of model files (VRAM + system RAM)
+- **Notes:** TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Untested with more system RAM or a 24 GB+ GPU (e.g. RunPod); both reduce spilling. For fast local iteration use SDXL and composite text separately.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Text prompt
@@ -132,7 +134,8 @@ Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel no
 Re-shoot an existing image of the same subject from a new camera angle. Qwen-Image-Edit-2511 + multi-angle LoRA holds identity, clothing, and lighting while changing the camera viewpoint. Produces a sibling of the source still at a different angle.
 
 - **Output:** image
-- **Requirements:** needs image, ~12 GB VRAM
+- **Requirements:** needs image, ~12 GB VRAM, loads ~31.3 GB of model files (VRAM + system RAM)
+- **Notes:** Uses the fp8 model file, same as qwen_pose_edit, where fp8 tested about 40% faster than the Q4_K_M .gguf on an RTX 4070 Ti (2026-09-14). Also runs with this workflow's multi-angle LoRA on the fp8 file (tested 2026-09-14).
 - **Providers:** local
 - **Params:**
   - `image` · _string_ · **required** — Source image filename or Studio output path to re-angle
@@ -144,11 +147,12 @@ Re-shoot an existing image of the same subject from a new camera angle. Qwen-Ima
 Edit an existing image from a plain-English instruction — change a subject's pose, position, or what they're doing while holding their identity, clothing, the room, and lighting. Powered by Qwen-Image-Edit-2511; the source image is the reference (no LoRA).
 
 - **Output:** image
-- **Requirements:** needs image, ~12 GB VRAM
+- **Requirements:** needs image, ~12 GB VRAM, loads ~30.2 GB of model files (VRAM + system RAM)
+- **Notes:** TESTED 2026-09-14 on RTX 4070 Ti (12 GB) + 16 GB system RAM, 20 steps at 832x1248, same prompt and seed: the fp8 file (20.5 GB) sampled at 5.8 s per step, the Q4_K_M .gguf (13.2 GB) at 9.7 s per step, with near-identical output. The fp8 file is larger but the card does fp8 math natively and ComfyUI's Dynamic VRAM streams it from disk. A Q3_K_L .gguf (10.6 GB) was no faster than Q4_K_M and drew worse anatomy.
 - **Providers:** local
 - **Params:**
   - `image` · _string_ · **required** — Source image filename or Studio output path to edit
-  - `prompt` · _string_ · **required** — Plain-English edit instruction.
+  - `prompt` · _string_ · **required** — Plain-English edit instruction. Describe only what changes; the model keeps everything else. Name each body part and where it goes ('left hand on her left hip'). Place the subject against named objects with an exact position ('on the path, one step left of the bench, not touching it'). 'Next to the bench' is too loose and can put the subject in front of the bench instead.
   - `seed` · _integer_ · default `42`
 
 ### `sdxl_img2img` — SDXL Image-to-Image
@@ -179,10 +183,11 @@ Generate SDXL image variations from a source image using prompt guidance and den
 Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no source image.
 
 - **Output:** video
-- **Requirements:** ~12 GB VRAM
+- **Requirements:** ~12 GB VRAM, loads ~38.0 GB of model files (VRAM + system RAM)
+- **Notes:** UNTESTED: not yet run end-to-end with the default fp8_scaled UNets and T2V lightx2v LoRAs. The fp8 .safetensors defaults load through ComfyUI's Dynamic VRAM path, which streams weights from disk instead of holding them in RAM. GGUF files skip that path in ComfyUI-GGUF (PR #427 unmerged) and keep both experts in system RAM, so a GGUF swap needs its own RAM check.
 - **Providers:** local, cloud_serverless
 - **Params:**
-  - `prompt` · _str_ · **required** — Text prompt
+  - `prompt` · _str_ · **required** — Text prompt: subject, setting, and action. Describe big physical action with strong verbs (walks, jumps, turns). Words like subtle, slowly, or gently produce a near-still clip.
   - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
   - `width` · _int_ · default `640`
   - `height` · _int_ · default `640`
@@ -213,7 +218,7 @@ Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no 
 Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 2.1 I2V backbone + InfiniteTalk/MultiTalk). Talking-head motion only, not big body motion.
 
 - **Output:** video
-- **Requirements:** needs audio, ~12 GB VRAM
+- **Requirements:** needs audio, ~12 GB VRAM, loads ~19.8 GB of model files (VRAM + system RAM)
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** · default `a woman is talking` — Drives expression/motion. InfiniteTalk is talking-head; keep it simple.
@@ -245,7 +250,7 @@ Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 
 Move the camera around a single still — orbit, pan, zoom — to get real new angles as a video clip. Uses the Wan2.2-Fun-A14B-Control-Camera model.
 
 - **Output:** video
-- **Requirements:** supports LoRA, ~12 GB VRAM
+- **Requirements:** supports LoRA, ~12 GB VRAM, loads ~32.1 GB of model files (VRAM + system RAM)
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** — Scene/subject prompt. Keep it a generic description of the subject; the camera move comes from camera_pose, not the prompt.
@@ -281,10 +286,10 @@ Move the camera around a single still — orbit, pan, zoom — to get real new a
 Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion prompt driving the movement. Identity and scene come from the source image.
 
 - **Output:** video
-- **Requirements:** supports LoRA, ~12 GB VRAM
+- **Requirements:** supports LoRA, ~12 GB VRAM, loads ~21.2 GB of model files (VRAM + system RAM)
 - **Providers:** local, cloud_serverless
 - **Params:**
-  - `prompt` · _str_ · **required** — Motion prompt
+  - `prompt` · _str_ · **required** — Motion prompt. Describe big physical action with strong verbs (walks, jumps, turns). Words like subtle, slowly, or gently produce a near-still clip.
   - `image` · _str_ · **required** — Input image filename
   - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
   - `width` · _int_ · default `512`
@@ -316,7 +321,7 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
 Audio-driven lip-sync applied on top of a driving motion clip. Loads a source video (e.g. a subject dancing/twirling from a t2v/i2v run), encodes its motion, and re-samples it to lip-sync a voice line while preserving the body motion (Wan 2.1 I2V backbone + InfiniteTalk/MultiTalk). Use this instead of infinitetalk_i2v when you want real body motion, not just a talking head.
 
 - **Output:** video
-- **Requirements:** needs audio, needs video, ~12 GB VRAM
+- **Requirements:** needs audio, needs video, ~12 GB VRAM, loads ~19.8 GB of model files (VRAM + system RAM)
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** · default `a woman is talking` — Drives expression. The body motion comes from the driving video, so keep this simple.

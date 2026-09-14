@@ -66,6 +66,11 @@ def requirement_flags(req: dict) -> str:
     vram = req.get("vram_gb")
     if vram:
         flags.append(f"~{vram} GB VRAM")
+    files = req.get("model_files_gb")
+    if files:
+        # Weights that don't fit in VRAM are offloaded to system RAM, then disk.
+        # VRAM + RAM covering this total is what keeps generation fast.
+        flags.append(f"loads ~{files} GB of model files (VRAM + system RAM)")
     return ", ".join(flags) if flags else "—"
 
 
@@ -136,6 +141,9 @@ def main() -> None:
                 out.append("")
             out.append(f"- **Output:** {m.get('output_type', 'image')}")
             out.append(f"- **Requirements:** {requirement_flags(m.get('requirements', {}))}")
+            notes = (m.get("requirements") or {}).get("notes")
+            if notes:
+                out.append(f"- **Notes:** {notes}")
             providers = m.get("compatible_providers") or []
             if providers:
                 out.append(f"- **Providers:** {', '.join(providers)}")

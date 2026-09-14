@@ -23,11 +23,11 @@ Organize work like a film:
 - **Scene** — a sequence within the project
 - **Shot** — a single image or video clip with version history
 
-Generate inside the structure, or generate standalone. Shots can also carry voiceovers via ElevenLabs.
+Generate inside the structure, or generate standalone.
 
 ### Workflows
 
-FlixML Studio is built on [ComfyUI](https://github.com/comfyanonymous/ComfyUI) workflows. Add a workflow JSON file, reference it by ID when generating, and the Studio fills in variables at request time. Built-ins are included. See [SKILL.md](./SKILL.md) for authoring details.
+FlixML Studio is built on [ComfyUI](https://github.com/comfyanonymous/ComfyUI) workflows. Add a workflow JSON file, reference it by ID when generating, and the Studio fills in variables at request time. Built-ins are listed in [docs/WORKFLOWS.md](./docs/WORKFLOWS.md). The template variables are documented in `app/flixml/workflows/registry.py`.
 
 ### Providers
 
@@ -37,13 +37,13 @@ Any GPU that runs ComfyUI. Local nodes, remote servers, or RunPod serverless. Th
 // config.json
 {
   "gpu_nodes": [
-    { "id": "local-gpu-1", "roles": ["image"], "comfyui": { "url": "http://<your-comfyui-host>:<port>" } },
-    { "id": "local-gpu-2", "roles": ["video"], "comfyui": { "url": "http://<your-comfyui-host>:<port>" } }
+    { "id": "gpu-1", "roles": ["image"], "comfyui": { "url": "http://<your-comfyui-host>:<port>" } },
+    { "id": "gpu-2", "roles": ["video"], "comfyui": { "url": "http://<your-comfyui-host>:<port>" } }
   ]
 }
 ```
 
-Role-based routing prevents video jobs from landing on image-only nodes.
+Each node becomes a provider named `local-<id>`, here `local-gpu-1` and `local-gpu-2`. Studio rejects a video job sent to a node without the `video` role.
 
 ### Characters
 
@@ -66,7 +66,7 @@ Enforcement is off by default (`config.json` `security.require_api_key: false`):
 - PostgreSQL
 - A running ComfyUI instance (local, remote, or serverless like RunPod)
 
-Add the ComfyUI URL to `config.json` so the Studio can route jobs to it as a provider. See the Providers section below for an example.
+Add the ComfyUI URL to `config.json` so the Studio can route jobs to it as a provider. See Providers above for an example.
 
 ### Installation
 
@@ -98,7 +98,7 @@ See `.env.example` for all available variables.
 | `NEMOFLIX_API_URL` | URL the Studio UI uses to reach the backend |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `NEMOFLIX_OUTPUT_DIR` | Directory where generated media is stored |
-| `ELEVENLABS_API_KEY` | Optional. Enables text-to-speech voiceovers for shots. |
+| `ELEVENLABS_API_KEY` | Optional. Lists ElevenLabs voices at `/api/tts/voices`. |
 
 ## Quick API Example
 
@@ -116,7 +116,7 @@ curl -X POST <your-api-url>/api/image/generate \
   }'
 ```
 
-For full API usage — discovering workflows/providers, video, projects, voice, LoRA training, and more — see [SKILL.md](./SKILL.md).
+For agents: [SKILL.md](./SKILL.md) covers images, video, lip-sync, and multi-shot projects. The field reference is `GET /openapi.json`.
 
 ## LoRA Training
 
@@ -176,7 +176,7 @@ Training runs on AMD ROCm via the Ostris AI Toolkit.
 | `studio/` | React + Vite frontend |
 | `migrations/` | Database migrations |
 | `docker/` | Container setup |
-| `SKILL.md` | Full agent/user guide (also served raw at `/api/guide`) |
+| `SKILL.md` | Agent guide (also served raw at `/api/guide`) |
 
 ## License
 

@@ -6,9 +6,10 @@
   "output_type": "image",
   "requirements": {
     "vram_gb": 24,
+    "model_files_gb": 48.1,
     "workflow_type": "flux2",
     "supports_lora": false,
-    "notes": "TESTED 2026-09-07 on RTX 4070 Ti (12.9GB VRAM + 17GB RAM). FLUX.2-dev is ~32B: fp8 weights=35GB, +12GB text encoder. Exceeds a 12GB card's total memory and spills to SSD. Real timing on 12GB: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF+turbo. No quant makes it usable locally. Needs a 24GB+ GPU (e.g. RunPod) for practical speed. For fast local iteration use SDXL and composite text separately."
+    "notes": "TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Untested with more system RAM or a 24 GB+ GPU (e.g. RunPod); both reduce spilling. For fast local iteration use SDXL and composite text separately."
   },
   "params": {
     "prompt": {

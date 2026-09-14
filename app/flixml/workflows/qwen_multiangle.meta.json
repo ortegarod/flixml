@@ -6,9 +6,11 @@
   "output_type": "image",
   "requirements": {
     "vram_gb": 12,
+    "model_files_gb": 31.3,
     "workflow_type": "qwen_image_edit",
     "supports_lora": false,
-    "requires_image": true
+    "requires_image": true,
+    "notes": "Uses the fp8 model file, same as qwen_pose_edit, where fp8 tested about 40% faster than the Q4_K_M .gguf on an RTX 4070 Ti (2026-09-14). Also runs with this workflow's multi-angle LoRA on the fp8 file (tested 2026-09-14)."
   },
   "params": {
     "image": {
@@ -33,8 +35,8 @@
     {
       "image": "images/portrait_still_00001_.png",
       "prompt": "left side view eye-level shot medium shot",
-      "provider": "local-pc"
+      "provider": "local-gpu-1"
     }
   ],
-  "notes": "Output resolution auto-derives from the source via FluxKontextImageScale. Models live only on the 12GB PC node — always submit with provider=local-pc. Runs 4-step Lightning (steps/cfg/sampler baked in). Do not attach a character; pass only the angle spec as prompt."
+  "notes": "Output resolution auto-derives from the source via FluxKontextImageScale. Runs 4-step Lightning (steps/cfg/sampler baked in). Do not attach a character; pass only the angle spec as prompt."
 }

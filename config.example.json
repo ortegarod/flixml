@@ -1,7 +1,7 @@
 {
   "gpu_nodes": [
     {
-      "id": "local-image",
+      "id": "gpu-1",
       "name": "Local image node",
       "roles": ["image", "default"],
       "comfyui": {
@@ -9,7 +9,7 @@
       }
     },
     {
-      "id": "local-video",
+      "id": "gpu-2",
       "name": "Local video node",
       "roles": ["video"],
       "comfyui": {

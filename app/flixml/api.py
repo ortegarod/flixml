@@ -289,9 +289,9 @@ class ShotRecord(BaseModel):
 
 
 class VideoGenerateRequest(BaseModel):
-    mode: Literal["t2v", "i2v", "v2v"] = Field(
-        default="i2v",
-        description="t2v/i2v/v2v. v2v (e.g. InfiniteTalk motion+lip-sync) takes a driving video instead of a still image.",
+    mode: Literal["t2v", "i2v", "v2v"] | None = Field(
+        default=None,
+        description="t2v/i2v/v2v. Optional: derived from the workflow's task when omitted. v2v (e.g. InfiniteTalk motion+lip-sync) takes a driving video instead of a still image.",
         json_schema_extra={"examples": ["i2v"]},
     )
     workflow: str = Field(
@@ -347,7 +347,7 @@ class VideoGenerateRequest(BaseModel):
         ),
     )
 
-    provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-pc"]})
+    provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-gpu-1"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
 
 
@@ -373,9 +373,9 @@ class ImageGenerateRequest(BaseModel):
     )
     character: str | None = Field(default=None, description="Shortcut for one character binding")
     characters: list[CharacterBinding] = Field(default_factory=list, description="Optional explicit character bindings")
-    checkpoint: str | None = Field(
+    lora_checkpoint: str | None = Field(
         default=None,
-        description="LoRA checkpoint filename, path under the LoRA output dir, or 'latest'",
+        description="Trained LoRA checkpoint filename, path under the LoRA output dir, or 'latest'",
         json_schema_extra={"examples": ["latest"]},
     )
     prompt: str = Field(
@@ -406,9 +406,9 @@ class ImageGenerateRequest(BaseModel):
         default=None,
         description="Denoise strength for img2img workflows (0.0 preserves source, 1.0 ignores it).",
     )
-    model: str | None = Field(
+    checkpoint: str | None = Field(
         default=None,
-        description="Base checkpoint model filename for SDXL workflows (e.g. sd_xl_base_1.0.safetensors).",
+        description="Base model filename for workflows with a `checkpoint` param (list: GET /api/comfy/models/checkpoints).",
         json_schema_extra={"examples": ["sd_xl_base_1.0.safetensors"]},
     )
     workflow_params: dict[str, Any] | None = Field(
@@ -668,19 +668,9 @@ async def _reconcile_loop() -> None:
 
 @app.get("/api/workflows")
 async def list_workflows() -> list[dict]:
-    """List all available workflows an agent can request."""
+    """List all available workflows an agent can request, including each one's params."""
     registry = get_registry()
-    return [
-        {
-            "id": w.id,
-            "name": w.name,
-            "description": w.description,
-            "task": w.task,
-            "output_type": w.output_type,
-            "requirements": w.requirements,
-        }
-        for w in registry.list_workflows()
-    ]
+    return [w.to_dict() for w in registry.list_workflows()]
 
 
 @app.get("/api/providers")
@@ -826,8 +816,8 @@ def _character_reference_image(binding: CharacterBinding, record: dict[str, Any]
 
 
 async def _ensure_comfy_input_image(image: str, provider: str | None = None) -> str:
-    source = _OUTPUT_DIR / Path(image).name
-    if not source.is_file():
+    source = _resolve_output_file(image)
+    if source is None:
         return image
     # Upload to the node that will run the job, not the default node. Otherwise
     # the image lands on the wrong machine when image and video run on separate nodes.
@@ -1252,6 +1242,7 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
                 "scene_id": scene_id,
                 "shot_id": shot_id,
                 "version_id": version_id,
+                "output_role": "image",
             },
             submit=True,
         )
@@ -1756,6 +1747,7 @@ async def nodes() -> dict[str, Any]:
         }
         if configured.comfyui:
             client = comfy(configured)
+            node["provider"] = f"local-{configured.id}"  # matches LocalComfyUIProvider.provider_id
             node["url"] = configured.comfyui.normalized_url
             node["client_id"] = configured.comfy_client_id
             node["runtimes"]["comfyui"] = {"url": configured.comfyui.normalized_url, "client_id": configured.comfy_client_id, "online": False}
@@ -1769,6 +1761,7 @@ async def nodes() -> dict[str, Any]:
                     dev = devices[0]
                     node.update({
                         "gpu_name": dev.get("name", "?"),
+                        "vram_gb": round(dev.get("vram_total", 0) / 1_000_000_000, 1),
                         "vram_total": dev.get("vram_total", 0),
                         "vram_free": dev.get("vram_free", 0),
                         "torch_vram_total": dev.get("torch_vram_total", 0),
@@ -1811,7 +1804,7 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
     target = _OUTPUT_DIR / name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(await file.read())
-    return {"ok": True, "image": name}
+    return {"ok": True, "image": name, "filename": name}
 
 
 @app.post("/api/video/generate", response_model=VideoGenerateResponse)
@@ -1824,6 +1817,11 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
     bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
     prompt = body.prompt
+
+    if body.mode is None:
+        meta = get_registry().get(body.workflow)
+        task = meta.task if meta else ""
+        body.mode = "t2v" if task.startswith("text-") else "v2v" if task.startswith("video-") else "i2v"
 
     if agent is not None:
         agent.require_workflow(body.workflow)
@@ -2510,7 +2508,7 @@ def _lora_checkpoint_path(checkpoint: str, output_dir: Path | None = None) -> Pa
     if not str(resolved).startswith(str(output_root)):
         raise HTTPException(status_code=400, detail="Checkpoint must be inside the LoRA output directory")
     if resolved.suffix != ".safetensors" or not resolved.is_file():
-        raise HTTPException(status_code=404, detail="Checkpoint not found")
+        raise HTTPException(status_code=404, detail="LoRA checkpoint not found")
     return resolved
 
 
@@ -2553,8 +2551,8 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
 
     checkpoint_name: str | None = None
     checkpoint_lora_name: str | None = None
-    if body.checkpoint:
-        checkpoint_path = _lora_checkpoint_path(body.checkpoint)
+    if body.lora_checkpoint:
+        checkpoint_path = _lora_checkpoint_path(body.lora_checkpoint)
         checkpoint_name = checkpoint_path.name
         checkpoint_lora_name = _comfy_lora_name_for_checkpoint(checkpoint_path)
         loras.insert(0, {"name": checkpoint_lora_name, "strength": body.lora_strength, "checkpoint": checkpoint_name})
@@ -2564,7 +2562,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
     resolved_lora_name = checkpoint_lora_name or (loras[0].get("name") if loras else None)
 
     # Resolve each tunable field: explicit request value > character preset > workflow's own default (unset here).
-    resolved_model = body.model if body.model is not None else character_defaults.preferred_checkpoint
+    resolved_model = body.checkpoint if body.checkpoint is not None else character_defaults.preferred_checkpoint
     resolved_width = body.width if body.width is not None else character_defaults.image_width
     resolved_height = body.height if body.height is not None else character_defaults.image_height
     resolved_steps = body.steps if body.steps is not None else character_defaults.steps
