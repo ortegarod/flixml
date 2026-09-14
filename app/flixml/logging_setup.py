@@ -2,7 +2,7 @@
 
 One JSON object per line on stdout. systemd journal captures stdout, so:
 
-    journalctl -u <your-api-service> -o cat | jq .
+    journalctl -u flixml-studio-api.service -o cat | jq .
 
 is the single source of truth for application activity.
 
