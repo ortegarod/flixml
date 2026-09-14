@@ -106,13 +106,10 @@ def _load_guide_html() -> str:
     global _GUIDE_HTML
     if _GUIDE_HTML is not None:
         return _GUIDE_HTML
-    # Resolve SKILL.md relative to the project root. The package lives under
-    # app/flixml/, so the project root is three directories up.
-    project_root = Path(__file__).resolve().parents[3]
+    # Resolve SKILL.md relative to the project root. This file is
+    # <root>/app/flixml/api.py, so the root is parents[2].
+    project_root = Path(__file__).resolve().parents[2]
     skill_path = project_root / "SKILL.md"
-    if not skill_path.is_file():
-        # Last-ditch: look for a sibling install directory called nemoflix-studio.
-        skill_path = project_root.parent / "nemoflix-studio" / "SKILL.md"
     md = skill_path.read_text(encoding="utf-8") if skill_path.is_file() else "# FlixML Skill\n\nSKILL.md not found."
     _GUIDE_HTML = md
     return _GUIDE_HTML
