@@ -15,7 +15,7 @@ export function buildAgentContext(item: MediaItem): string {
   const meta = item.metadata || {};
   const wp = (meta.workflow_params as Record<string, any>) || {};
 
-  const lines: string[] = ["[Nemoflix asset]"];
+  const lines: string[] = ["[FlixML asset]"];
   const push = (label: string, value: unknown) => {
     if (value === null || value === undefined || value === "") return;
     lines.push(`${label}: ${value}`);

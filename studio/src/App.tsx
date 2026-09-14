@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
-import { BrowserRouter, Routes, Route, Outlet, useMatch, useNavigate, useParams, Link } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Menu, Sparkles, UserCircle } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
@@ -12,7 +12,6 @@ import { ProjectFilmsView } from "./components/ProjectFilmsView";
 import { Lightbox } from "./components/Lightbox";
 
 import { AppSidebar } from "./components/sidebar/AppSidebar";
-import LandingPage from "./LandingPage";
 import type { SidebarTab } from "./components/sidebar/AppSidebar";
 import type { CharacterSummary, JobItem, LoraCheckpoint, LoraTrainingStatus, MediaItem, Project, Scene, Shot, ProjectPhase, ProjectModeData } from "./types";
 
@@ -196,13 +195,10 @@ function Shell() {
               <Sparkles className="w-4 h-4 text-black" />
             </div>
             <div className="min-w-0 hidden sm:block">
-              <h1 className="font-heading text-base font-bold tracking-tight leading-none">Nemoflix<span className="text-brand"> Studio</span></h1>
+              <h1 className="font-heading text-base font-bold tracking-tight leading-none">FlixML<span className="text-brand"> Studio</span></h1>
               <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">Cinematic AI Studio</p>
             </div>
           </button>
-          <Link to="/" className="hidden sm:inline-flex items-center text-[11px] text-gray-600 hover:text-gray-400 transition ml-1" title="Back to home">
-            ← Home
-          </Link>
         </div>
 
         <div className="flex items-center gap-2 text-[11px]">
@@ -784,7 +780,7 @@ function AppRoutes() {
     <BrowserRouter>
       <AppContext.Provider value={ctxValue}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<Navigate to="/studio" replace />} />
           <Route path="/studio" element={<Shell />}>
             <Route index element={<StudioRoute />} />
             <Route path="projects" element={<ProjectsRoute />} />
