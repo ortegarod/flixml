@@ -1,6 +1,6 @@
-# Nemoflix Studio
+# FlixML Studio
 
-Nemoflix Studio is a media generation workbench. It runs image and video generation through ComfyUI workflows, trains LoRAs, and exposes everything through a clean REST API with a React UI for browsing, organizing, and queuing work. Jobs are tracked from queue to completion, routed across GPU providers, and organized into projects, scenes, and shots with persistent characters.
+FlixML Studio is a media generation workbench. It runs image and video generation through ComfyUI workflows, trains LoRAs, and exposes everything through a clean REST API with a React UI for browsing, organizing, and queuing work. Jobs are tracked from queue to completion, routed across GPU providers, and organized into projects, scenes, and shots with persistent characters.
 
 It ships with built-in workflows and lets you add your own.
 
@@ -27,7 +27,7 @@ Generate inside the structure, or generate standalone. Shots can also carry voic
 
 ### Workflows
 
-Nemoflix Studio is built on [ComfyUI](https://github.com/comfyanonymous/ComfyUI) workflows. Add a workflow JSON file, reference it by ID when generating, and the Studio fills in variables at request time. Built-ins are included. See [SKILL.md](./SKILL.md) for authoring details.
+FlixML Studio is built on [ComfyUI](https://github.com/comfyanonymous/ComfyUI) workflows. Add a workflow JSON file, reference it by ID when generating, and the Studio fills in variables at request time. Built-ins are included. See [SKILL.md](./SKILL.md) for authoring details.
 
 ### Providers
 
@@ -71,8 +71,8 @@ Add the ComfyUI URL to `config.json` so the Studio can route jobs to it as a pro
 ### Installation
 
 ```bash
-git clone https://github.com/ortegarod/nemoflix-studio.git
-cd nemoflix-studio
+git clone https://github.com/ortegarod/flixml.git
+cd flixml
 
 # API
 cd app && pip install -r requirements.txt
@@ -85,7 +85,7 @@ cp .env.example .env
 createdb nemoflix_studio
 
 # Start the API — migrations run automatically
-cd app && python -m nemoflix
+cd app && python -m flixml
 
 # Studio UI
 cd ../studio && npm install && npm run dev
