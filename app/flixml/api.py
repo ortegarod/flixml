@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .auth import Agent, bearer_scheme, resolve_agent
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
 from .workflows.registry import init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
@@ -614,6 +614,8 @@ async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]
         outputs = _extract_outputs(raw, client)
         status = "completed" if outputs else "unknown"
 
+    await update_job_run_times(prompt_id, *_run_times(comfy_job, raw.get(prompt_id) if comfy_job is None else None))
+
     # ComfyUI saying "completed" means generation finished, not that we hold the files.
     # Only report completed once _persist_outputs has actually imported them.
     if status == "completed" and outputs:
@@ -622,6 +624,21 @@ async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]
     if status in {"pending", "running", "completed", "failed"}:
         await update_job_status(prompt_id, status, error=error)
     return {"status": status, "outputs": outputs if status == "completed" else [], "raw": raw}
+
+
+def _ms_to_utc(value: Any) -> datetime | None:
+    return datetime.fromtimestamp(value / 1000, UTC) if isinstance(value, (int, float)) else None
+
+
+def _run_times(comfy_job: dict[str, Any] | None, history_entry: Any) -> tuple[datetime | None, datetime | None]:
+    """When the node started and finished running a job, from /api/jobs/{id} or /history/{id}."""
+    if comfy_job is not None:
+        return _ms_to_utc(comfy_job.get("execution_start_time")), _ms_to_utc(comfy_job.get("execution_end_time"))
+    status = history_entry.get("status") if isinstance(history_entry, dict) else None
+    messages = status.get("messages") or [] if isinstance(status, dict) else []
+    stamps = {m[0]: m[1].get("timestamp") for m in messages if isinstance(m, list) and len(m) == 2 and isinstance(m[1], dict)}
+    finished = stamps.get("execution_success") or stamps.get("execution_error") or stamps.get("execution_interrupted")
+    return _ms_to_utc(stamps.get("execution_start")), _ms_to_utc(finished)
 
 
 def _abandoned(job: dict[str, Any]) -> bool:
