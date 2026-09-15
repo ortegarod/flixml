@@ -171,6 +171,24 @@ async def update_job_metadata(prompt_id: str, metadata: dict[str, Any]) -> None:
         )
 
 
+async def update_job_run_times(prompt_id: str, started_at: datetime | None, finished_at: datetime | None) -> None:
+    """Record when the node started and finished running a job. Never overwrites a known time with NULL."""
+    if started_at is None and finished_at is None:
+        return
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE jobs
+            SET started_at=COALESCE($2, started_at),
+                finished_at=COALESCE($3, finished_at)
+            WHERE prompt_id=$1
+            """,
+            prompt_id,
+            started_at,
+            finished_at,
+        )
+
+
 async def get_job(prompt_id: str) -> dict[str, Any] | None:
     row = await get_pool().fetchrow("SELECT * FROM jobs WHERE prompt_id=$1", prompt_id)
     return _job_row(row) if row else None

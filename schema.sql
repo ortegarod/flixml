@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     metadata JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
+    completed_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_updated_at ON jobs(updated_at DESC);
