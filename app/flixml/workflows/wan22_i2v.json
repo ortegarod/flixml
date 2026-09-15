@@ -1,14 +1,16 @@
 {
   "90": {
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "{{high_model}}"
+      "unet_name": "{{high_model}}",
+      "weight_dtype": "default"
     }
   },
   "91": {
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "{{low_model}}"
+      "unet_name": "{{low_model}}",
+      "weight_dtype": "default"
     }
   },
   "38": {
