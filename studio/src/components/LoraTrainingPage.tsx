@@ -407,7 +407,7 @@ export function LoraTrainingPage() {
           <div className="px-5 py-4 border-b border-gray-800/40 bg-gray-900/20 space-y-3">
             <p className="text-xs text-gray-500">
               Register a remote dataset folder name. Start Training now fills it from gallery images marked for the selected character at{" "}
-              <code className="text-gray-400 bg-black/40 px-1 rounded">/root/nemoflix-studio/training/datasets/&lt;id&gt;/</code>.
+              <code className="text-gray-400 bg-black/40 px-1 rounded">/root/flixml/training/datasets/&lt;id&gt;/</code>.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="space-y-1">

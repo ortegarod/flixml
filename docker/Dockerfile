@@ -1,14 +1,14 @@
-# Nemoflix Studio — RunPod Worker (FLUX.2 + LoRA)
+# FlixML Studio — RunPod Worker (FLUX.2 + LoRA)
 #
 # Builds on top of the official runpod/worker-comfyui base image and bakes in:
 #   - FLUX.2 dev fp8mixed (unet, clip, vae)
-#   - Nemoflix LoRAs (mounted at build time)
+#   - FlixML LoRAs (mounted at build time)
 #
 # Usage:
-#   docker build -t ortegarodrigo/nemoflix-flux2:latest .
-#   docker push ortegarodrigo/nemoflix-flux2:latest
+#   docker build -t <your-dockerhub-user>/flixml-flux2:latest .
+#   docker push <your-dockerhub-user>/flixml-flux2:latest
 #
-# Then in RunPod console: create endpoint → image = ortegarodrigo/nemoflix-flux2:latest
+# Then in RunPod console: create endpoint → image = <your-dockerhub-user>/flixml-flux2:latest
 
 ARG WORKER_VERSION=5.1.0
 FROM runpod/worker-comfyui:${WORKER_VERSION}-base
@@ -42,7 +42,7 @@ RUN comfy model download \
   --filename flux2-vae.safetensors
 
 # ---------------------------------------------------------------------------
-# 3. Add Nemoflix LoRAs
+# 3. Add FlixML LoRAs
 # ---------------------------------------------------------------------------
 # COPY from build context (place .safetensors files next to this Dockerfile)
 COPY loras/*.safetensors models/loras/

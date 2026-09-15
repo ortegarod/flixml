@@ -16,11 +16,11 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 3011,
     proxy: {
-      "/api": { target: process.env.NEMOFLIX_API_URL, changeOrigin: true },
-      "/docs": { target: process.env.NEMOFLIX_API_URL, changeOrigin: true },
-      "/redoc": { target: process.env.NEMOFLIX_API_URL, changeOrigin: true },
-      "/openapi.json": { target: process.env.NEMOFLIX_API_URL, changeOrigin: true },
-      "/media": { target: process.env.NEMOFLIX_API_URL, changeOrigin: true },
+      "/api": { target: process.env.FLIXML_API_URL, changeOrigin: true },
+      "/docs": { target: process.env.FLIXML_API_URL, changeOrigin: true },
+      "/redoc": { target: process.env.FLIXML_API_URL, changeOrigin: true },
+      "/openapi.json": { target: process.env.FLIXML_API_URL, changeOrigin: true },
+      "/media": { target: process.env.FLIXML_API_URL, changeOrigin: true },
     },
   },
   build: {

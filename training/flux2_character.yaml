@@ -26,7 +26,7 @@ config:
   name: "my-character"
   process:
     - type: "ui_trainer"
-      training_folder: "/root/nemoflix-studio/training/output"
+      training_folder: "/root/flixml/training/output"
       device: cuda:0
       # Replace with the private trigger for the subject, e.g. a short unique token.
       trigger_word: "character_trigger"
@@ -40,7 +40,7 @@ config:
         max_step_saves_to_keep: 6
         push_to_hub: false
       datasets:
-        - folder_path: "/root/nemoflix-studio/training/datasets/identity-flux2"
+        - folder_path: "/root/flixml/training/datasets/identity-flux2"
           caption_ext: "txt"
           # 0.05 dropout is the guide default when text embeddings are NOT cached.
           caption_dropout_rate: 0.05

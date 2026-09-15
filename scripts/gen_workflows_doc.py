@@ -107,7 +107,7 @@ def main() -> None:
     out.append("     Source: app/flixml/workflows/*.meta.json")
     out.append("     Regenerate: python scripts/gen_workflows_doc.py -->")
     out.append("")
-    out.append("# Nemoflix Workflows")
+    out.append("# FlixML Workflows")
     out.append("")
     out.append(
         "The complete catalog of shipped generation workflows, grouped by task. "
