@@ -20,7 +20,7 @@ Training config templates, caption files, and dataset folders for character LoRA
 
 ## Workflow
 
-1. Mark 30–60 training images per character in the Nemoflix Studio gallery (toggle "Include in training dataset").
+1. Mark 30–60 training images per character in the FlixML Studio gallery (toggle "Include in training dataset").
 2. Write one caption file per image in `datasets/{character_id}/{image_stem}.txt`.
 3. Start training from the UI or via `POST /api/lora-training/start`.
 4. Monitor samples and download checkpoints when done.
@@ -50,7 +50,7 @@ ch4rtrig, a person, sitting at a wooden desk in a navy blazer, soft side lightin
 
 Rules:
 
-- Start with `<trigger>, <class word>,` where the class word is the generic category of your subject (e.g. `a person`, `a robot`, `a creature`). For Nemoflix Studio character LoRAs this is usually `a person`.
+- Start with `<trigger>, <class word>,` where the class word is the generic category of your subject (e.g. `a person`, `a robot`, `a creature`). For FlixML Studio character LoRAs this is usually `a person`.
 - Describe visible scene details (pose, clothing, setting, lighting, framing).
 - Do **not** describe identity-specific features (face shape, eye color, hair color).
 - No quality tags (`masterpiece`, `8k`, `photorealistic`).

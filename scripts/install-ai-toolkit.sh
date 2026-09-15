@@ -14,7 +14,7 @@ ROCM_INDEX_PRIMARY="${ROCM_INDEX_PRIMARY:-https://download.pytorch.org/whl/rocm7
 ROCM_INDEX_FALLBACK="${ROCM_INDEX_FALLBACK:-https://download.pytorch.org/whl/rocm7.0}"
 AI_TOOLKIT_REF="${AI_TOOLKIT_REF:-main}"
 INSTALL_UI_DEPS="${INSTALL_UI_DEPS:-1}"
-AITK_AUTH_TOKEN="${AITK_AUTH_TOKEN:-nemoflix-aitk-secret}"
+AITK_AUTH_TOKEN="${AITK_AUTH_TOKEN:-flixml-aitk-secret}"
 AITK_GPU_IDS="${AITK_GPU_IDS:-0}"
 PYTHON_BIN="$TOOLKIT_VENV/bin/python"
 export DEBIAN_FRONTEND=noninteractive
@@ -107,26 +107,26 @@ if compgen -G "$REPO_DIR/training/*.yaml" >/dev/null; then
 fi
 
 cat > "$TRAINING_DIR/README.md" <<'EOF'
-# Nemoflix AI Toolkit Training Workspace
+# FlixML AI Toolkit Training Workspace
 
 Training layout for disposable AMD droplets. The Studio repo is cloned at
-`/root/nemoflix-studio`; datasets/config/output live under that repo's
+`/root/flixml`; datasets/config/output live under that repo's
 `training/` directory.
 
 ## Paths
 
 - AI Toolkit: `/root/ai-toolkit`
 - Venv: `/root/ai-toolkit-venv`
-- Datasets: `/root/nemoflix-studio/training/datasets`
-- Configs: `/root/nemoflix-studio/training/config`
-- Outputs/checkpoints: `/root/nemoflix-studio/training/output`
-- Sample control images: `/root/nemoflix-studio/training/samples`
+- Datasets: `/root/flixml/training/datasets`
+- Configs: `/root/flixml/training/config`
+- Outputs/checkpoints: `/root/flixml/training/output`
+- Sample control images: `/root/flixml/training/samples`
 
 ## Run a config
 
 ```bash
 cd /root/ai-toolkit
-/root/ai-toolkit-venv/bin/python run.py /root/nemoflix-studio/training/config/<config>.yaml
+/root/ai-toolkit-venv/bin/python run.py /root/flixml/training/config/<config>.yaml
 ```
 
 ## Hugging Face token
@@ -155,7 +155,7 @@ EOF
 cat > "$TRAINING_DIR/run-ai-toolkit.sh" <<'EOF'
 #!/bin/bash
 set -Eeuo pipefail
-CONFIG_PATH="${1:?Usage: /root/nemoflix-studio/training/run-ai-toolkit.sh /root/nemoflix-studio/training/config/job.yaml}"
+CONFIG_PATH="${1:?Usage: /root/flixml/training/run-ai-toolkit.sh /root/flixml/training/config/job.yaml}"
 cd /root/ai-toolkit
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
 exec /root/ai-toolkit-venv/bin/python run.py "$CONFIG_PATH"

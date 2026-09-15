@@ -71,7 +71,7 @@ class LocalComfyUIProvider(GPUProvider):
         self.node_id = node_id
         self.base_url = base_url.rstrip("/")
         self.roles = roles or ["default"]
-        self.client_id = client_id or f"nemoflix-local-{node_id}-{int(time.time())}"
+        self.client_id = client_id or f"flixml-local-{node_id}-{int(time.time())}"
         self.timeout_sec = timeout_sec
         
         self._http_client: httpx.AsyncClient | None = None
@@ -480,7 +480,7 @@ class LocalComfyUIProvider(GPUProvider):
             raise ValueError(f"Node {node.id} has no ComfyUI configuration")
         
         return cls(
-            # Use the node's resolved client_id (with the stable `nemoflix-<id>`
+            # Use the node's resolved client_id (with the stable `flixml-<id>`
             # fallback), NOT the raw comfyui.client_id which is usually unset. The
             # progress WS bridge subscribes as `node.comfy_client_id`; ComfyUI routes
             # progress/execution events only to the submitting client_id, so submit

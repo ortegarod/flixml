@@ -2,7 +2,7 @@
      Source: app/flixml/workflows/*.meta.json
      Regenerate: python scripts/gen_workflows_doc.py -->
 
-# Nemoflix Workflows
+# FlixML Workflows
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` — that endpoint is the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 

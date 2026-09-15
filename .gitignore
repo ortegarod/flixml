@@ -24,6 +24,7 @@ config.json
 secrets/
 .env
 .env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -51,7 +52,6 @@ outputs/
 studio/public/demos/*.mp4
 
 # Local workflow overrides — private, never committed.
-# This path must track the backend module name. The app/nemoflix -> app/flixml
-# rename left it pointing at the old path, which silently un-ignored the dir.
+# This path must track the backend module name. Renaming the module without
+# updating it silently un-ignores the dir.
 app/flixml/workflows/local/
-app/nemoflix/workflows/local/

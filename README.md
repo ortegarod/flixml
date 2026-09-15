@@ -74,30 +74,32 @@ Add the ComfyUI URL to `config.json` so the Studio can route jobs to it as a pro
 git clone https://github.com/ortegarod/flixml.git
 cd flixml
 
-# API
-cd app && pip install -r requirements.txt
-
-# Copy environment variables and edit them
+# Config: environment variables and your ComfyUI nodes
 cp .env.example .env
-# Edit .env to set DATABASE_URL, NEMOFLIX_OUTPUT_DIR, etc.
+cp config.example.json config.json
+# Edit .env and config.json for your machine
 
-# Create the PostgreSQL database
-createdb nemoflix_studio
+# API (from the repo root). Migrations run automatically.
+pip install -r requirements.txt
+createdb flixml_studio
+set -a; . ./.env; set +a
+PYTHONPATH=app python -m flixml
 
-# Start the API — migrations run automatically
-cd app && python -m flixml
-
-# Studio UI
-cd ../studio && npm install && npm run dev
+# Studio UI, in a second terminal from the repo root
+set -a; . ./.env; set +a
+cd studio && npm install && npm run dev
 ```
 
 See `.env.example` for all available variables.
 
 | Variable | Description |
 |---|---|
-| `NEMOFLIX_API_URL` | URL the Studio UI uses to reach the backend |
+| `FLIXML_API_URL` | URL the Studio UI uses to reach the backend |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `NEMOFLIX_OUTPUT_DIR` | Directory where generated media is stored |
+| `FLIXML_OUTPUT_DIR` | Directory where generated media is stored |
+| `FLIXML_TRAINING_DIR` | Required. Local folder for LoRA training datasets and configs |
+| `FLIXML_LORA_OUTPUT_DIR` | Required. Local folder where trained LoRAs are saved |
+| `FLIXML_COMFY_LORA_DIR` | Required. ComfyUI `models/loras` folder trained LoRAs are copied to |
 | `ELEVENLABS_API_KEY` | Optional. Lists ElevenLabs voices at `/api/tts/voices`. |
 
 ## Quick API Example

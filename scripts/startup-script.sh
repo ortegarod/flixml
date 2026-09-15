@@ -8,7 +8,7 @@ trap 'echo "ERROR: setup failed at line $LINENO"' ERR
 APT_GET="apt-get -o DPkg::Lock::Timeout=300"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
 APP_REPO_URL="${APP_REPO_URL:-https://github.com/ortegarod/flixml.git}"
-APP_DIR="${APP_DIR:-/root/nemoflix-studio}"
+APP_DIR="${APP_DIR:-/root/flixml}"
 
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:8188}"
 
@@ -55,7 +55,7 @@ echo "=== PyTorch GPU Check ==="
 # Clone or update the project repo. The droplet uses this repo only for worker
 # install scripts/workflow assets. The durable API, database, Studio UI, and
 # control plane live on the VPS.
-echo "=== Cloning/updating Nemoflix Studio repo ==="
+echo "=== Cloning/updating FlixML Studio repo ==="
 if [ -d "$APP_DIR/.git" ]; then
     git -C "$APP_DIR" fetch --depth 1 origin main
     git -C "$APP_DIR" reset --hard origin/main
@@ -63,7 +63,7 @@ else
     git clone --depth 1 "$APP_REPO_URL" "$APP_DIR"
 fi
 
-# NOTE: Studio frontend and Nemoflix AMD API are hosted on the VPS, not on the
+# NOTE: Studio frontend and FlixML Studio API are hosted on the VPS, not on the
 # droplet. This droplet is disposable and runs ComfyUI only.
 
 # Install ComfyUI.
@@ -137,11 +137,11 @@ bash "$APP_DIR/scripts/install-video-stack.sh"
 
 echo "=== Setup Complete ==="
 echo "ComfyUI worker: http://<droplet-ip>:8188"
-echo "Studio UI and Nemoflix AMD API are hosted on the VPS."
-echo "On the VPS, set COMFY_URL=http://<droplet-ip>:8188 in nemoflix-amd-api.service and restart it."
+echo "Studio UI and FlixML Studio API are hosted on the VPS."
+echo "On the VPS, add http://<droplet-ip>:8188 as a gpu_nodes entry in config.json and restart the Studio API."
 echo ""
 echo "!!! REMINDER !!! Transfer any custom LoRA models to the droplet:"
-echo "  scp -i <ssh-key> <your-lora.safetensors> root@<droplet-ip>:/root/ComfyUI/models/loras/nemoflix-amd/"
+echo "  scp -i <ssh-key> <your-lora.safetensors> root@<droplet-ip>:/root/ComfyUI/models/loras/flixml/"
 echo ""
 echo "!!! REMINDER !!! For LoRA training, create the ai-toolkit env file with your HF token:"
 echo "  echo 'HF_TOKEN=hf_...' > /root/ai-toolkit/.env"

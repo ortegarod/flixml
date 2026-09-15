@@ -30,8 +30,8 @@ class ComfyRuntime(BaseModel):
 class AiToolkitRuntime(BaseModel):
     toolkit_dir: str = "/root/ai-toolkit"
     venv: str = "/root/ai-toolkit-venv"
-    training_dir: str = "/root/nemoflix-studio/training"
-    runner: str = "/root/nemoflix-studio/training/run-ai-toolkit.sh"
+    training_dir: str = "/root/flixml/training"
+    runner: str = "/root/flixml/training/run-ai-toolkit.sh"
     status: Literal["local_cli", "remote_cli", "manual", "unknown"] = "local_cli"
 
 
@@ -54,7 +54,7 @@ class GpuNode(BaseModel):
     def comfy_client_id(self) -> str:
         if self.comfyui and self.comfyui.client_id:
             return self.comfyui.client_id
-        return f"nemoflix-{self.id}"
+        return f"flixml-{self.id}"
 
 
 # Backward-compatible alias for existing API code type hints.
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     comfy_url: str | None = Field(default=None, validation_alias="COMFY_URL")
     request_timeout_seconds: float = Field(default=120.0, validation_alias="REQUEST_TIMEOUT_SECONDS")
     database_url: str = Field(validation_alias="DATABASE_URL")
-    output_dir: str = Field(validation_alias="NEMOFLIX_OUTPUT_DIR")
+    output_dir: str = Field(validation_alias="FLIXML_OUTPUT_DIR")
     aitk_api_url: str | None = Field(default=None, validation_alias="AITK_API_URL")
     elevenlabs_api_key: str | None = Field(default=None, validation_alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str | None = Field(default=None, validation_alias="ELEVENLABS_VOICE_ID")

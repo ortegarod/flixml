@@ -44,9 +44,9 @@ set -Eeuo pipefail
 # SDXL LoRA training script using HF diffusers
 # Usage: ./train-lora-sdxl.sh /path/to/dataset output_name
 
-DATASET_DIR="${1:-/root/nemoflix-studio/training/datasets/sample}"
+DATASET_DIR="${1:-/root/flixml/training/datasets/sample}"
 OUTPUT_NAME="${2:-my-lora}"
-OUTPUT_DIR="/root/nemoflix-studio/training/outputs/${OUTPUT_NAME}"
+OUTPUT_DIR="/root/flixml/training/outputs/${OUTPUT_NAME}"
 PYTHON_BIN="/root/comfyui-venv/bin/python"
 
 echo "=== Training SDXL LoRA ==="
@@ -89,7 +89,7 @@ chmod +x "$TRAINING_DIR/train-lora-sdxl.sh"
 
 # 7. Write dataset prep notes
 cat > "$TRAINING_DIR/README.md" << 'EOF'
-# Nemoflix Training Workspace
+# FlixML Training Workspace
 
 ## Dataset Format
 

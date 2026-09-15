@@ -14,7 +14,7 @@ from ..db import get_pool
 
 _DO_API = "https://api.digitalocean.com/v2"
 _ACTIVE_STATUSES = {"provisioning", "booting", "installing", "ready", "training", "syncing", "destroying"}
-_DEFAULT_TAGS = ["nemoflix-training", "autodestroy"]
+_DEFAULT_TAGS = ["flixml-training", "autodestroy"]
 
 
 class TrainingCloudError(RuntimeError):
@@ -27,7 +27,7 @@ def _now() -> datetime:
 
 def _clean_name(value: str) -> str:
     value = re.sub(r"[^a-zA-Z0-9.-]+", "-", value.strip().lower())
-    return value.strip("-")[:63] or "nemoflix-training"
+    return value.strip("-")[:63] or "flixml-training"
 
 
 def _parse_ssh_keys(raw: str | None) -> list[int | str]:
@@ -194,22 +194,22 @@ class DigitalOceanTrainingCloud:
 runcmd:
   - |
     set -Eeuo pipefail
-    exec > >(tee -a /var/log/nemoflix-training-cloud-init.log) 2>&1
-    mkdir -p /root/nemoflix-studio
-    echo "nemoflix training droplet bootstrap_mode=bare" > /root/nemoflix-bootstrap-ready
+    exec > >(tee -a /var/log/flixml-training-cloud-init.log) 2>&1
+    mkdir -p /root/flixml
+    echo "flixml training droplet bootstrap_mode=bare" > /root/flixml-bootstrap-ready
 """
         return f"""#cloud-config
 runcmd:
   - |
     set -Eeuo pipefail
-    exec > >(tee -a /var/log/nemoflix-training-cloud-init.log) 2>&1
+    exec > >(tee -a /var/log/flixml-training-cloud-init.log) 2>&1
     export APP_REPO_URL={shlex.quote(repo_url)}
-    export APP_DIR='/root/nemoflix-studio'
+    export APP_DIR='/root/flixml'
     export INSTALL_UI_DEPS='1'
     export AITK_GPU_IDS='0'
     export AITK_AUTH_TOKEN={shlex.quote(aitk_token)}
     git clone --depth 1 "$APP_REPO_URL" "$APP_DIR" || git -C "$APP_DIR" pull --ff-only || true
-    echo "nemoflix training droplet bootstrap_mode={bootstrap_mode}" > /root/nemoflix-bootstrap-ready
+    echo "flixml training droplet bootstrap_mode={bootstrap_mode}" > /root/flixml-bootstrap-ready
     bash "$APP_DIR/scripts/startup-script.sh"
     bash "$APP_DIR/scripts/install-ai-toolkit.sh"
 """
@@ -242,7 +242,7 @@ runcmd:
         if active and active.get("status") != "destroyed":
             raise TrainingCloudError(f"Active training droplet already exists: {active.get('name')} ({active.get('status')})")
 
-        name = _clean_name(f"nemoflix-training-{_now().strftime('%Y%m%d-%H%M%S')}")
+        name = _clean_name(f"flixml-training-{_now().strftime('%Y%m%d-%H%M%S')}")
         tags = list(_DEFAULT_TAGS)
         ssh_keys = _parse_ssh_keys(self.settings.training_cloud_ssh_keys)
         body: dict[str, Any] = {
@@ -326,7 +326,7 @@ runcmd:
         if not droplet_id and public_ipv4:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
-                    f"{_DO_API}/droplets?tag_name=nemoflix-training",
+                    f"{_DO_API}/droplets?tag_name=flixml-training",
                     headers=self._headers(),
                 )
                 if resp.status_code == 200:

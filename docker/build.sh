@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-IMAGE="${IMAGE:-ortegarodrigo/nemoflix-flux2}"
+IMAGE="${IMAGE:?Set IMAGE=<your-dockerhub-user>/flixml-flux2}"
 TAG="${TAG:-latest}"
 
 echo "Building ${IMAGE}:${TAG} ..."

@@ -494,7 +494,7 @@ class LoraTrainingStartRequest(BaseModel):
     job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", json_schema_extra={"examples": ["mycharacter_flux2_v1"]})
     trigger_word: str = Field(min_length=1, json_schema_extra={"examples": ["mycharacter"]})
     base_config: str = Field(default="flux2_identity", description="Training template name; resolves to <name>_template.yaml in the training dir", json_schema_extra={"examples": ["flux2_identity"]})
-    dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/nemoflix-training/datasets/", json_schema_extra={"examples": ["mycharacter_dataset_v1"]})
+    dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/flixml-training/datasets/", json_schema_extra={"examples": ["mycharacter_dataset_v1"]})
 
     # -- Model -----------------------------------------------------------------
     model: str = Field(default="flux2_dev", description="Base model label, stored with the job", json_schema_extra={"examples": ["flux2_dev"]})
@@ -2101,13 +2101,13 @@ def _resolve_filename_prefix(prefix: str | None, subfolder: str) -> str:
     if existing:
         raise HTTPException(status_code=409, detail=f"Filename prefix '{safe}' already exists - choose a different name.")
     return safe
-_TRAINING_DIR_VAL = os.environ.get("NEMOFLIX_TRAINING_DIR")
+_TRAINING_DIR_VAL = os.environ.get("FLIXML_TRAINING_DIR")
 if not _TRAINING_DIR_VAL:
-    raise RuntimeError("NEMOFLIX_TRAINING_DIR environment variable is required")
+    raise RuntimeError("FLIXML_TRAINING_DIR environment variable is required")
 _TRAINING_DIR = Path(_TRAINING_DIR_VAL)
 _TRAINING_CONFIG_DIR = _TRAINING_DIR / "config"
 # Droplet paths - these live on the GPU worker, referenced by name only from the VPS.
-_DROPLET_TRAINING_DIR = Path("/root/nemoflix-training")
+_DROPLET_TRAINING_DIR = Path("/root/flixml-training")
 _DROPLET_OUTPUT_DIR = _DROPLET_TRAINING_DIR / "output"
 _DROPLET_LOGS_DIR = _DROPLET_TRAINING_DIR / "logs"
 _DROPLET_DATASETS_DIR = _DROPLET_TRAINING_DIR / "datasets"
@@ -2125,13 +2125,13 @@ def _aitk_headers() -> dict[str, str]:
 
 
 # Local VPS paths for LoRA checkpoints synced from the droplet.
-_LORA_OUTPUT_DIR_VAL = os.environ.get("NEMOFLIX_LORA_OUTPUT_DIR")
+_LORA_OUTPUT_DIR_VAL = os.environ.get("FLIXML_LORA_OUTPUT_DIR")
 if not _LORA_OUTPUT_DIR_VAL:
-    raise RuntimeError("NEMOFLIX_LORA_OUTPUT_DIR environment variable is required")
+    raise RuntimeError("FLIXML_LORA_OUTPUT_DIR environment variable is required")
 _LORA_OUTPUT_DIR = Path(_LORA_OUTPUT_DIR_VAL)
-_COMFY_LORA_DIR_VAL = os.environ.get("NEMOFLIX_COMFY_LORA_DIR")
+_COMFY_LORA_DIR_VAL = os.environ.get("FLIXML_COMFY_LORA_DIR")
 if not _COMFY_LORA_DIR_VAL:
-    raise RuntimeError("NEMOFLIX_COMFY_LORA_DIR environment variable is required")
+    raise RuntimeError("FLIXML_COMFY_LORA_DIR environment variable is required")
 _COMFY_LORA_DIR = Path(_COMFY_LORA_DIR_VAL)
 _TRAINING_SAMPLES_DIR = _OUTPUT_DIR / "samples"
 
@@ -2720,7 +2720,7 @@ async def lora_training_datasets_list():
 
 
 class CreateDatasetRequest(BaseModel):
-    id: str = Field(min_length=1, description="Folder name on the droplet under /root/nemoflix-training/datasets/")
+    id: str = Field(min_length=1, description="Folder name on the droplet under /root/flixml-training/datasets/")
     name: str = Field(min_length=1)
     description: str | None = None
     image_count: int | None = None

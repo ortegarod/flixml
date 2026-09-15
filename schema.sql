@@ -1,4 +1,4 @@
--- Nemoflix Studio schema — dev-only, single file
+-- FlixML Studio schema — dev-only, single file
 -- Run on every init_db(); all statements use IF NOT EXISTS / IF NOT EXISTS
 
 -- Media files (gallery)
