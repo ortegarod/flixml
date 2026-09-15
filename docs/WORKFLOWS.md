@@ -6,7 +6,7 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` — that endpoint is the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**13 workflows** across 5 task types.
+**12 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -20,7 +20,6 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `sdxl_img2img` | Image → Image | Generate SDXL image variations from a source image using prompt guidance and denoise strength |
 | `wan22_t2v` | Text → Video | Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no source image |
 | `infinitetalk_i2v` | Image → Video | Audio-driven talking-head |
-| `wan22_fun_camera` | Image → Video | Move the camera around a single still — orbit, pan, zoom — to get real new angles as a video clip |
 | `wan22_i2v` | Image → Video | Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion prompt driving the movement |
 | `infinitetalk_v2v` | Video → Video | Audio-driven lip-sync applied on top of a driving motion clip |
 
@@ -245,48 +244,13 @@ Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 
   - `speed_lora_strength` · _float_ · default `1.0`
   - `filename_prefix` · _str_ · default `infinitetalk_i2v`
 
-### `wan22_fun_camera` — Wan 2.2 Fun Camera (orbit / angles)
-
-Move the camera around a single still — orbit, pan, zoom — to get real new angles as a video clip. Uses the Wan2.2-Fun-A14B-Control-Camera model.
-
-- **Output:** video
-- **Requirements:** supports LoRA, ~12 GB VRAM, loads ~32.1 GB of model files (VRAM + system RAM)
-- **Providers:** local
-- **Params:**
-  - `prompt` · _str_ · **required** — Scene/subject prompt. Keep it a generic description of the subject; the camera move comes from camera_pose, not the prompt.
-  - `image` · _str_ · **required** — Input still filename — the frame the camera moves around.
-  - `camera_pose` · _str_ · default `ClockWise (CW)` — Camera trajectory. One of: Static, Pan Up, Pan Down, Pan Left, Pan Right, Zoom In, Zoom Out, Anti Clockwise (ACW), ClockWise (CW). CW/ACW orbit the camera around the subject.
-  - `speed` · _float_ · default `1.0` — Trajectory speed / amount of camera travel (0-10). Higher = bigger angle swing across the clip.
-  - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
-  - `width` · _int_ · default `480` — Keep modest for 12GB; 480x832 portrait test, go bigger once locked.
-  - `height` · _int_ · default `832`
-  - `length` · _int_ · default `81` — Frame count (4k+1). More frames = more of the orbit.
-  - `fps` · _int_ · default `16`
-  - `seed` · _int_
-  - `steps_high` · _int_ · default `15`
-  - `steps_low` · _int_ · default `15`
-  - `total_steps` · _int_ · default `30` — steps_high + steps_low; passed to KSamplerAdvanced.steps
-  - `cfg_high` · _float_ · default `1.0`
-  - `cfg_low` · _float_ · default `1.0`
-  - `shift` · _float_ · default `5.0`
-  - `sampler` · _str_ · default `euler`
-  - `scheduler` · _str_ · default `simple`
-  - `vae` · _str_ · default `Wan2.1_VAE.safetensors`
-  - `clip` · _str_ · default `umt5_xxl_fp8_e4m3fn_scaled.safetensors`
-  - `clip_vision` · _str_ · default `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` — Image conditioning to preserve the subject's likeness through the camera move.
-  - `high_model` · _str_ · default `HighNoise\Wan2.2-Fun-A14B-Control-Camera-HighNoise-Q4_K_M.gguf` — GGUF Fun Camera Control UNet (UnetLoaderGGUF)
-  - `low_model` · _str_ · default `LowNoise\Wan2.2-Fun-A14B-Control-Camera-LowNoise-Q4_K_M.gguf` — GGUF Fun Camera Control UNet (UnetLoaderGGUF)
-  - `high_lora` · _str_ · default `Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors` — Lightning speed LoRA (high-noise)
-  - `low_lora` · _str_ · default `Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors` — Lightning speed LoRA (low-noise)
-  - `high_lora_strength` · _float_ · default `1.0`
-  - `low_lora_strength` · _float_ · default `1.0`
-
 ### `wan22_i2v` — Wan 2.2 Image-to-Video
 
 Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion prompt driving the movement. Identity and scene come from the source image.
 
 - **Output:** video
-- **Requirements:** supports LoRA, ~12 GB VRAM, loads ~21.2 GB of model files (VRAM + system RAM)
+- **Requirements:** supports LoRA, ~12 GB VRAM, loads ~36.8 GB of model files (VRAM + system RAM)
+- **Notes:** TESTED 2026-09-14 on RTX 4070 Ti (12 GB) + 16 GB system RAM, 768x528, 49 frames, 30 steps, same image, prompt and seed: the fp8_scaled pair (2x14.3 GB) finished in 594 s, the Q3_K_S .gguf pair (2x6.5 GB) in 723 s, with the same composition and slightly more motion on fp8. Steady sampling was about 10.9 s per step on fp8; the Q3 run sampled at 13 to 14 s per step. The fp8 files load through ComfyUI's Dynamic VRAM path; .gguf files do not.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Motion prompt. Describe big physical action with strong verbs (walks, jumps, turns). Words like subtle, slowly, or gently produce a near-still clip.
@@ -307,8 +271,8 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
   - `scheduler` · _str_ · default `simple`
   - `vae` · _str_ · default `Wan2.1_VAE.safetensors`
   - `clip` · _str_ · default `umt5_xxl_fp8_e4m3fn_scaled.safetensors`
-  - `high_model` · _str_ · default `Wan2.2-I2V-A14B-HighNoise-Q3_K_S.gguf` — GGUF quantized UNet (loaded via UnetLoaderGGUF)
-  - `low_model` · _str_ · default `Wan2.2-I2V-A14B-LowNoise-Q3_K_S.gguf` — GGUF quantized UNet (loaded via UnetLoaderGGUF)
+  - `high_model` · _str_ · default `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors` — fp8_scaled high-noise model in diffusion_models (UNETLoader)
+  - `low_model` · _str_ · default `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors` — fp8_scaled low-noise model in diffusion_models (UNETLoader)
   - `high_lora` · _str_ · default `Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors` — Lightning speed LoRA for high-noise model
   - `low_lora` · _str_ · default `Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors` — Lightning speed LoRA for low-noise model
   - `high_lora_strength` · _float_ · default `1.0`
