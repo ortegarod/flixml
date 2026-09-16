@@ -7,7 +7,9 @@ It ships with built-in workflows and lets you add your own.
 Two ways to use it:
 
 - **API-first** — generate images and video, manage projects, and train LoRAs through a clean REST API. AI agents call the same endpoints humans do.
-- **Studio UI** — browse generations, organize projects into scenes and shots, manage characters, and queue jobs without touching code.
+- **Studio UI** — browse generations, organize projects into scenes and shots, manage characters, and watch what your GPUs are rendering, without touching code. The **Jobs** page times each run in flight against how long that workflow usually takes on that node.
+
+Full documentation: [flixml.com/docs](https://flixml.com/docs).
 
 ## Core Concepts
 
@@ -51,11 +53,11 @@ Register persistent characters with LoRA associations, trigger words, and refere
 
 ### Agent Identity & API Keys
 
-Multiple callers — AI agents, scripts, humans — can share one Studio instance's generation queue. Send `Authorization: Bearer <key>` on `/api/image/generate` or `/api/video/generate` to attribute a job to an agent identity, optionally scoped to specific characters/workflows or capped on concurrent jobs.
+Give each caller — AI agent, script, person — its own key, sent as `Authorization: Bearer <key>`. An **admin** key sees everything. Any other key sees only what it created: its jobs, its generated and uploaded media, and its projects (and the shots and renders inside them). It sees and generates with only the characters on its allowlist, or every character if the list is empty, and can also be limited to certain workflows or capped on concurrent jobs. A job can't take another caller's file as its input image, video or audio.
 
-Provision keys with `scripts/manage_agent_keys.py` (`create`, `list`, `rotate`, `revoke`, `enable`) — there's no HTTP endpoint for minting them, so only someone with shell access to the box can create one. Keys are stored as SHA-256 hashes, never plaintext.
+Manage keys in Studio under **Settings → API keys**, also reachable from the account menu in the top-right corner: create a key (shown once, with a copy button), change its scope, replace it, revoke it, or delete it. Only admin keys can open that page or its API (`/api/agents`). Studio stores SHA-256 hashes, never the keys, so a lost key can't be shown again; replace it instead. **Settings → Account** shows which key the browser is signed in with and signs it out. The command line does the same with `scripts/manage_agent_keys.py` (`create`, `update`, `list`, `rotate`, `revoke`, `enable`).
 
-Enforcement is off by default (`config.json` `security.require_api_key: false`): requests with no key, or an unrecognized one, still work — they just aren't attributed. Set it to `true` once every caller you care about has a key; unscoped/anonymous requests then get rejected with 401.
+`config.json` `security.require_api_key` (default `false`) decides what happens to a request with no key: served unrestricted while it's `false`, rejected with 401 once it's `true`. A key that is sent but unknown or revoked is always rejected. [Secure your install](#secure-your-install) walks through turning it on.
 
 ## Getting Started
 
@@ -92,6 +94,21 @@ cd studio && npm install && npm run dev
 
 See `.env.example` for all available variables.
 
+### Secure your install
+
+A fresh install requires no key, so anyone who can reach the API or the UI has full access. Before you expose it beyond your own machine, create an admin key and turn keys on.
+
+1. Create your admin key. In the Studio UI, open **Settings → API keys**, click **New key**, tick **Admin**, and copy the key it shows you. On a machine without a browser, run this from the repo root with `.env` loaded instead:
+
+   ```bash
+   python scripts/manage_agent_keys.py create me "Me" --admin --key-file ~/.config/flixml/me.key
+   ```
+
+   `--key-file` writes the key to a file only you can read. Leave it off to print the key once.
+2. Set `"security": { "require_api_key": true }` in `config.json`. The API reads it on every request, so no restart is needed.
+3. Reload Studio and paste your key into the sign-in prompt. The browser keeps it in an HttpOnly cookie.
+4. Create a key for each agent or script under **Settings → API keys**. They send it as `Authorization: Bearer <key>`.
+
 | Variable | Description |
 |---|---|
 | `FLIXML_API_URL` | URL the Studio UI uses to reach the backend |
@@ -108,6 +125,7 @@ Generate an image:
 
 ```bash
 curl -X POST <your-api-url>/api/image/generate \
+  -H "Authorization: Bearer <your-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "workflow": "<workflow-id>",
@@ -118,7 +136,7 @@ curl -X POST <your-api-url>/api/image/generate \
   }'
 ```
 
-For agents: [SKILL.md](./SKILL.md) covers images, video, lip-sync, and multi-shot projects. The field reference is `GET /openapi.json`.
+Leave out the `Authorization` header if your install doesn't require keys. For agents: [SKILL.md](./SKILL.md) covers images, video, lip-sync, and multi-shot projects. The field reference is `GET /openapi.json`.
 
 ## LoRA Training
 
@@ -182,7 +200,15 @@ Training runs on AMD ROCm via the Ostris AI Toolkit.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+GNU AGPL-3.0 — see [LICENSE](LICENSE). Copyright © 2026 Rodrigo Ortega.
+
+Run it, fork it, modify it, use it commercially. The one condition: if you run a
+modified version as a network service, you have to publish your modifications
+under the same license. Self-hosting FlixML as-is for yourself, your team, or your
+clients requires nothing of you.
+
+If you want to build on FlixML without publishing your changes, a commercial
+license is available — open an issue.
 
 ---
 

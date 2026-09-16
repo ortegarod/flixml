@@ -81,8 +81,58 @@ def _text_list(value: Any) -> list[str]:
     return out
 
 
+# Loader nodes and the input naming the model file each one loads.
+_MODEL_INPUTS = {
+    "CheckpointLoaderSimple": "ckpt_name",
+    "UNETLoader": "unet_name",
+    "UnetLoaderGGUF": "unet_name",
+    "WanVideoModelLoader": "model",
+    "HiDreamO1ModelLoader": "model_name",
+}
+_LORA_NODES = {"LoraLoader", "LoraLoaderModelOnly"}
+
+
+def graph_models(workflow_json: Any) -> dict[str, list[str]]:
+    """Read the base models and LoRAs a submitted ComfyUI graph loads.
+
+    The graph is what actually ran, so this covers workflows whose model is fixed in the
+    template as well as ones that take it as a param. Unfilled `{{placeholders}}`, "none"
+    and zero-strength LoRAs are skipped.
+    """
+    if isinstance(workflow_json, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            workflow_json = json.loads(workflow_json)
+    models: list[str] = []
+    loras: list[str] = []
+    if not isinstance(workflow_json, dict):
+        return {"models": models, "loras": loras}
+    for node in workflow_json.values():
+        if not isinstance(node, dict):
+            continue
+        class_type = node.get("class_type")
+        inputs = node.get("inputs") or {}
+        if class_type in _MODEL_INPUTS:
+            name = inputs.get(_MODEL_INPUTS[class_type])
+            target = models
+        elif class_type in _LORA_NODES:
+            name = inputs.get("lora_name")
+            target = loras
+            with contextlib.suppress(TypeError, ValueError):
+                if float(inputs.get("strength_model", 1)) == 0:
+                    continue
+        else:
+            continue
+        if not isinstance(name, str) or not name or name == "none" or name.startswith("{{"):
+            continue
+        name = Path(name).name
+        if name not in target:
+            target.append(name)
+    return {"models": models, "loras": loras}
+
+
 def _job_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
+    data.update(graph_models(data.get("workflow_json")))
     metadata = data.get("metadata")
     if isinstance(metadata, str):
         with contextlib.suppress(json.JSONDecodeError):
@@ -382,8 +432,14 @@ def _shot_version_row(row: asyncpg.Record) -> dict[str, Any]:
     return _json_row(row, ("metadata",))
 
 
-async def list_projects(limit: int = 100) -> list[dict[str, Any]]:
-    rows = await get_pool().fetch("SELECT * FROM projects ORDER BY updated_at DESC LIMIT $1", limit)
+async def list_projects(limit: int = 100, owner_id: str | None = None) -> list[dict[str, Any]]:
+    """List projects, newest first. `owner_id` limits them to one agent's projects."""
+    if owner_id is None:
+        rows = await get_pool().fetch("SELECT * FROM projects ORDER BY updated_at DESC LIMIT $1", limit)
+    else:
+        rows = await get_pool().fetch(
+            "SELECT * FROM projects WHERE metadata->>'owner_id' = $2 ORDER BY updated_at DESC LIMIT $1", limit, owner_id
+        )
     return [_project_row(row) for row in rows]
 
 
@@ -693,8 +749,55 @@ async def upsert_project_render(render: dict[str, Any]) -> dict[str, Any]:
     return _render_row(row)
 
 
-async def list_jobs(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-    rows = await get_pool().fetch("SELECT * FROM jobs ORDER BY updated_at DESC LIMIT $1 OFFSET $2", limit, offset)
+async def workflow_run_times(recent: int = 20) -> dict[str, dict[str, Any]]:
+    """How long each workflow took on each node, from its most recent completed runs.
+
+    Only the last `recent` runs per workflow and node count, so a model or hardware
+    change shows up within a few jobs. Returns {workflow: {provider: stats}}.
+    """
+    rows = await get_pool().fetch(
+        """
+        WITH runs AS (
+            SELECT metadata->>'workflow' AS workflow,
+                   metadata->>'provider' AS provider,
+                   EXTRACT(EPOCH FROM finished_at - started_at) AS seconds,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY metadata->>'workflow', metadata->>'provider'
+                       ORDER BY finished_at DESC
+                   ) AS n
+            FROM jobs
+            WHERE status = 'completed' AND started_at IS NOT NULL AND finished_at >= started_at
+              AND metadata->>'workflow' IS NOT NULL AND metadata->>'provider' IS NOT NULL
+        )
+        SELECT workflow, provider, COUNT(*) AS samples,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY seconds) AS median_seconds,
+               MIN(seconds) AS min_seconds, MAX(seconds) AS max_seconds
+        FROM runs
+        WHERE n <= $1
+        GROUP BY workflow, provider
+        """,
+        recent,
+    )
+    stats: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        stats.setdefault(row["workflow"], {})[row["provider"]] = {
+            "median_seconds": round(float(row["median_seconds"])),
+            "min_seconds": round(float(row["min_seconds"])),
+            "max_seconds": round(float(row["max_seconds"])),
+            "samples": row["samples"],
+        }
+    return stats
+
+
+async def list_jobs(limit: int = 100, offset: int = 0, owner_id: str | None = None) -> list[dict[str, Any]]:
+    """List jobs, most recently updated first. `owner_id` limits them to one agent's jobs."""
+    if owner_id is None:
+        rows = await get_pool().fetch("SELECT * FROM jobs ORDER BY updated_at DESC LIMIT $1 OFFSET $2", limit, offset)
+    else:
+        rows = await get_pool().fetch(
+            "SELECT * FROM jobs WHERE metadata->>'owner_id' = $3 ORDER BY updated_at DESC LIMIT $1 OFFSET $2",
+            limit, offset, owner_id,
+        )
     return [_job_row(row) for row in rows]
 
 
@@ -744,11 +847,12 @@ async def create_agent(
     allowed_characters: list[str] | None = None,
     allowed_workflows: list[str] | None = None,
     max_concurrent_jobs: int | None = None,
+    is_admin: bool = False,
 ) -> dict[str, Any]:
     row = await get_pool().fetchrow(
         """
-        INSERT INTO agents (id, name, key_hash, allowed_characters, allowed_workflows, max_concurrent_jobs)
-        VALUES ($1, $2, $3, $4::text[], $5::text[], $6)
+        INSERT INTO agents (id, name, key_hash, allowed_characters, allowed_workflows, max_concurrent_jobs, is_admin)
+        VALUES ($1, $2, $3, $4::text[], $5::text[], $6, $7)
         RETURNING *
         """,
         id,
@@ -757,8 +861,24 @@ async def create_agent(
         allowed_characters or None,
         allowed_workflows or None,
         max_concurrent_jobs,
+        is_admin,
     )
     return _agent_row(row)
+
+
+async def update_agent(agent_id: str, fields: dict[str, Any]) -> bool:
+    """Set any of name, enabled, allowed_characters, allowed_workflows, max_concurrent_jobs, is_admin."""
+    columns = {"name": "", "enabled": "", "allowed_characters": "::text[]", "allowed_workflows": "::text[]", "max_concurrent_jobs": "", "is_admin": ""}
+    sets: list[str] = []
+    params: list[Any] = [agent_id]
+    for key, cast in columns.items():
+        if key in fields:
+            params.append(fields[key])
+            sets.append(f"{key}=${len(params)}{cast}")
+    if not sets:
+        return await get_agent(agent_id) is not None
+    result = await get_pool().execute(f"UPDATE agents SET {', '.join(sets)} WHERE id=$1", *params)
+    return result != "UPDATE 0"
 
 
 async def list_agents() -> list[dict[str, Any]]:
@@ -784,6 +904,12 @@ async def set_agent_enabled(agent_id: str, enabled: bool) -> bool:
 async def set_agent_key_hash(agent_id: str, key_hash: str) -> bool:
     result = await get_pool().execute("UPDATE agents SET key_hash=$2 WHERE id=$1", agent_id, key_hash)
     return result != "UPDATE 0"
+
+
+async def delete_agent(agent_id: str) -> bool:
+    """Delete an agent. What it owns stays, visible to admin keys only."""
+    result = await get_pool().execute("DELETE FROM agents WHERE id=$1", agent_id)
+    return result != "DELETE 0"
 
 
 async def touch_agent_last_used(agent_id: str) -> None:
@@ -876,6 +1002,7 @@ def _media_where(
     tag: str | None = None,
     training_dataset: bool | None = None,
     start_param: int = 1,
+    owner_id: str | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a shared WHERE clause + params for media listing/count queries.
 
@@ -923,6 +1050,11 @@ def _media_where(
     elif training_dataset is False:
         clauses.append("included_in_training_dataset = FALSE")
 
+    if owner_id is not None:
+        token = _next()
+        params.append(owner_id)
+        clauses.append(f"metadata->>'owner_id' = {token}")
+
     return " AND ".join(clauses), params
 
 
@@ -935,12 +1067,20 @@ async def list_media(
     character_id: str | None = None,
     tag: str | None = None,
     training_dataset: bool | None = None,
+    owner_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1)
+    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id)
     limit_param = f"${len(params) + 1}"
     offset_param = f"${len(params) + 2}"
+    # Submit and run times live on the job that produced the file. Scalar subqueries keep
+    # the shared WHERE clause's unqualified column names pointing at media.
     sql = f"""
-        SELECT * FROM media
+        SELECT media.*,
+               (SELECT created_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_created_at,
+               (SELECT started_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_started_at,
+               (SELECT finished_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_finished_at,
+               (SELECT workflow_json FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow_json
+        FROM media
         WHERE {where}
         ORDER BY COALESCE(modified, created_at) DESC, filename DESC
         LIMIT {limit_param} OFFSET {offset_param}
@@ -956,8 +1096,9 @@ async def media_count(
     character_id: str | None = None,
     tag: str | None = None,
     training_dataset: bool | None = None,
+    owner_id: str | None = None,
 ) -> int:
-    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1)
+    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id)
     sql = f"SELECT COUNT(*) FROM media WHERE {where}"
     return int(await get_pool().fetchval(sql, *params) or 0)
 

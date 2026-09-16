@@ -5,7 +5,7 @@ export function ProjectsGuide({ compact = false }: { compact?: boolean }) {
     <div className={compact ? "h-full overflow-y-auto p-4 space-y-5" : "max-w-2xl mx-auto p-8 space-y-8"}>
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-500/20 ring-1 ring-white/10">
+        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand to-brand-soft flex items-center justify-center shadow-lg shadow-black/30 ring-1 ring-white/10">
           <Film className="w-6 h-6 text-white" />
         </div>
         <div>
@@ -15,10 +15,10 @@ export function ProjectsGuide({ compact = false }: { compact?: boolean }) {
       </div>
 
       {/* Core instruction */}
-      <div className={compact ? "rounded-2xl border border-violet-600/20 bg-gradient-to-b from-violet-950/10 to-gray-900/20 p-4" : "rounded-2xl border border-violet-600/20 bg-gradient-to-b from-violet-950/10 to-gray-900/20 p-6"}>
+      <div className={compact ? "rounded-2xl border border-gray-800 bg-gray-950/50 p-4" : "rounded-2xl border border-gray-800 bg-gray-950/50 p-6"}>
         <div className="flex items-center gap-2 mb-4">
-          <Terminal className="w-4 h-4 text-violet-400" />
-          <span className="text-sm font-semibold text-violet-200">How it works</span>
+          <Terminal className="w-4 h-4 text-brand" />
+          <span className="text-sm font-semibold text-gray-100">How it works</span>
         </div>
         <p className="text-sm text-gray-300 leading-relaxed mb-4">
           You talk to your AI agent like you'd talk to a person. Tell it what you want — the agent plans the scenes, picks the shots, generates the images, animates them, and stitches everything together. You just review and say yes or no.
@@ -71,7 +71,7 @@ export function ProjectsGuide({ compact = false }: { compact?: boolean }) {
       {/* Iterate */}
       <div className="rounded-2xl border border-gray-800/40 bg-gray-900/20 p-5">
         <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-rose-400" />
+          <Terminal className="w-4 h-4 text-brand" />
           After you see it, change anything
         </h3>
         <div className="space-y-1.5 text-sm text-gray-400">

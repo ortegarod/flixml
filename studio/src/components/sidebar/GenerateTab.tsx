@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { copyText } from "../../lib/agentContext";
+import { approxDuration } from "../../lib/duration";
 
 // Shape of a registry workflow as served by GET /api/workflows. Everything the
 // docs below render is derived live from this — no static workflow doc to drift.
-interface WorkflowMeta {
+export interface WorkflowMeta {
   id: string;
   name?: string;
   description?: string;
@@ -16,6 +17,10 @@ interface WorkflowMeta {
     requires_image?: boolean;
     requires_audio?: boolean;
   };
+  // Measured on this install from recent completed jobs; null until one finishes.
+  run_time?: {
+    by_provider: Record<string, { median_seconds: number; min_seconds: number; max_seconds: number; samples: number }>;
+  } | null;
 }
 
 // ── Presentation maps ───────────────────────────────────────────────────────
@@ -94,10 +99,10 @@ const TASKS: Record<
 // tier fall through to the generic badge — the public build knows nothing about them.
 function modelFamily(id: string): { label: string; cls: string } {
   if (id.startsWith("flux2")) return { label: "FLUX.2", cls: "bg-amber-500/15 text-amber-200" };
-  if (id.startsWith("sdxl")) return { label: "SDXL", cls: "bg-sky-500/15 text-sky-200" };
-  if (id.startsWith("qwen")) return { label: "Qwen", cls: "bg-violet-500/15 text-violet-200" };
-  if (id.startsWith("infinitetalk")) return { label: "InfiniteTalk", cls: "bg-emerald-500/15 text-emerald-200" };
-  if (id.startsWith("wan22")) return { label: "Wan 2.2", cls: "bg-rose-500/15 text-rose-200" };
+  if (id.startsWith("sdxl")) return { label: "SDXL", cls: "bg-white/5 text-gray-300" };
+  if (id.startsWith("qwen")) return { label: "Qwen", cls: "bg-white/5 text-gray-300" };
+  if (id.startsWith("infinitetalk")) return { label: "InfiniteTalk", cls: "bg-white/5 text-gray-300" };
+  if (id.startsWith("wan22")) return { label: "Wan 2.2", cls: "bg-white/5 text-gray-300" };
   return { label: "Model", cls: "bg-white/10 text-gray-300" };
 }
 
@@ -106,7 +111,7 @@ function InOut({ input, output }: { input: string; output: string }) {
     <span className="shrink-0 inline-flex items-center gap-1 text-[9px] font-mono">
       <span className="rounded bg-white/[0.05] px-1 py-0.5 text-gray-400">{input}</span>
       <span className="text-gray-600">→</span>
-      <span className="rounded bg-rose-600/15 px-1 py-0.5 text-rose-200">{output}</span>
+      <span className="rounded bg-white/5 px-1 py-0.5 text-gray-300">{output}</span>
     </span>
   );
 }
@@ -119,9 +124,31 @@ function Chip({ children, cls }: { children: React.ReactNode; cls?: string }) {
   );
 }
 
+// Typical run time from job history. One node shows its median; several show the
+// range of their medians. The title names each node and how many runs it's based on.
+function RunTimeChip({ runTime }: { runTime: WorkflowMeta["run_time"] }) {
+  const nodes = Object.entries(runTime?.by_provider ?? {});
+  if (nodes.length === 0) return null;
+  const medians = nodes.map(([, s]) => s.median_seconds);
+  const low = Math.min(...medians);
+  const high = Math.max(...medians);
+  const label = approxDuration(low) === approxDuration(high) ? approxDuration(low) : `${approxDuration(low)}–${approxDuration(high)}`;
+  const title = nodes
+    .map(([node, s]) => {
+      const spread = approxDuration(s.min_seconds) === approxDuration(s.max_seconds) ? "" : `${approxDuration(s.min_seconds)}–${approxDuration(s.max_seconds)}, `;
+      return `${node}: typically ${approxDuration(s.median_seconds)} (${spread}last ${s.samples} run${s.samples === 1 ? "" : "s"})`;
+    })
+    .join("\n");
+  return (
+    <Chip cls="bg-white/5 text-gray-300">
+      <span title={title}>~{label} run</span>
+    </Chip>
+  );
+}
+
 // One workflow row. The factual, workflow-authored description is always visible —
 // that's what makes two same-family workflows legibly different — alongside
-// objective spec chips only (model, VRAM, LoRA, needs-image/voice). No opinions.
+// objective spec chips only (model, VRAM, measured run time, LoRA, needs-image/voice). No opinions.
 function WorkflowCard({ w }: { w: WorkflowMeta }) {
   const req = w.requirements ?? {};
   const fam = modelFamily(w.id);
@@ -137,9 +164,10 @@ function WorkflowCard({ w }: { w: WorkflowMeta }) {
       <div className="flex flex-wrap items-center gap-1">
         <Chip cls={fam.cls}>{fam.label}</Chip>
         {typeof req.vram_gb === "number" && <Chip>{req.vram_gb} GB VRAM</Chip>}
-        {req.supports_lora && <Chip cls="bg-rose-600/15 text-rose-200">LoRA</Chip>}
+        <RunTimeChip runTime={w.run_time} />
+        {req.supports_lora && <Chip cls="bg-white/5 text-gray-300">LoRA</Chip>}
         {req.requires_image && <Chip>needs image</Chip>}
-        {req.requires_audio && <Chip cls="bg-emerald-500/15 text-emerald-200">needs voice</Chip>}
+        {req.requires_audio && <Chip cls="bg-white/5 text-gray-300">needs voice</Chip>}
       </div>
     </div>
   );
@@ -182,7 +210,7 @@ export function GenerateTab() {
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-5">
-      <section className="rounded-2xl border border-rose-600/30 bg-gradient-to-b from-rose-950/25 to-gray-950/70 p-4 space-y-2 shadow-lg shadow-rose-950/10">
+      <section className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4 space-y-2 shadow-lg shadow-black/20">
         <h2 className="text-lg font-semibold">Start here</h2>
         <p className="text-sm text-gray-300 leading-relaxed">
           FlixML Studio is an AI image &amp; video studio you run by talking to your agent. You say
@@ -220,7 +248,7 @@ export function GenerateTab() {
                 </div>
                 <button
                   onClick={() => copyExample(task, meta.example)}
-                  className="w-full text-left rounded-lg border border-gray-800 bg-black/35 px-2.5 py-1.5 text-[11px] text-gray-400 hover:border-rose-600/50 hover:text-gray-200 transition"
+                  className="w-full text-left rounded-lg border border-gray-800 bg-black/35 px-2.5 py-1.5 text-[11px] text-gray-400 hover:border-brand hover:text-gray-200 transition"
                   title="Copy this instruction to give your agent"
                 >
                   {copiedKey === task ? "Copied ✓" : `Try: "${meta.example}"`}

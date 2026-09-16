@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Trash2, Copy, Check, Download } from "lucide-react";
 import type { CharacterSummary, MediaItem } from "../types";
-import { buildAgentContext, copyText } from "../lib/agentContext";
+import { assetReference, copyText } from "../lib/agentContext";
 
 // Minimal shape of the /api/workflows entries we surface as agent-guidance options.
 interface WorkflowMeta {
@@ -285,11 +285,11 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
 
   const characterName = (id: string) => characters.find((character) => character.id === id)?.name || id;
 
-  // Copy this asset's agent context plus a ready-to-run instruction, so the user
-  // can paste it straight to their agent to build the next pipeline step.
+  // Copy this asset's reference plus what the human wants done with it. The agent
+  // looks the asset up itself, so nothing technical has to be pasted by hand.
   function copyBuild(instruction: string, key: string) {
     if (!current) return;
-    copyText(`${buildAgentContext(current)}\n\nWhat I want: ${instruction}`);
+    copyText(`${assetReference(current)} — ${instruction}`);
     flashCopied(key);
   }
 
@@ -316,12 +316,12 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
     <>
       {current && (
         <button
-          onClick={() => { copyText(buildAgentContext(current)); flashCopied("__context__"); }}
-          className="mb-4 w-full flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-violet-500 transition"
-          title="Copy this asset's context — paste it to your agent, then just tell it what to do"
+          onClick={() => { copyText(assetReference(current)); flashCopied("__context__"); }}
+          className="mb-4 w-full flex items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-2.5 text-xs font-semibold text-brand-foreground hover:brightness-110 transition"
+          title="Copy this asset's reference — paste it to your agent and say what you want; it looks up the rest"
         >
           {copiedKey === "__context__" ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-          {copiedKey === "__context__" ? "Copied — paste to your agent" : "Copy context for agent"}
+          {copiedKey === "__context__" ? "Copied — paste to your agent" : "Copy reference for agent"}
         </button>
       )}
       {current && (
@@ -340,7 +340,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
                 <button
                   key={action.key}
                   onClick={() => copyBuild(action.instruction, action.key)}
-                  className="w-full text-left rounded-lg border border-gray-800 bg-black/30 px-2.5 py-1.5 text-[11px] text-gray-300 hover:border-violet-500/50 transition"
+                  className="w-full text-left rounded-lg border border-gray-800 bg-black/30 px-2.5 py-1.5 text-[11px] text-gray-300 hover:border-brand transition"
                   title="Copy this asset + instruction to give your agent"
                 >
                   {copiedKey === action.key ? "Copied ✓ — paste to your agent" : action.label}
@@ -358,7 +358,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
             <button
               onClick={toggleTrainingDataset}
               disabled={savingMetadata}
-              className={`w-full rounded-lg px-3 py-2 text-xs font-semibold transition ${current.included_in_training_dataset ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500" : "bg-gray-900 text-gray-300 hover:bg-gray-800 hover:text-white"} disabled:opacity-50`}
+              className={`w-full rounded-lg px-3 py-2 text-xs font-semibold transition ${current.included_in_training_dataset ? "bg-brand text-brand-foreground hover:brightness-110" : "bg-gray-900 text-gray-300 hover:bg-gray-800 hover:text-white"} disabled:opacity-50`}
             >
               {current.included_in_training_dataset ? "Included in training dataset" : "Include in training dataset"}
             </button>
@@ -381,7 +381,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
             <select
               value={characterDraft}
               onChange={(event) => setCharacterDraft(event.target.value)}
-              className="min-w-0 rounded-md bg-black/30 border border-gray-800 px-2 py-1 text-[11px] text-gray-300 focus:outline-none focus:border-rose-600"
+              className="min-w-0 rounded-md bg-black/30 border border-gray-800 px-2 py-1 text-[11px] text-gray-300 focus:outline-none focus:border-brand"
             >
               <option value="">No character</option>
               {characters.map((character) => (
@@ -391,7 +391,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
             <button
               onClick={saveMetadata}
               disabled={savingMetadata}
-              className="rounded-md bg-gray-800 px-2 py-1 text-[11px] font-medium text-gray-200 hover:bg-rose-600 hover:text-white disabled:text-gray-600 transition"
+              className="rounded-md bg-gray-800 px-2 py-1 text-[11px] font-medium text-gray-200 hover:bg-brand hover:text-brand-foreground disabled:text-gray-600 transition"
             >
               {savingMetadata ? "…" : "Save"}
             </button>
@@ -399,12 +399,12 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
               value={tagsDraft}
               onChange={(event) => setTagsDraft(event.target.value)}
               placeholder="tags: keeper, portrait"
-              className="col-span-2 min-w-0 rounded-md bg-black/30 border border-gray-800 px-2 py-1 text-[11px] text-gray-300 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
+              className="col-span-2 min-w-0 rounded-md bg-black/30 border border-gray-800 px-2 py-1 text-[11px] text-gray-300 focus:outline-none focus:border-brand placeholder:text-gray-700"
             />
             <button
               onClick={toggleTrainingDataset}
               disabled={savingMetadata}
-              className={`col-span-2 rounded-md px-2 py-1.5 text-[11px] font-medium transition ${current.included_in_training_dataset ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500" : "bg-gray-900 text-gray-300 hover:bg-gray-800 hover:text-white"} disabled:opacity-50`}
+              className={`col-span-2 rounded-md px-2 py-1.5 text-[11px] font-medium transition ${current.included_in_training_dataset ? "bg-brand text-brand-foreground hover:brightness-110" : "bg-gray-900 text-gray-300 hover:bg-gray-800 hover:text-white"} disabled:opacity-50`}
             >
               {current.included_in_training_dataset ? "Included in training dataset" : "Include in training dataset"}
             </button>
@@ -483,9 +483,9 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
         {/* Image — natural size. Swipe left/right to navigate. */}
         <div className="w-full bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {isVideo ? (
-            <video src={selectedUrl} controls autoPlay loop playsInline className="w-full" />
+            <video src={selectedUrl} controls autoPlay loop playsInline className="w-full max-h-[68vh]" />
           ) : (
-            <img src={selectedUrl} alt="" className="w-full object-contain" />
+            <img src={selectedUrl} alt="" className="w-full max-h-[68vh] object-contain" />
           )}
         </div>
 

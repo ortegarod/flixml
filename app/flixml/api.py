@@ -16,14 +16,15 @@ from urllib.parse import quote
 
 import httpx
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import Agent, bearer_scheme, resolve_agent
+from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_read_file, current_agent, generate_key, hash_key, owner_scope, owns
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp
+from . import db
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
 from .workflows.registry import init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
@@ -127,19 +128,181 @@ Core surfaces:
 
 Workflows and providers are discovered live (`GET /api/workflows`, `GET /api/providers`).
 
-**Agent identity:** include `Authorization: Bearer <key>` to attribute your jobs to an agent
-identity (see `scripts/manage_agent_keys.py`). Enforcement is off by default
-(`config.json` `security.require_api_key`) — a request with no key still works, it just isn't
-attributed. Once enforced, a key can also carry a character/workflow allowlist and a
-concurrent-job cap, checked on `/api/image/generate` and `/api/video/generate`.
+**Agent identity:** send `Authorization: Bearer <key>` (keys come from
+`scripts/manage_agent_keys.py`). An admin key sees everything. Any other key sees only the
+jobs, media and projects it created, and only the characters in its allowlist; it can also
+be limited to certain workflows and capped on concurrent jobs. `config.json`
+`security.require_api_key` (default false) decides whether a request with no key is rejected
+or served unrestricted. A key that is sent but unknown or revoked is always rejected.
 """
 
 app = FastAPI(
     title="FlixML API",
     description=API_DESCRIPTION,
     version="0.1.0",
-    dependencies=[Depends(bearer_scheme)],
+    dependencies=[Depends(authorize)],
 )
+
+
+class SessionRequest(BaseModel):
+    key: str = Field(min_length=1)
+
+
+@app.get("/api/session")
+async def session(request: Request) -> dict[str, Any]:
+    """Who the caller is. 401 when a key is required and none (or a revoked one) was sent."""
+    agent = current_agent(request)
+    require_key = get_settings().security_config().require_api_key
+    if agent is None and (require_key or request.cookies.get(SESSION_COOKIE)):
+        raise HTTPException(status_code=401, detail="Sign in with an API key")
+    return {"agent": agent.to_dict() if agent else None, "require_api_key": require_key}
+
+
+@app.post("/api/session")
+async def sign_in(body: SessionRequest, response: Response) -> dict[str, Any]:
+    """Sign the browser in: check the key, then keep it in an HttpOnly cookie."""
+    agent = await agent_for_key(body.key.strip())
+    if agent is None:
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+    response.set_cookie(SESSION_COOKIE, body.key.strip(), max_age=365 * 24 * 3600, httponly=True, samesite="lax")
+    return {"agent": agent.to_dict()}
+
+
+@app.delete("/api/session")
+async def sign_out(response: Response) -> dict[str, Any]:
+    """Forget the browser's key."""
+    response.delete_cookie(SESSION_COOKIE)
+    return {"ok": True}
+
+
+_AGENT_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+
+
+class AgentRecord(BaseModel):
+    """An API key's identity and scope. The key itself is never stored or returned again."""
+
+    id: str
+    name: str
+    enabled: bool
+    is_admin: bool
+    allowed_characters: list[str]
+    allowed_workflows: list[str]
+    max_concurrent_jobs: int | None
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class AgentCreateRequest(BaseModel):
+    id: str = Field(pattern=_AGENT_ID_PATTERN, description="Slug: lowercase letters, digits, - and _")
+    name: str = Field(min_length=1, max_length=100)
+    is_admin: bool = False
+    allowed_characters: list[str] = Field(default_factory=list, description="Empty allows every character")
+    allowed_workflows: list[str] = Field(default_factory=list, description="Empty allows every workflow")
+    max_concurrent_jobs: int | None = Field(default=None, ge=1)
+
+
+class AgentUpdateRequest(BaseModel):
+    """Only the fields sent change."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    enabled: bool | None = None
+    is_admin: bool | None = None
+    allowed_characters: list[str] | None = None
+    allowed_workflows: list[str] | None = None
+    max_concurrent_jobs: int | None = Field(default=None, ge=1)
+
+
+class AgentKeyResponse(BaseModel):
+    agent: AgentRecord
+    key: str = Field(description="Shown once. Only its hash is stored.")
+
+
+def _agent_record(row: dict[str, Any]) -> AgentRecord:
+    return AgentRecord(**{name: row.get(name) for name in AgentRecord.model_fields})
+
+
+async def _existing_agent(agent_id: str) -> dict[str, Any]:
+    row = await db.get_agent(agent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return row
+
+
+def _refuse_self_lockout(caller: Agent | None, agent_id: str, action: str) -> None:
+    """Keep the key making the request from removing its own access."""
+    if caller is not None and caller.id == agent_id:
+        raise HTTPException(status_code=400, detail=f"You can't {action} the key you're signed in with")
+
+
+@app.get("/api/agents", response_model=list[AgentRecord])
+async def list_agent_keys() -> list[AgentRecord]:
+    """List API keys and their scopes. Admin keys only."""
+    return [_agent_record(row) for row in await db.list_agents()]
+
+
+@app.post("/api/agents", response_model=AgentKeyResponse)
+async def create_agent_key(body: AgentCreateRequest) -> AgentKeyResponse:
+    """Create an agent and its API key. The key is in this response only. Admin keys only."""
+    if await db.get_agent(body.id):
+        raise HTTPException(status_code=409, detail=f"Agent '{body.id}' already exists")
+    raw_key = generate_key()
+    row = await db.create_agent(
+        id=body.id,
+        name=body.name,
+        key_hash=hash_key(raw_key),
+        allowed_characters=body.allowed_characters,
+        allowed_workflows=body.allowed_workflows,
+        max_concurrent_jobs=body.max_concurrent_jobs,
+        is_admin=body.is_admin,
+    )
+    return AgentKeyResponse(agent=_agent_record(row), key=raw_key)
+
+
+@app.patch("/api/agents/{agent_id}", response_model=AgentRecord)
+async def update_agent_key(agent_id: str, body: AgentUpdateRequest, request: Request) -> AgentRecord:
+    """Change an agent's name, scope, admin flag, or revoke/re-enable its key. Admin keys only."""
+    await _existing_agent(agent_id)
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("enabled") is False:
+        _refuse_self_lockout(current_agent(request), agent_id, "revoke")
+    if fields.get("is_admin") is False:
+        _refuse_self_lockout(current_agent(request), agent_id, "remove admin from")
+    for list_field in ("allowed_characters", "allowed_workflows"):
+        if list_field in fields:
+            fields[list_field] = fields[list_field] or None
+    await db.update_agent(agent_id, fields)
+    return _agent_record(await _existing_agent(agent_id))
+
+
+@app.post("/api/agents/{agent_id}/rotate", response_model=AgentKeyResponse)
+async def rotate_agent_key(agent_id: str, request: Request) -> AgentKeyResponse:
+    """Replace an agent's key. The old key stops working now; the new one is shown once. Admin keys only."""
+    await _existing_agent(agent_id)
+    _refuse_self_lockout(current_agent(request), agent_id, "rotate")
+    raw_key = generate_key()
+    await db.set_agent_key_hash(agent_id, hash_key(raw_key))
+    return AgentKeyResponse(agent=_agent_record(await _existing_agent(agent_id)), key=raw_key)
+
+
+@app.delete("/api/agents/{agent_id}")
+async def delete_agent_key(agent_id: str, request: Request) -> dict[str, Any]:
+    """Delete an agent and its key. What it made stays, visible to admin keys. Admin keys only."""
+    await _existing_agent(agent_id)
+    _refuse_self_lockout(current_agent(request), agent_id, "delete")
+    await db.delete_agent(agent_id)
+    return {"ok": True, "id": agent_id}
+
+
+async def _require_readable(agent: Agent | None, filename: str | None) -> None:
+    """Reject a request that points a job at an output file the caller can't see."""
+    if not filename or owner_scope(agent) is None:
+        return
+    source = _resolve_output_file(filename)
+    if source is None:
+        return  # not an output file; a ComfyUI input name or URL, resolved by the node
+    rel = source.resolve().relative_to(_OUTPUT_DIR.resolve()).as_posix()
+    if not await can_read_file(agent, rel):
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
 
 @app.get("/api/guide")
@@ -685,9 +848,21 @@ async def _reconcile_loop() -> None:
 
 @app.get("/api/workflows")
 async def list_workflows() -> list[dict]:
-    """List all available workflows an agent can request, including each one's params."""
+    """List all available workflows an agent can request, including each one's params.
+
+    `run_time` holds measured run times per node from this install's recent completed
+    jobs, or null if the workflow has never finished here. Times reflect the params
+    those jobs used; longer videos and bigger sizes take longer.
+    """
     registry = get_registry()
-    return [w.to_dict() for w in registry.list_workflows()]
+    run_times = await workflow_run_times()
+    workflows = []
+    for w in registry.list_workflows():
+        entry = w.to_dict()
+        by_provider = run_times.get(w.id)
+        entry["run_time"] = {"by_provider": by_provider} if by_provider else None
+        workflows.append(entry)
+    return workflows
 
 
 @app.get("/api/providers")
@@ -946,9 +1121,11 @@ async def agent_chat(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/characters")
-async def characters() -> dict[str, Any]:
-    """List all registered characters with their LoRAs, triggers, and voices."""
+async def characters(agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """List registered characters with their LoRAs, triggers, and voices (those the caller may use)."""
     items = await list_characters()
+    if agent is not None and owner_scope(agent) is not None:
+        items = [item for item in items if agent.can_use_character(item["id"])]
     return {"characters": items, "count": len(items)}
 
 
@@ -962,8 +1139,10 @@ async def character_detail(character_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/characters", response_model=CharacterRecord)
-async def create_character(character: CharacterRecord) -> CharacterRecord:
+async def create_character(character: CharacterRecord, agent: Agent | None = Depends(current_agent)) -> CharacterRecord:
     """Create or replace a character (idempotent by character id)."""
+    if agent is not None:
+        agent.require_characters([character.id])
     record = await upsert_character(character.model_dump())
     return CharacterRecord(**record)
 
@@ -994,10 +1173,11 @@ async def remove_character(character_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/characters/{character_id}/media")
-async def character_media(character_id: str, offset: int = 0, limit: int = 60) -> dict[str, Any]:
+async def character_media(character_id: str, offset: int = 0, limit: int = 60, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """List media associated with a specific character."""
-    total = await media_count(character_id=character_id)
-    rows = await list_media(character_id=character_id, limit=limit, offset=offset)
+    scope = owner_scope(agent)
+    total = await media_count(character_id=character_id, owner_id=scope)
+    rows = await list_media(character_id=character_id, limit=limit, offset=offset, owner_id=scope)
 
     items = []
     for row in rows:
@@ -1027,9 +1207,9 @@ async def character_media(character_id: str, offset: int = 0, limit: int = 60) -
 
 
 @app.get("/api/projects")
-async def projects(limit: int = 100) -> dict[str, Any]:
-    """List all projects with basic metadata and render counts."""
-    items = await list_projects(limit)
+async def projects(limit: int = 100, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """List projects with basic metadata and render counts."""
+    items = await list_projects(limit, owner_id=owner_scope(agent))
     # Augment each project with render count from the renders table
     for item in items:
         item["render_count"] = len(await list_project_renders(item["id"]))
@@ -1037,9 +1217,14 @@ async def projects(limit: int = 100) -> dict[str, Any]:
 
 
 @app.post("/api/projects", response_model=ProjectRecord)
-async def create_project(project: ProjectRecord) -> ProjectRecord:
+async def create_project(project: ProjectRecord, agent: Agent | None = Depends(current_agent)) -> ProjectRecord:
     """Create a new project (script) with title, aspect ratio, and cast."""
     record = _record_with_id(project, "prj")
+    if agent is not None:
+        existing = await get_project(record["id"])
+        if existing and not owns(agent, existing.get("metadata")):
+            raise HTTPException(status_code=409, detail="Project id already in use")
+        record["metadata"] = {**(record.get("metadata") or {}), "owner_id": agent.id}
     saved = await upsert_project(record)
     return ProjectRecord(**saved)
 
@@ -1065,7 +1250,10 @@ async def patch_project(project_id: str, patch: dict[str, Any]) -> ProjectRecord
     unknown = sorted(set(patch) - allowed)
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unsupported project fields: {', '.join(unknown)}")
+    owner_id = (current.get("metadata") or {}).get("owner_id")
     current.update(patch)
+    if owner_id:
+        current["metadata"] = {**(current.get("metadata") or {}), "owner_id": owner_id}
     saved = await upsert_project(current)
     return ProjectRecord(**saved)
 
@@ -1199,6 +1387,12 @@ def _wan_resolution(aspect_ratio: str | None) -> tuple[int, int]:
     return (640, 640)
 
 
+async def _project_owner(project_id: str) -> str | None:
+    """Shots and renders belong to whoever owns the project, whoever triggered them."""
+    project = await get_project(project_id)
+    return ((project or {}).get("metadata") or {}).get("owner_id")
+
+
 def _character_bindings_from_ids(ids: list[str]) -> list[CharacterBinding]:
     return [CharacterBinding(id=item) for item in ids]
 
@@ -1214,7 +1408,7 @@ async def _project_character_ids(project_id: str, scene_id: str, shot: dict[str,
 
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/generate-image", response_model=ImageGenerateResponse)
-async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest) -> ImageGenerateResponse:
+async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest, agent: Agent | None = Depends(current_agent)) -> ImageGenerateResponse:
     """Generate an image for a project shot using its description/image_prompt and character LoRAs."""
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
@@ -1232,6 +1426,10 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
     resolved_prompt = _prompt_with_character_triggers(prompt, records)
     # Determine workflow from the shot (explicit, not inferred from characters)
     workflow = body.workflow
+    if agent is not None:
+        agent.require_workflow(workflow)
+        agent.require_characters(character_ids)
+        await agent.require_capacity()
 
     loras = _character_loras(records, workflow, bindings)
     if not loras:
@@ -1254,6 +1452,7 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
             provider=body.provider,
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
+            owner_id=await _project_owner(project_id),
             extra_metadata={
                 "project_id": project_id,
                 "scene_id": scene_id,
@@ -1294,7 +1493,7 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
 
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/animate", response_model=VideoGenerateResponse)
-async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest) -> VideoGenerateResponse:
+async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest, agent: Agent | None = Depends(current_agent)) -> VideoGenerateResponse:
     """Animate a project shot by generating a video from its selected/generated image."""
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
@@ -1310,7 +1509,13 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
     bindings = [binding for binding, _ in resolved]
     records = [record for _, record in resolved]
 
+    if agent is not None:
+        agent.require_workflow(body.workflow)
+        agent.require_characters(character_ids)
+        await agent.require_capacity()
+
     image = shot.get("image_file")
+    await _require_readable(agent, image)
     if not image and resolved:
         image = _character_reference_image(bindings[0], records[0])
     if not image:
@@ -1340,6 +1545,7 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
             height=height,
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
+            owner_id=await _project_owner(project_id),
             extra_metadata={
                 "project_id": project_id,
                 "scene_id": scene_id,
@@ -1637,12 +1843,13 @@ async def _run_render(project_id: str, shots: list[dict[str, Any]], render_id: s
         "size": stat.st_size,
         "workflow_type": "project_render",
         "prompt": project_id,
+        "metadata": json.dumps({"owner_id": await _project_owner(project_id)}),
     })
     await _set_render_status(project_id, "completed", final_video=rel, render_id=render_id)
 
 
 @app.post("/api/projects/{project_id}/render")
-async def render_project(project_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+async def render_project(project_id: str, background_tasks: BackgroundTasks, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Assemble all completed shot images/videos into the final project video."""
     project = await get_project(project_id)
     if not project:
@@ -1660,6 +1867,9 @@ async def render_project(project_id: str, background_tasks: BackgroundTasks) -> 
     renderable = [s for s in ordered_shots if s.get("video_file") or s.get("image_file")]
     if not renderable:
         raise HTTPException(status_code=400, detail="No shots have images or video to render")
+    for shot in renderable:
+        await _require_readable(agent, shot.get("video_file"))
+        await _require_readable(agent, shot.get("image_file"))
 
     render_id = _new_id("rnd")
     meta = dict(project.get("metadata") or {})
@@ -1807,7 +2017,7 @@ async def comfy_get(path: str) -> Any:
 
 
 @app.post("/api/images/upload")
-async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_image(file: UploadFile = File(...), agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Persist an uploaded image into the output dir so any workflow can reference it.
 
     Deliberately does NOT push to a ComfyUI node here. Node placement is decided at
@@ -1821,11 +2031,22 @@ async def upload_image(file: UploadFile = File(...)) -> dict[str, Any]:
     target = _OUTPUT_DIR / name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(await file.read())
+    # Catalog it now, owned by the uploader, so the uploader can reference it in a job.
+    width, height = _read_dimensions(target)
+    await upsert_media({
+        "filename": name,
+        "type": _media_type_from_path(target),
+        "width": width,
+        "height": height,
+        "size": target.stat().st_size,
+        "modified": utc_from_timestamp(target.stat().st_mtime),
+        "metadata": json.dumps({"owner_id": agent.id}) if agent else None,
+    })
     return {"ok": True, "image": name, "filename": name}
 
 
 @app.post("/api/video/generate", response_model=VideoGenerateResponse)
-async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depends(resolve_agent)) -> VideoGenerateResponse:
+async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depends(current_agent)) -> VideoGenerateResponse:
     """Submit a single video generation job (t2v, i2v, or v2v)."""
     # Character resolution only supplies a fallback reference image for i2v.
     # Wan video takes identity from the image, so character triggers and character LoRAs
@@ -1844,6 +2065,8 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
         agent.require_workflow(body.workflow)
         agent.require_characters([r.get("id") for r in character_records if r.get("id")])
         await agent.require_capacity()
+    for reference in (body.image, body.video, body.audio):
+        await _require_readable(agent, reference)
 
     image = body.image
     if body.mode == "i2v" and not image and resolved:
@@ -2057,7 +2280,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
 
 
 @app.get("/api/jobs")
-async def jobs(include_completed: bool = True) -> dict[str, Any]:
+async def jobs(include_completed: bool = True, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Return jobs from durable Postgres state — a pure DB read, no live ComfyUI calls.
 
     `_reconcile_loop` keeps these rows current in the background. This endpoint is
@@ -2066,7 +2289,7 @@ async def jobs(include_completed: bool = True) -> dict[str, Any]:
     answering HTTP, and per-job round-trips would then hang the whole endpoint until it
     times out — blanking the lane even though jobs are actively running.
     """
-    db_jobs = await list_jobs(limit=100)
+    db_jobs = await list_jobs(limit=100, owner_id=owner_scope(agent))
 
     if not include_completed:
         db_jobs = [job for job in db_jobs if job.get("status") not in {"completed", "failed"}]
@@ -2538,7 +2761,7 @@ def _comfy_lora_name_for_checkpoint(path: Path) -> str:
 
 
 @app.post("/api/image/generate", response_model=ImageGenerateResponse)
-async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depends(resolve_agent)) -> ImageGenerateResponse:
+async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depends(current_agent)) -> ImageGenerateResponse:
     """Submit a single image generation job."""
     resolved = await _resolve_characters(body.character, body.characters)
     bindings = [binding for binding, _ in resolved]
@@ -2548,6 +2771,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         agent.require_workflow(body.workflow)
         agent.require_characters([r.get("id") for r in character_records if r.get("id")])
         await agent.require_capacity()
+    await _require_readable(agent, body.image)
 
     # Character presets (checkpoint, cfg/steps/sampler/scheduler, negative prompt,
     # resolution, look description) apply whenever the request doesn't explicitly
@@ -2779,6 +3003,7 @@ async def listing(
     character_id: str = "",
     tag: str = "",
     training_dataset: str = "",
+    agent: Agent | None = Depends(current_agent),
 ) -> dict[str, Any]:
     """List generated media from the media table.
 
@@ -2801,6 +3026,7 @@ async def listing(
         character_id=char_id,
         tag=tag_filter,
         training_dataset=training_only if training_dataset.strip() else None,
+        owner_id=owner_scope(agent),
     )
     rows = await list_media(
         limit=limit,
@@ -2810,6 +3036,7 @@ async def listing(
         character_id=char_id,
         tag=tag_filter,
         training_dataset=training_only if training_dataset.strip() else None,
+        owner_id=owner_scope(agent),
     )
 
     items = []
@@ -2819,6 +3046,10 @@ async def listing(
             continue
         modified = row.get("modified") or row.get("updated_at") or row.get("created_at")
         mtime = modified.timestamp() if hasattr(modified, "timestamp") else (modified or 0)
+        graph = db.graph_models(row.get("job_workflow_json"))
+        if not graph["models"] and row.get("model"):
+            # Older rows recorded the model on the media row and have no job graph.
+            graph["models"] = [row["model"]]
         items.append({
             "name": Path(filename).name,
             "filename": filename,
@@ -2829,11 +3060,18 @@ async def listing(
             "url": f"/media/{filename}",
             "thumb": f"/api/thumb/{filename}",
             "prompt": row.get("prompt"),
+            "negative_prompt": row.get("negative_prompt"),
             "prompt_id": row.get("prompt_id"),
             "character_ids": row.get("character_ids") or [],
             "tags": row.get("tags") or [],
             "included_in_training_dataset": row.get("included_in_training_dataset", False),
             "metadata": _parse_jsonb(row.get("metadata")),
+            # Imports have no job; when the file was added stands in for when it was submitted.
+            "submitted_at": row.get("job_created_at") or row.get("created_at"),
+            "started_at": row.get("job_started_at"),
+            "finished_at": row.get("job_finished_at"),
+            "models": graph["models"],
+            "loras": graph["loras"],
         })
 
     return {
@@ -2845,12 +3083,13 @@ async def listing(
 
 
 @app.get("/api/listing/counts")
-async def listing_counts() -> dict[str, Any]:
-    """Return aggregate counts for all media, images, and videos."""
+async def listing_counts(agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """Return aggregate counts for the caller's media, images, and videos."""
+    scope = owner_scope(agent)
     return {
-        "total": await media_count(),
-        "images": await media_count(type_filter="image"),
-        "videos": await media_count(type_filter="video"),
+        "total": await media_count(owner_id=scope),
+        "images": await media_count(type_filter="image", owner_id=scope),
+        "videos": await media_count(type_filter="video", owner_id=scope),
     }
 
 
@@ -2907,7 +3146,7 @@ async def media_thumb(path: str) -> FileResponse:
 
 
 @app.post("/api/delete")
-async def delete_media(body: dict[str, Any]) -> dict[str, Any]:
+async def delete_media(body: dict[str, Any], agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Delete generated files by relative path and remove their DB records."""
     files = body.get("files", [])
     if not isinstance(files, list):
@@ -2922,6 +3161,9 @@ async def delete_media(body: dict[str, Any]) -> dict[str, Any]:
         target = _safe_output_path(item)
         if not target:
             failed.append({"file": item, "error": "invalid path"})
+            continue
+        if not await can_read_file(agent, item):
+            failed.append({"file": item, "error": "not found"})
             continue
         try:
             if target.is_file():

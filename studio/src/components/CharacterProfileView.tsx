@@ -272,9 +272,9 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
   const loraCount = character.loras.length;
 
   const inputBase =
-    "w-full rounded-lg border border-gray-700 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-rose-500 focus:bg-black/50 focus:outline-none transition";
+    "w-full rounded-lg border border-gray-700 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-brand focus:bg-black/50 focus:outline-none transition";
   const textareaBase =
-    "w-full rounded-lg border border-gray-700 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-rose-500 focus:bg-black/50 focus:outline-none transition resize-none font-mono leading-relaxed";
+    "w-full rounded-lg border border-gray-700 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-brand focus:bg-black/50 focus:outline-none transition resize-none font-mono leading-relaxed";
 
   return (
     <div className="p-5 lg:p-7 space-y-6">
@@ -284,7 +284,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
           <div className="flex items-center gap-2 text-sm">
             {saving && (
               <>
-                <span className="w-3.5 h-3.5 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
+                <span className="w-3.5 h-3.5 border-2 border-brand-soft border-t-brand rounded-full animate-spin" />
                 <span className="text-gray-400">Saving...</span>
               </>
             )}
@@ -310,7 +310,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
                 <button
                   onClick={save}
                   disabled={saving}
-                  className="rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition flex items-center gap-1.5"
+                  className="rounded-lg bg-brand hover:brightness-110 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" /> Save
                 </button>
@@ -322,7 +322,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
 
       {/* ── Hero / Profile Header ── */}
       <section className="rounded-3xl border border-gray-800/60 bg-gradient-to-b from-gray-900/70 to-gray-950/40 overflow-hidden">
-        <div className="relative h-44 bg-gradient-to-br from-rose-950/50 via-fuchsia-950/20 to-amber-950/20">
+        <div className="relative h-44 bg-gradient-to-br from-gray-900 via-gray-950 to-black">
           {avatarUrl && <img src={avatarUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-35 blur-sm scale-105" />}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
         </div>
@@ -334,7 +334,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
               {avatarUrl ? (
                 <img src={avatarUrl} alt={form.name} className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full bg-gradient-to-br from-rose-500 to-amber-400 flex items-center justify-center">
+                <div className="w-full h-full bg-gradient-to-br from-brand to-brand-soft flex items-center justify-center">
                   <UserRound className="w-12 h-12 text-white" />
                 </div>
               )}
@@ -365,7 +365,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
                 type="text"
                 value={form.name}
                 onChange={(e) => updateField("name", e.target.value)}
-                className="w-full max-w-lg text-3xl font-bold tracking-tight bg-transparent border-b border-gray-700 focus:border-rose-500 focus:outline-none px-0 py-1 transition text-white placeholder-gray-600"
+                className="w-full max-w-lg text-3xl font-bold tracking-tight bg-transparent border-b border-gray-700 focus:border-brand focus:outline-none px-0 py-1 transition text-white placeholder-gray-600"
                 placeholder="Character name"
               />
 
@@ -373,13 +373,13 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
                 value={form.description}
                 onChange={(e) => updateField("description", e.target.value)}
                 rows={2}
-                className="w-full max-w-2xl text-sm text-gray-300 bg-transparent border border-gray-700 focus:border-rose-500 focus:bg-black/20 focus:outline-none rounded-lg px-3 py-2 transition resize-none placeholder-gray-600"
+                className="w-full max-w-2xl text-sm text-gray-300 bg-transparent border border-gray-700 focus:border-brand focus:bg-black/20 focus:outline-none rounded-lg px-3 py-2 transition resize-none placeholder-gray-600"
                 placeholder="Description"
               />
             </div>
 
             <div className="flex gap-2 flex-shrink-0">
-              <button onClick={onGenerate} className="rounded-xl bg-rose-600 hover:bg-rose-500 px-4 py-2 text-sm font-semibold transition flex items-center gap-2">
+              <button onClick={onGenerate} className="rounded-xl bg-brand hover:brightness-110 px-4 py-2 text-sm font-semibold transition flex items-center gap-2">
                 <Sparkles className="w-4 h-4" /> Generate
               </button>
             </div>
@@ -466,7 +466,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
       {/* ── Defaults ── */}
       <section className="rounded-3xl border border-gray-800/60 bg-gray-950/40 p-5 space-y-4">
         <div className="flex items-center gap-2">
-          <Settings2 className="w-4 h-4 text-violet-400" />
+          <Settings2 className="w-4 h-4 text-brand" />
           <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-300">Defaults</h2>
         </div>
         <textarea
@@ -495,7 +495,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
             <button
               onClick={save}
               disabled={saving}
-              className="rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition flex items-center gap-1.5"
+              className="rounded-lg bg-brand hover:brightness-110 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition flex items-center gap-1.5"
             >
               {saving ? (
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -512,7 +512,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
       {character.loras.length > 0 && (
         <section className="rounded-3xl border border-gray-800/60 bg-gray-950/40 p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-violet-400" />
+            <Cpu className="w-4 h-4 text-brand" />
             <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-300">Model</h2>
           </div>
 
@@ -521,7 +521,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
               const shortName = lora.name.split("/").pop() ?? lora.name;
               return (
                 <div key={i} className="rounded-2xl border border-gray-800/60 bg-black/30 p-4 space-y-3">
-                  <p className="text-xs font-mono text-violet-300 break-all">{shortName}</p>
+                  <p className="text-xs font-mono text-brand break-all">{shortName}</p>
                   <div className="grid grid-cols-3 gap-3">
                     {lora.base_model && (
                       <div>
@@ -568,7 +568,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
                   <tbody>
                     {checkpoints.checkpoints.map((ck, i) => (
                       <tr key={i} className="border-b border-gray-800/40 last:border-0 hover:bg-gray-900/30">
-                        <td className="px-3 py-2 font-mono text-violet-300">{ck.step ?? "final"}</td>
+                        <td className="px-3 py-2 font-mono text-brand">{ck.step ?? "final"}</td>
                         <td className="px-3 py-2 text-gray-400 font-mono text-[11px] break-all">{ck.name}</td>
                         <td className="px-3 py-2 text-gray-400 text-right font-mono">{(ck.size_bytes / 1024 / 1024).toFixed(0)} MB</td>
                         <td className="px-3 py-2 text-gray-500 text-right whitespace-nowrap">{new Date(ck.modified_at).toLocaleDateString()}</td>
@@ -621,10 +621,10 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
       {/* ── Media Gallery ── */}
       <section className="space-y-4">
         <div className="flex items-center gap-2 border-b border-gray-800/60">
-          <button onClick={() => setTab("images")} className={`px-4 py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${tab === "images" ? "text-white border-rose-500" : "text-gray-600 border-transparent hover:text-gray-300"}`}>
+          <button onClick={() => setTab("images")} className={`px-4 py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${tab === "images" ? "text-white border-brand" : "text-gray-600 border-transparent hover:text-gray-300"}`}>
             <Image className="w-4 h-4" /> Images
           </button>
-          <button onClick={() => setTab("videos")} className={`px-4 py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${tab === "videos" ? "text-white border-rose-500" : "text-gray-600 border-transparent hover:text-gray-300"}`}>
+          <button onClick={() => setTab("videos")} className={`px-4 py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${tab === "videos" ? "text-white border-brand" : "text-gray-600 border-transparent hover:text-gray-300"}`}>
             <Film className="w-4 h-4" /> Videos
           </button>
         </div>

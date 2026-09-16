@@ -220,7 +220,7 @@ export function ProjectDetailView({
             <ArrowLeft className="w-3.5 h-3.5" /> All projects
           </button>
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-rose-400/70">Project</p>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-brand">Project</p>
             <h1 className="text-base font-semibold tracking-tight text-gray-100 truncate">{project.title}</h1>
           </div>
         </div>
@@ -241,7 +241,7 @@ export function ProjectDetailView({
             <button
               onClick={() => renderStatus !== "rendering" && setShowRenderConfirm(true)}
               disabled={renderStatus === "rendering"}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-600/15 hover:bg-violet-600/25 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-1.5 text-xs font-medium text-violet-100 transition"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-brand bg-brand-faint hover:brightness-125 disabled:opacity-50 disabled:cursor-not-allowed px-3 py-1.5 text-xs font-medium text-brand transition"
             >
               {renderStatus === "rendering"
                 ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Rendering…</>
@@ -262,7 +262,7 @@ export function ProjectDetailView({
                 <>
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-rose-400/70">Scene {selectedScene.scene_number}</p>
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-brand">Scene {selectedScene.scene_number}</p>
                       <h2 className="text-2xl font-bold tracking-tight mt-1">{selectedScene.title || "Untitled scene"}</h2>
                       {selectedScene.summary && (
                         <p className="text-sm text-gray-400 mt-2 max-w-2xl leading-relaxed">{selectedScene.summary}</p>
@@ -271,7 +271,7 @@ export function ProjectDetailView({
                     <button
                       onClick={addShot}
                       disabled={saving}
-                      className="inline-flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-600/10 hover:bg-rose-600/20 hover:border-rose-400/50 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-rose-100 transition flex-shrink-0"
+                      className="inline-flex items-center gap-2 rounded-xl border border-brand bg-brand-faint hover:brightness-125 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-brand transition flex-shrink-0"
                     >
                       <Plus className="w-3.5 h-3.5" /> {saving ? "Adding…" : "Add shot"}
                     </button>
@@ -327,7 +327,7 @@ export function ProjectDetailView({
                     key={version.id}
                     onClick={() => selectVersion(version)}
                     title={`v${version.version_number} · ${version.kind} · ${version.status}`}
-                    className={`flex-shrink-0 relative rounded-lg overflow-hidden border transition ${isCurrent ? "border-rose-500/60 ring-1 ring-rose-500/40" : "border-gray-800 hover:border-gray-600"}`}
+                    className={`flex-shrink-0 relative rounded-lg overflow-hidden border transition ${isCurrent ? "border-brand ring-1 ring-brand-soft" : "border-gray-800 hover:border-gray-600"}`}
                   >
                     {url ? (
                       version.kind === "video" ? (
@@ -338,7 +338,7 @@ export function ProjectDetailView({
                     ) : (
                       <div className="h-14 w-24 flex items-center justify-center bg-gray-900 text-[10px] text-gray-600">{version.status}</div>
                     )}
-                    <span className={`absolute bottom-0.5 left-0.5 rounded px-1 text-[9px] font-mono ${isCurrent ? "bg-rose-600 text-white" : "bg-black/70 text-gray-300"}`}>v{version.version_number}</span>
+                    <span className={`absolute bottom-0.5 left-0.5 rounded px-1 text-[9px] font-mono ${isCurrent ? "bg-brand text-white" : "bg-black/70 text-gray-300"}`}>v{version.version_number}</span>
                   </button>
                 );
               })}
@@ -414,13 +414,13 @@ function PhaseChip({ phase }: { phase: ProjectPhase }) {
   }
   if (phase === "generate") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-600/15 px-2.5 py-1 text-rose-200">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-brand bg-brand-faint px-2.5 py-1 text-gray-200">
         <Wand2 className="w-3 h-3" /> Generate
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/40 bg-violet-600/15 px-2.5 py-1 text-violet-200">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-brand bg-brand-faint px-2.5 py-1 text-gray-200">
       <Play className="w-3 h-3" /> Animate
     </span>
   );
@@ -444,30 +444,30 @@ function RemixCenter({ project, shots }: { project: Project; shots: Shot[] }) {
   const totalShots = shots.length;
 
   return (
-    <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-950/10 to-gray-950 p-8 text-center max-w-2xl mx-auto space-y-5">
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/50 p-8 text-center max-w-2xl mx-auto space-y-5">
       <div className="flex items-center justify-center gap-2">
-        <Sparkles className="w-6 h-6 text-violet-400" />
-        <p className="text-lg font-semibold text-violet-200">Remix Phase</p>
+        <Sparkles className="w-6 h-6 text-brand" />
+        <p className="text-lg font-semibold text-gray-200">Remix Phase</p>
       </div>
 
       <div className="grid grid-cols-3 gap-3 text-[11px]">
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
           <p className="text-gray-600 text-[10px] uppercase tracking-wider">Images</p>
-          <p className="text-violet-300 mt-0.5 font-mono text-sm">{imageCount}/{totalShots}</p>
+          <p className="text-brand mt-0.5 font-mono text-sm">{imageCount}/{totalShots}</p>
         </div>
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
           <p className="text-gray-600 text-[10px] uppercase tracking-wider">Videos</p>
-          <p className="text-violet-300 mt-0.5 font-mono text-sm">{videoCount}/{totalShots}</p>
+          <p className="text-brand mt-0.5 font-mono text-sm">{videoCount}/{totalShots}</p>
         </div>
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
           <p className="text-gray-600 text-[10px] uppercase tracking-wider">Status</p>
-          <p className="text-violet-300 mt-0.5 font-mono text-sm">{project.status}</p>
+          <p className="text-brand mt-0.5 font-mono text-sm">{project.status}</p>
         </div>
       </div>
 
       <div className="space-y-3 text-left">
         <p className="text-xs text-gray-300 leading-relaxed">
-          <strong className="text-violet-200">Remixing is editing.</strong> Change any prompt, hit regenerate, and iterate until it lands. Your agent can also edit prompts for you.
+          <strong className="text-gray-200">Remixing is editing.</strong> Change any prompt, hit regenerate, and iterate until it lands. Your agent can also edit prompts for you.
         </p>
 
         <div className="rounded-xl border border-gray-700/40 bg-gray-900/40 p-3 space-y-2">
@@ -479,8 +479,8 @@ function RemixCenter({ project, shots }: { project: Project; shots: Shot[] }) {
             { n: 4, title: "Iterate", body: "Not quite right? Edit the prompt again and regenerate. Each run creates a new version you can compare." },
           ].map((step) => (
             <div key={step.n} className="flex gap-2.5">
-              <div className="flex-shrink-0 w-5 h-5 rounded-md bg-violet-500/20 flex items-center justify-center mt-0.5">
-                <span className="text-[10px] font-medium text-violet-400">{step.n}</span>
+              <div className="flex-shrink-0 w-5 h-5 rounded-md bg-brand-faint flex items-center justify-center mt-0.5">
+                <span className="text-[10px] font-medium text-brand">{step.n}</span>
               </div>
               <div>
                 <p className="text-[11px] text-gray-200">{step.title}</p>
@@ -504,30 +504,30 @@ function AnimateCenter({ project, shots }: { project: Project; shots: Shot[] }) 
   const totalShots = shots.length;
 
   return (
-    <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-b from-violet-950/10 to-gray-950 p-8 text-center max-w-2xl mx-auto space-y-5">
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/50 p-8 text-center max-w-2xl mx-auto space-y-5">
       <div className="flex items-center justify-center gap-2">
-        <Play className="w-6 h-6 text-violet-400" />
-        <p className="text-lg font-semibold text-violet-200">Animate Phase</p>
+        <Play className="w-6 h-6 text-brand" />
+        <p className="text-lg font-semibold text-gray-200">Animate Phase</p>
       </div>
 
       <div className="grid grid-cols-3 gap-3 text-[11px]">
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
           <p className="text-gray-600 text-[10px] uppercase tracking-wider">Images</p>
-          <p className="text-violet-300 mt-0.5 font-mono text-sm">{imageCount}/{totalShots}</p>
+          <p className="text-brand mt-0.5 font-mono text-sm">{imageCount}/{totalShots}</p>
         </div>
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
           <p className="text-gray-600 text-[10px] uppercase tracking-wider">Videos</p>
-          <p className="text-violet-300 mt-0.5 font-mono text-sm">{videoCount}/{totalShots}</p>
+          <p className="text-brand mt-0.5 font-mono text-sm">{videoCount}/{totalShots}</p>
         </div>
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2">
           <p className="text-gray-600 text-[10px] uppercase tracking-wider">Status</p>
-          <p className="text-violet-300 mt-0.5 font-mono text-sm">{project.status}</p>
+          <p className="text-brand mt-0.5 font-mono text-sm">{project.status}</p>
         </div>
       </div>
 
       <div className="space-y-3 text-left">
         <p className="text-xs text-gray-300 leading-relaxed">
-          <strong className="text-violet-200">All images are generated.</strong> Now you can animate any shot into a video clip. Pick a shot and click Animate.
+          <strong className="text-gray-200">All images are generated.</strong> Now you can animate any shot into a video clip. Pick a shot and click Animate.
         </p>
 
         <div className="rounded-xl border border-gray-700/40 bg-gray-900/40 p-3 space-y-2">
@@ -539,8 +539,8 @@ function AnimateCenter({ project, shots }: { project: Project; shots: Shot[] }) 
             { n: 4, title: "Select versions", body: "The bottom strip shows all versions. Click one to make it active." },
           ].map((step) => (
             <div key={step.n} className="flex gap-2.5">
-              <div className="flex-shrink-0 w-5 h-5 rounded-md bg-violet-500/20 flex items-center justify-center mt-0.5">
-                <span className="text-[10px] font-medium text-violet-400">{step.n}</span>
+              <div className="flex-shrink-0 w-5 h-5 rounded-md bg-brand-faint flex items-center justify-center mt-0.5">
+                <span className="text-[10px] font-medium text-brand">{step.n}</span>
               </div>
               <div>
                 <p className="text-[11px] text-gray-200">{step.title}</p>
@@ -579,7 +579,7 @@ function ShotCard({ shot, phase, selected, saving, onSelect, onGenerateImage, on
   return (
     <div
       onClick={onSelect}
-      className={`rounded-xl border bg-gray-900/30 overflow-hidden cursor-pointer transition ${selected ? "border-rose-500/50 ring-1 ring-rose-500/30" : "border-gray-800/60 hover:border-gray-700"}`}
+      className={`rounded-xl border bg-gray-900/30 overflow-hidden cursor-pointer transition ${selected ? "border-brand ring-1 ring-brand-soft" : "border-gray-800/60 hover:border-gray-700"}`}
     >
       <div className="aspect-video bg-black flex items-center justify-center relative">
         {videoUrl ? (
@@ -596,7 +596,7 @@ function ShotCard({ shot, phase, selected, saving, onSelect, onGenerateImage, on
           shot {shot.shot_number}
         </span>
         {videoUrl && (
-          <span className="absolute top-1.5 right-1.5 rounded-md bg-violet-600/80 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-white inline-flex items-center gap-1">
+          <span className="absolute top-1.5 right-1.5 rounded-md bg-black/70 border border-white/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-white inline-flex items-center gap-1">
             <Video className="w-2.5 h-2.5" /> video
           </span>
         )}
@@ -607,15 +607,15 @@ function ShotCard({ shot, phase, selected, saving, onSelect, onGenerateImage, on
         </p>
         <div className="flex items-center gap-1.5 pt-1 border-t border-gray-800/40">
           {rendering ? (
-            <div className="flex-1 rounded-lg border border-amber-800/30 bg-amber-950/20 px-2 py-1 text-[11px] text-amber-400 text-center">
-              <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse mr-1.5 align-middle" />
+            <div className="flex-1 rounded-lg border border-brand bg-brand-faint px-2 py-1 text-[11px] text-brand text-center">
+              <span className="inline-block w-2 h-2 rounded-full bg-brand animate-pulse mr-1.5 align-middle" />
               {shot.status === 'animating' ? 'Animating…' : 'Generating…'}
             </div>
           ) : phase === "outline" || !imageUrl ? (
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); onGenerateImage(); }}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-600/10 hover:bg-rose-600/20 px-2 py-1 text-[11px] text-rose-100 transition"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand bg-brand-faint hover:brightness-125 px-2 py-1 text-[11px] text-brand transition"
               >
                 <Wand2 className="w-3 h-3" /> {imageUrl ? "Regenerate" : "Generate"}
               </button>
@@ -637,7 +637,7 @@ function ShotCard({ shot, phase, selected, saving, onSelect, onGenerateImage, on
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); onAnimate(); }}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-600/15 hover:bg-violet-600/25 px-2 py-1 text-[11px] text-violet-100 transition"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand bg-brand-faint hover:brightness-125 px-2 py-1 text-[11px] text-brand transition"
               >
                 <Play className="w-3 h-3" /> Animate
               </button>
@@ -695,7 +695,7 @@ function ShotEditor({ shot, phase, saving, onPatch, onGenerate, onAnimate }: Sho
           value={draft.subtitle}
           onChange={(e) => setDraft((d) => ({ ...d, subtitle: e.target.value }))}
           rows={2}
-          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-500/50 placeholder:text-gray-700 leading-relaxed"
+          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-brand/50 placeholder:text-gray-700 leading-relaxed"
           placeholder="The screen flickers to life at precisely 8:00 AM."
         />
       </Field>
@@ -705,7 +705,7 @@ function ShotEditor({ shot, phase, saving, onPatch, onGenerate, onAnimate }: Sho
           value={draft.description}
           onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
           rows={3}
-          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-500/50 placeholder:text-gray-700 leading-relaxed"
+          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-brand/50 placeholder:text-gray-700 leading-relaxed"
           placeholder="Wide shot of the workshop, neon glow on the floor."
         />
       </Field>
@@ -715,7 +715,7 @@ function ShotEditor({ shot, phase, saving, onPatch, onGenerate, onAnimate }: Sho
           value={draft.image_prompt}
           onChange={(e) => setDraft((d) => ({ ...d, image_prompt: e.target.value }))}
           rows={4}
-          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-500/50 placeholder:text-gray-700 leading-relaxed font-mono"
+          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-brand/50 placeholder:text-gray-700 leading-relaxed font-mono"
           placeholder="atlas, workshop interior, neon underglow, cinematic anamorphic lens, moody lighting"
         />
       </Field>
@@ -725,7 +725,7 @@ function ShotEditor({ shot, phase, saving, onPatch, onGenerate, onAnimate }: Sho
           value={draft.motion_prompt}
           onChange={(e) => setDraft((d) => ({ ...d, motion_prompt: e.target.value }))}
           rows={3}
-          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-500/50 placeholder:text-gray-700 leading-relaxed font-mono"
+          className="w-full rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-brand/50 placeholder:text-gray-700 leading-relaxed font-mono"
           placeholder="Slow push in, suit plates locking into place."
         />
       </Field>
@@ -750,15 +750,15 @@ function ShotEditor({ shot, phase, saving, onPatch, onGenerate, onAnimate }: Sho
           <Save className="w-3.5 h-3.5" /> {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
         </button>
         {(shot.status === 'rendering_image' || shot.status === 'animating') ? (
-          <div className="rounded-xl border border-amber-800/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-400 text-center font-medium">
-            <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse mr-1.5 align-middle" />
+          <div className="rounded-xl border border-brand bg-brand-faint px-3 py-2 text-xs text-brand text-center font-medium">
+            <span className="inline-block w-2 h-2 rounded-full bg-brand animate-pulse mr-1.5 align-middle" />
             {shot.status === 'animating' ? 'Animating…' : 'Generating…'}
           </div>
         ) : phase === "outline" || !shot.image_file ? (
           <button
             onClick={() => { if (!saving) onGenerate(); }}
             disabled={saving}
-            className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-600/15 hover:bg-rose-600/25 disabled:opacity-50 px-3 py-2 text-xs font-medium text-rose-100 transition"
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand-faint hover:brightness-125 disabled:opacity-50 px-3 py-2 text-xs font-medium text-brand transition"
           >
             <Wand2 className="w-3.5 h-3.5" /> {shot.image_file ? "Regenerate image" : "Generate image"}
           </button>
@@ -774,7 +774,7 @@ function ShotEditor({ shot, phase, saving, onPatch, onGenerate, onAnimate }: Sho
             <button
               onClick={() => { if (!saving) onAnimate(); }}
               disabled={saving}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-600/15 hover:bg-violet-600/25 disabled:opacity-50 px-3 py-2 text-xs font-medium text-violet-100 transition"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand-faint hover:brightness-125 disabled:opacity-50 px-3 py-2 text-xs font-medium text-brand transition"
             >
               <Play className="w-3.5 h-3.5" /> Animate
             </button>
@@ -832,7 +832,7 @@ function ProjectSummary({ project }: { project: Project }) {
         <p className="text-[11px] font-medium text-gray-300 mb-2">Share (coming soon)</p>
         <div className="grid grid-cols-1 gap-1.5">
           <button disabled className="rounded-lg border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-[11px] text-gray-500 text-left flex items-center gap-2 opacity-50 cursor-not-allowed">
-            <span className="text-rose-400">♪</span> TikTok
+            <span className="text-brand">♪</span> TikTok
           </button>
           <button disabled className="rounded-lg border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-[11px] text-gray-500 text-left flex items-center gap-2 opacity-50 cursor-not-allowed">
             <span className="text-red-400">▶</span> YouTube Shorts
@@ -841,7 +841,7 @@ function ProjectSummary({ project }: { project: Project }) {
             <span className="text-pink-400">▣</span> Instagram Reels
           </button>
           <button disabled className="rounded-lg border border-gray-800 bg-gray-900/40 px-2.5 py-1.5 text-[11px] text-gray-500 text-left flex items-center gap-2 opacity-50 cursor-not-allowed">
-            <span className="text-purple-400">◉</span> X / Twitter
+            <span className="text-gray-400">◉</span> X / Twitter
           </button>
         </div>
       </div>
@@ -874,7 +874,7 @@ function RenderConfirmModal({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800/60 flex-shrink-0">
           <div className="flex items-center gap-2">
-            <Clapperboard className="w-4 h-4 text-violet-400" />
+            <Clapperboard className="w-4 h-4 text-brand" />
             <h2 className="text-sm font-semibold text-gray-100">Render final video</h2>
           </div>
           <button onClick={onCancel} className="text-gray-600 hover:text-gray-300 transition">
@@ -975,7 +975,7 @@ function RenderConfirmModal({
             </button>
             <button
               onClick={onConfirm}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl border border-violet-500/40 bg-violet-600/20 hover:bg-violet-600/30 text-xs font-medium text-violet-100 transition"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl border border-brand bg-brand-faint hover:brightness-125 text-xs font-medium text-brand transition"
             >
               <Clapperboard className="w-3.5 h-3.5" /> Render
             </button>

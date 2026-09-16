@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, us
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
-import { Menu, Sparkles, UserCircle } from "lucide-react";
+import { BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, Sparkles, UserCircle } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
 import { ProjectsView } from "./components/ProjectsView";
@@ -10,6 +10,10 @@ import { LoraTrainingPage } from "./components/LoraTrainingPage";
 import { ProjectDetailView } from "./components/ProjectDetailView";
 import { ProjectFilmsView } from "./components/ProjectFilmsView";
 import { Lightbox } from "./components/Lightbox";
+import { SignInGate } from "./components/SignInGate";
+import { ApiKeysPage } from "./components/ApiKeysPage";
+import { JobsPage } from "./components/JobsPage";
+import { AccountSettings, SettingsPage, signOut, useSession } from "./components/SettingsPage";
 
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import type { SidebarTab } from "./components/sidebar/AppSidebar";
@@ -114,12 +118,75 @@ export function useApp() {
   return useContext(AppContext);
 }
 
+/* ── Account menu: who is signed in, plus Settings and sign-out ── */
+function AccountMenu() {
+  const navigate = useNavigate();
+  const { data: session } = useSession();
+  const agent = session?.agent;
+  const close = () => document.getElementById("account-menu")?.hidePopover();
+  const itemClass =
+    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-300 hover:bg-gray-800/80 hover:text-white focus-visible:bg-gray-800/80 focus-visible:outline-none";
+
+  return (
+    <>
+      <button
+        type="button"
+        popoverTarget="account-menu"
+        id="account-menu-button"
+        className="flex items-center gap-2 rounded-xl border border-gray-800 bg-gray-900/50 px-2.5 py-1.5 text-gray-200 hover:border-gray-600 transition"
+      >
+        <UserCircle className="w-4 h-4" aria-hidden />
+        <span className="hidden sm:inline font-medium">{agent?.name ?? "Account"}</span>
+      </button>
+      <div
+        id="account-menu"
+        popover="auto"
+        // Pin under the button when it opens; the top layer ignores the header's layout.
+        onBeforeToggle={(event) => {
+          const rect = document.getElementById("account-menu-button")?.getBoundingClientRect();
+          if (event.newState !== "open" || !rect) return;
+          event.currentTarget.style.top = `${rect.bottom + 8}px`;
+          event.currentTarget.style.right = `${window.innerWidth - rect.right}px`;
+        }}
+        className="fixed m-0 w-60 [inset:auto] rounded-2xl border border-gray-800 bg-gray-950 p-1.5 text-white shadow-2xl shadow-black/60"
+      >
+        {agent && (
+          <div className="border-b border-gray-800/60 px-3 py-2 mb-1">
+            <p className="text-sm font-medium text-gray-100">{agent.name}</p>
+            <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-400">
+              {agent.is_admin && <ShieldCheck className="h-3 w-3 text-amber-300" aria-hidden />}
+              {agent.is_admin ? "Admin" : "Scoped key"} · <span className="font-mono">{agent.id}</span>
+            </p>
+          </div>
+        )}
+        <button type="button" className={itemClass} onClick={() => { close(); navigate("/studio/settings/account"); }}>
+          <Settings className="h-4 w-4" aria-hidden /> Settings
+        </button>
+        <a className={itemClass} href="https://flixml.com/docs" target="_blank" rel="noreferrer" onClick={close}>
+          <BookOpen className="h-4 w-4" aria-hidden /> Docs
+        </a>
+        {/* AGPL-3.0 §13: a network-served copy has to offer its users the source. */}
+        <a className={itemClass} href="https://github.com/ortegarod/flixml" target="_blank" rel="noreferrer" onClick={close}>
+          <Code2 className="h-4 w-4" aria-hidden /> Source code
+        </a>
+        {agent && (
+          <button type="button" className={itemClass} onClick={signOut}>
+            <LogOut className="h-4 w-4" aria-hidden /> Sign out
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
 /* ── Layout Shell: header + sidebar + <Outlet /> ── */
 function Shell() {
   const ctx = useApp();
   const navigate = useNavigate();
   const projectMatch = useMatch("/studio/projects/:projectId");
   const loraMatch = useMatch("/studio/lora-training");
+  const settingsMatch = useMatch("/studio/settings/*");
+  const jobsMatch = useMatch("/studio/jobs");
 
   // Load project when entering a project-detail route
   const lastProjectId = useRef<string | undefined>(undefined);
@@ -137,10 +204,21 @@ function Shell() {
     if (loraMatch) ctx.setActiveSidebarTab("characters");
   }, [loraMatch]);
 
-  const videoCount = ctx.items.filter(
-    (item) => item.type === "video" || item.url.endsWith(".mp4") || item.url.endsWith(".webm")
-  ).length;
-  const imageCount = ctx.items.length - videoCount;
+  useEffect(() => {
+    // Settings has its own section nav; however it was reached, drop the empty side panel
+    if (settingsMatch) {
+      ctx.setActiveSidebarTab("settings");
+      ctx.setSidebarCollapsed(true);
+    }
+  }, [!!settingsMatch]);
+
+  // Jobs is a full-width page too — same treatment when it's reached by URL
+  useEffect(() => {
+    if (jobsMatch) {
+      ctx.setActiveSidebarTab("jobs");
+      ctx.setSidebarCollapsed(true);
+    }
+  }, [!!jobsMatch]);
 
   const projectMode: ProjectModeData | undefined =
     projectMatch && ctx.projectData
@@ -191,7 +269,7 @@ function Shell() {
             className="flex items-center gap-3 min-w-0 hover:opacity-80 transition"
             title="Studio home"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 via-brand to-amber-600 flex items-center justify-center shadow-lg shadow-brand/25 ring-1 ring-white/10">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-brand-soft flex items-center justify-center shadow-lg shadow-brand/25 ring-1 ring-white/10">
               <Sparkles className="w-4 h-4 text-black" />
             </div>
             <div className="min-w-0 hidden sm:block">
@@ -206,39 +284,15 @@ function Shell() {
             {(() => {
               const activeCount = ctx.jobs.filter((j) => j.status === "pending" || j.status === "running").length;
               return activeCount > 0 ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-800/40 bg-amber-950/30 px-2.5 py-1 text-amber-400 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand bg-brand-faint px-2.5 py-1 text-brand font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" />
                   {activeCount} generating
                 </span>
               ) : null;
             })()}
-            <span className="rounded-full border border-gray-800 bg-gray-900/50 px-2.5 py-1 text-gray-500">
-              {ctx.items.length} media
-            </span>
-            <span className="hidden lg:inline rounded-full border border-gray-800 bg-gray-900/50 px-2.5 py-1 text-gray-500">
-              {imageCount} images
-            </span>
-            <span className="hidden lg:inline rounded-full border border-gray-800 bg-gray-900/50 px-2.5 py-1 text-gray-500">
-              {videoCount} videos
-            </span>
           </div>
 
-          <div className="group relative">
-            <button className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-950/20 px-2.5 py-1.5 text-rose-100 hover:border-rose-400/50 transition">
-              <UserCircle className="w-4 h-4" />
-              <span className="hidden sm:inline font-medium">Demo Account</span>
-              <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-amber-300">
-                Hackathon
-              </span>
-            </button>
-            <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-72 rounded-2xl border border-gray-800 bg-gray-950/95 p-4 shadow-2xl shadow-black/60 opacity-0 translate-y-1 transition group-hover:opacity-100 group-hover:translate-y-0">
-              <p className="text-xs font-semibold text-gray-200">Demo workspace</p>
-              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
-                This hackathon build uses a sample owner dataset to demonstrate character LoRA training,
-                generation, and media management. Authentication is intentionally mocked for the demo.
-              </p>
-            </div>
-          </div>
+          <AccountMenu />
         </div>
       </header>
 
@@ -256,6 +310,14 @@ function Shell() {
             activeTab={ctx.activeSidebarTab}
             collapsed={ctx.sidebarCollapsed}
             onTabChange={(tab) => {
+              // These pages fill the pane themselves, so they take the full width instead of a side panel
+              if (tab === "settings" || tab === "jobs") {
+                ctx.setActiveSidebarTab(tab);
+                ctx.setSidebarCollapsed(true);
+                navigate(tab === "jobs" ? "/studio/jobs" : "/studio/settings");
+                if (typeof window !== "undefined" && window.innerWidth < 768) ctx.setSidebarOpen(false);
+                return;
+              }
               // Clicking the already-active icon collapses the panel (VS Code style)
               if (tab === ctx.activeSidebarTab && !ctx.sidebarCollapsed) {
                 ctx.setSidebarCollapsed(true);
@@ -272,8 +334,6 @@ function Shell() {
               }
             }}
             onClose={() => ctx.setSidebarOpen(false)}
-            checkpoints={ctx.checkpoints}
-            onQueued={ctx.load}
             onSelectCharacter={(id) => {
               ctx.setActiveSidebarTab("characters");
               navigate(`/studio/characters/${id}`);
@@ -304,6 +364,7 @@ function Shell() {
 /* ── Route wrappers that connect URL params to existing components ── */
 function StudioRoute() {
   const ctx = useApp();
+  const navigate = useNavigate();
   return (
     <StudioView
       items={ctx.items}
@@ -312,7 +373,7 @@ function StudioRoute() {
       error={ctx.error}
       onOpen={ctx.setSelected}
       onDelete={ctx.deleteItem}
-      onOpenProjects={() => window.location.href = "/studio/projects"}
+      onOpenProjects={() => navigate("/studio/projects")}
       filter={ctx.galleryFilter}
       onFilterChange={ctx.setGalleryFilter}
       query={ctx.gallerySearch}
@@ -787,7 +848,14 @@ function AppRoutes() {
             <Route path="projects/:projectId" element={<ProjectRoute />} />
             <Route path="projects/:projectId/films" element={<ProjectFilmsRoute />} />
             <Route path="characters/:characterId" element={<CharacterRoute />} />
+            <Route path="jobs" element={<JobsPage />} />
             <Route path="lora-training" element={<LoraTrainingPage />} />
+            <Route path="settings" element={<SettingsPage />}>
+              <Route index element={<Navigate to="account" replace />} />
+              <Route path="account" element={<AccountSettings />} />
+              <Route path="api-keys" element={<ApiKeysPage />} />
+            </Route>
+            <Route path="agents" element={<Navigate to="/studio/settings/api-keys" replace />} />
           </Route>
         </Routes>
       </AppContext.Provider>
@@ -799,7 +867,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppRoutes />
+      <SignInGate>
+        <AppRoutes />
+      </SignInGate>
       <Toaster richColors theme="dark" position="bottom-right" />
     </QueryClientProvider>
   );

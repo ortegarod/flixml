@@ -96,7 +96,7 @@ export function ProjectFilmsView({ projectId, onBack }: ProjectFilmsViewProps) {
           <ArrowLeft className="w-3.5 h-3.5" /> Back to project
         </button>
         <div>
-          <p className="text-[10px] uppercase tracking-[0.22em] text-rose-400/70">Films</p>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-brand">Films</p>
           <h1 className="text-base font-semibold tracking-tight text-gray-100">{project?.title}</h1>
         </div>
         <span className="ml-auto text-[11px] text-gray-500 font-mono">{films.length} film{films.length !== 1 ? "s" : ""}</span>
@@ -146,7 +146,7 @@ export function ProjectFilmsView({ projectId, onBack }: ProjectFilmsViewProps) {
                       href={f.final_video_url || "#"}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-600/10 hover:bg-emerald-600/20 px-2 py-1.5 text-[11px] text-emerald-300 transition"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-brand bg-brand-faint hover:brightness-125 px-2 py-1.5 text-[11px] text-emerald-300 transition"
                     >
                       <Play className="w-3 h-3" /> Watch
                     </a>

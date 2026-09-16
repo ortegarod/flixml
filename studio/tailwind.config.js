@@ -13,7 +13,14 @@ export default {
         secondary: { DEFAULT: "var(--secondary)", foreground: "var(--secondary-foreground)" },
         muted: { DEFAULT: "var(--muted)", foreground: "var(--muted-foreground)" },
         accent: { DEFAULT: "var(--accent)", foreground: "var(--accent-foreground)" },
-        brand: { DEFAULT: "var(--brand)", foreground: "var(--brand-foreground)" },
+        // The app's only accent. soft/faint are --brand at reduced alpha, so
+        // rings and tints rebrand with it instead of drifting to another hue.
+        brand: {
+          DEFAULT: "var(--brand)",
+          foreground: "var(--brand-foreground)",
+          soft: "var(--brand-soft)",
+          faint: "var(--brand-faint)",
+        },
         destructive: { DEFAULT: "var(--destructive)" },
         border: "var(--border)",
         input: "var(--input)",
