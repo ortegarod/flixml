@@ -35,7 +35,7 @@ function vramPercent(node: NodeInfo) {
 
 function roleClass(role: string) {
   if (role === "training") return "text-amber-300 border-amber-500/30 bg-amber-500/10";
-  if (role === "image" || role === "video") return "text-blue-300 border-blue-500/30 bg-blue-500/10";
+  if (role === "image" || role === "video") return "text-gray-300 border-white/15 bg-white/5";
   return "text-gray-400 border-gray-700 bg-gray-900/60";
 }
 
@@ -156,7 +156,7 @@ export function NodesTab() {
                     <span>{gb((node.vram_total || 0) - (node.vram_free || 0))} / {gb(node.vram_total)}</span>
                   </div>
                   <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
-                    <div className="h-full bg-rose-500" style={{ width: `${percent ?? 0}%` }} />
+                    <div className="h-full bg-brand" style={{ width: `${percent ?? 0}%` }} />
                   </div>
                 </div>
 

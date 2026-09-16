@@ -1,23 +1,10 @@
+import { useEffect, useState } from "react";
 import type { JobItem } from "../types";
+import { approxDuration, clock } from "../lib/duration";
+import { useJobProgress, useWorkflowRunTimes } from "../lib/jobProgress";
 
 interface PendingMediaTileProps {
   job: JobItem;
-}
-
-function getProgress(job: JobItem): number {
-  if (typeof job.progress_percent === "number") return Math.round(job.progress_percent);
-  if (job.step_max && job.step_max > 0) {
-    return Math.round(((job.step_value || 0) / job.step_max) * 100);
-  }
-  return 0;
-}
-
-function statusLabel(status: string) {
-  if (status === "pending") return "Queued";
-  if (status === "running") return "Generating";
-  if (status === "failed") return "Failed";
-  if (status === "completed") return "Done";
-  return status;
 }
 
 // Strip a staged path down to its filename for compact display.
@@ -40,10 +27,20 @@ function MetaChip({ icon, value, title }: { icon: string; value: string; title?:
 }
 
 export function PendingMediaTile({ job }: PendingMediaTileProps) {
-  const progress = getProgress(job);
-  const isRunning = job.status === "running";
   const isFailed = job.status === "failed";
   const isCompleted = job.status === "completed";
+
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (isFailed || isCompleted) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [isFailed, isCompleted]);
+
+  const { data: workflows = [] } = useWorkflowRunTimes();
+  const { rendering, elapsed, typical, overdue, percent } = useJobProgress(job, now, workflows);
+  const isRunning = rendering;
+  const statusText = isFailed ? "Failed" : isCompleted ? "Done" : rendering ? "Rendering" : "Queued";
 
   const workflow = job.workflow || job.job_type;
   const inputVideo = baseName(job.video);
@@ -67,10 +64,10 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
     >
       {/* Animated shimmer background */}
       {!isFailed && !isCompleted && (
-        <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a2e] via-[#0d0d0d] to-[#1a1a2e] animate-pulse" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#1b1a18] via-[#0d0d0d] to-[#1b1a18] animate-pulse" />
       )}
       {isCompleted && (
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/30 via-[#0d0d0d] to-emerald-950/20" />
+        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.07] via-[#0d0d0d] to-white/[0.03]" />
       )}
       {!isFailed && !isCompleted && (
         <div
@@ -87,12 +84,12 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
         <div className="min-w-0">
           <span
             className={`flex items-center text-[10px] font-mono uppercase tracking-widest ${
-              isFailed ? "text-red-400/80" : isCompleted ? "text-emerald-400/80" : "text-primary/70"
+              isFailed ? "text-red-400/80" : isCompleted ? "text-white/70" : "text-brand"
             }`}
           >
-            {isRunning && <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary mr-1.5 animate-pulse" />}
-            {isCompleted && <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5" />}
-            {statusLabel(job.status)}
+            {isRunning && <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand mr-1.5 animate-pulse" />}
+            {isCompleted && <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/70 mr-1.5" />}
+            {statusText}
             {job.queue_position ? ` · #${job.queue_position}` : ""}
           </span>
           {workflow && (
@@ -108,19 +105,28 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-1.5 min-h-0">
         {isCompleted ? (
           <>
-            <svg className="w-8 h-8 text-emerald-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-8 h-8 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
-            <span className="text-emerald-400/60 font-mono text-xs">Done</span>
+            <span className="text-white/50 font-mono text-xs">Done</span>
           </>
         ) : isFailed ? (
           <span className="text-red-400/60 font-mono text-xs">Failed</span>
         ) : (
           <>
-            <span className="loading loading-ring loading-md text-primary opacity-60" />
-            {progress > 0 && (
-              <span className="text-white/60 font-mono text-lg font-bold tracking-widest leading-none">{progress}%</span>
+            <span className="loading loading-ring loading-md text-brand opacity-70" />
+            {elapsed !== null && (
+              <span className={`font-mono text-2xl font-bold tabular-nums leading-none ${overdue ? "text-red-300/80" : "text-white/70"}`}>
+                {clock(elapsed)}
+              </span>
             )}
+            <span className="text-[9px] font-mono text-white/30">
+              {typical
+                ? overdue
+                  ? `over the usual ${approxDuration(typical.seconds)}`
+                  : `usually ${approxDuration(typical.seconds)}`
+                : "no run history yet"}
+            </span>
             {(nodeStep || sampleStep) && (
               <span className="text-[9px] font-mono text-white/30">
                 {[nodeStep, sampleStep].filter(Boolean).join(" · ")}
@@ -165,16 +171,32 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
 
       {/* Progress bar */}
       {!isFailed && !isCompleted && (
-        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/5 z-20">
+        <div
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={
+            typical
+              ? `Estimated: ${percent}% of the usual run time for this workflow`
+              : "Rendering, no time estimate available"
+          }
+          title={
+            typical
+              ? `Elapsed against the median of the last ${typical.samples} run${typical.samples === 1 ? "" : "s"} on ${job.provider ?? "this node"} — an estimate, not sampler progress`
+              : "No run history for this workflow on this node yet"
+          }
+          className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/5 z-20"
+        >
           <div
-            className="h-full bg-primary transition-all duration-500 ease-out"
-            style={{ width: `${Math.max(2, progress)}%` }}
+            className={`h-full transition-all duration-1000 ease-linear ${overdue ? "bg-red-400/70" : "bg-brand"}`}
+            style={{ width: `${Math.max(2, percent)}%` }}
           />
         </div>
       )}
       {isCompleted && (
-        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-emerald-950 z-20">
-          <div className="h-full bg-emerald-500/60 transition-all duration-500" style={{ width: "100%" }} />
+        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/5 z-20">
+          <div className="h-full bg-white/40 transition-all duration-500" style={{ width: "100%" }} />
         </div>
       )}
       {isFailed && (

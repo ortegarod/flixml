@@ -27,10 +27,10 @@ interface ProjectsViewProps {
 
 const STATUS_STYLES: Record<string, string> = {
   draft: "border-gray-700/60 bg-gray-800/40 text-gray-400",
-  planning: "border-violet-500/30 bg-violet-500/10 text-violet-300",
-  ready: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
-  rendering: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-  completed: "border-blue-500/30 bg-blue-500/10 text-blue-300",
+  planning: "border-gray-700/60 bg-gray-800/40 text-gray-300",
+  ready: "border-gray-700/60 bg-gray-800/40 text-gray-200",
+  rendering: "border-brand bg-brand-faint text-brand",
+  completed: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   failed: "border-red-500/30 bg-red-500/10 text-red-300",
 };
 
@@ -106,7 +106,7 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
     <div className={compact ? "h-full overflow-y-auto p-4 space-y-5" : "h-full overflow-y-auto p-8 space-y-6"}>
       <section className="space-y-2">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-500/20 ring-1 ring-white/10">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-brand to-brand-soft flex items-center justify-center shadow-lg shadow-black/30 ring-1 ring-white/10">
             <Film className="w-5 h-5 text-white" />
           </div>
           <div className="min-w-0">
@@ -116,7 +116,7 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
           <button
             onClick={createProject}
             disabled={creating}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-600/15 hover:bg-rose-600/25 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-rose-100 transition"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-brand bg-brand-faint hover:brightness-125 disabled:opacity-50 px-2.5 py-1 text-[11px] font-medium text-brand transition"
             title="Create a new empty project"
           >
             <Plus className="w-3.5 h-3.5" /> {creating ? "Creating…" : "New project"}
@@ -131,10 +131,10 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
         </div>
       </section>
 
-      <section className="rounded-2xl border border-rose-600/20 bg-gradient-to-b from-rose-950/10 to-gray-950 p-4 space-y-3">
+      <section className="rounded-2xl border border-gray-800 bg-gray-950/50 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-rose-300" />
-          <p className="text-xs font-semibold text-rose-200 uppercase tracking-wider">What this tab is for</p>
+          <Sparkles className="w-4 h-4 text-brand" />
+          <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider">What this tab is for</p>
         </div>
         <p className="text-xs text-gray-300 leading-relaxed">
           This is not raw generation. This is where a rough idea becomes a structured short: synopsis, scenes, shots, and image prompts.
@@ -146,10 +146,10 @@ export function ProjectsView({ compact = false, onOpenProject }: ProjectsViewPro
         </div>
       </section>
 
-      <section className="rounded-2xl border border-violet-600/20 bg-gradient-to-b from-violet-950/10 to-gray-950 p-4 space-y-3">
+      <section className="rounded-2xl border border-gray-800 bg-gray-950/50 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-violet-300" />
-          <p className="text-xs font-semibold text-violet-200 uppercase tracking-wider">Agent workflow</p>
+          <Bot className="w-4 h-4 text-brand" />
+          <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider">Agent workflow</p>
         </div>
         <ol className="text-[11px] text-gray-400 space-y-1.5 leading-relaxed list-decimal pl-4">
           <li>Agent writes the project outline in conversation.</li>

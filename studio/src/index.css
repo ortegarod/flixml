@@ -9,8 +9,8 @@ body {
   /* Ambient cinematic depth: warm key-light glow over true black */
   background-color: #08080a;
   background-image:
-    radial-gradient(120% 80% at 15% -10%, oklch(0.79 0.135 78 / 0.07), transparent 55%),
-    radial-gradient(90% 70% at 100% 0%, oklch(0.55 0.12 265 / 0.06), transparent 50%);
+    radial-gradient(120% 80% at 15% -10%, var(--brand-glow), transparent 55%),
+    radial-gradient(90% 70% at 100% 0%, var(--brand-glow), transparent 50%);
   background-attachment: fixed;
 }
 
@@ -41,12 +41,34 @@ h1, h2, h3, .font-heading {
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.79 0.135 78 / 0.45);
+  background: var(--brand-soft);
   background-clip: content-box;
 }
 
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Gallery table detail row: full prompt beside the timeline and parameters once there's room. */
+.gallery-table {
+  container-type: inline-size;
+}
+
+.gallery-detail {
+  display: grid;
+}
+
+@container (min-width: 760px) {
+  .gallery-detail {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+
+/* Wide enough for model file names such as wan2.2_i2v_high_noise_14B_fp8_scaled. */
+@container (min-width: 960px) {
+  .gallery-detail {
+    grid-template-columns: minmax(0, 1fr) 440px;
+  }
 }
 
 @layer base {
@@ -57,9 +79,26 @@ h1, h2, h3, .font-heading {
   :root {
     --font-heading: 'Space Grotesk', 'Geist Variable', sans-serif;
     --font-sans: 'Geist Variable', system-ui, sans-serif;
-    /* Signature accent — molten amber-gold (celluloid, not "another purple AI app") */
-    --brand: oklch(0.79 0.135 78);
-    --brand-foreground: oklch(0.16 0.01 60);
+    /*
+     * Signature accent — neon green, matching flixml.com.
+     * This is the app's only accent hue. Change this one line to rebrand:
+     * everything below is derived from it, and the UI uses `brand` utilities
+     * rather than named Tailwind palettes.
+     *
+     * Colour rules for this app:
+     *   neutrals (gray-*, white/N) — all chrome. The media is the only thing
+     *                                with colour of its own.
+     *   brand                      — primary action, selection, focus, and work
+     *                                in flight. One hue carries all four.
+     *   red-*                      — errors and destructive confirmation.
+     * Nothing else. Seven accent families means none of them signals anything.
+     */
+    --brand: oklch(0.87 0.28 142);
+    --brand-foreground: oklch(0.17 0.03 145);
+    /* Derived from --brand, so a rebrand stays one line. */
+    --brand-soft: oklch(from var(--brand) l c h / 0.45);
+    --brand-faint: oklch(from var(--brand) l c h / 0.14);
+    --brand-glow: oklch(from var(--brand) l c h / 0.07);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -107,26 +146,26 @@ h1, h2, h3, .font-heading {
     --secondary-foreground: oklch(0.97 0.005 80);
     --muted: oklch(0.235 0.006 65);
     --muted-foreground: oklch(0.7 0.01 75);
-    /* Accent is the brand gold */
-    --accent: oklch(0.79 0.135 78);
-    --accent-foreground: oklch(0.16 0.01 60);
+    /* Accent is the brand hue */
+    --accent: var(--brand);
+    --accent-foreground: var(--brand-foreground);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 9%);
     --input: oklch(1 0 0 / 14%);
-    --ring: oklch(0.79 0.135 78);
-    --chart-1: oklch(0.79 0.135 78);
+    --ring: var(--brand);
+    --chart-1: var(--brand);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.145 0.005 62);
     --sidebar-foreground: oklch(0.97 0.005 80);
-    --sidebar-primary: oklch(0.79 0.135 78);
-    --sidebar-primary-foreground: oklch(0.16 0.01 60);
+    --sidebar-primary: var(--brand);
+    --sidebar-primary-foreground: var(--brand-foreground);
     --sidebar-accent: oklch(0.235 0.006 65);
     --sidebar-accent-foreground: oklch(0.97 0.005 80);
     --sidebar-border: oklch(1 0 0 / 9%);
-    --sidebar-ring: oklch(0.79 0.135 78);
+    --sidebar-ring: var(--brand);
   }
   * {
     border-color: hsl(var(--border));

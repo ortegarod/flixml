@@ -14,11 +14,20 @@ export interface MediaItem {
   filename?: string;
   thumb?: string;
   prompt?: string | null;
+  negative_prompt?: string | null;
   prompt_id?: string | null;
   character_ids?: string[];
   tags?: string[];
   included_in_training_dataset?: boolean;
   metadata?: Record<string, any> | null;
+  // When the producing job was submitted; for imports, when the file was added.
+  submitted_at?: string | null;
+  // When the producing job ran on its node; null for imports and jobs from before run times were recorded.
+  started_at?: string | null;
+  finished_at?: string | null;
+  // Base model and LoRA files the producing job's ComfyUI graph loaded.
+  models?: string[];
+  loras?: string[];
 }
 
 export interface LoraTrainingStatus {
@@ -68,6 +77,12 @@ export interface JobItem {
   job_type?: string;
   prompt?: string;
   created_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  models?: string[];
+  loras?: string[];
+  // Agent whose API key submitted the job.
+  owner_id?: string | null;
   queue_position?: number | null;
   current_node?: string | null;
   step_value?: number;

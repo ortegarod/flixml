@@ -1,12 +1,16 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
-import { ArrowRight, Film, Image, Search, SlidersHorizontal, Upload, Video } from "lucide-react";
+import { ArrowRight, Check, Film, Image, LayoutGrid, Search, SlidersHorizontal, Table2, Upload, Video, X } from "lucide-react";
 import { PendingMediaTile } from "./PendingMediaTile";
 import { MediaTile } from "./MediaTile";
+import { GalleryTable, type GalleryEntry } from "./GalleryTable";
 import { generateVideo } from "../api";
 import type { CharacterSummary, JobItem, MediaItem } from "../types";
 
 type Filter = "all" | "images" | "videos";
 type ViewSize = "compact" | "comfortable" | "large";
+type ViewMode = "grid" | "table";
+
+const VIEW_MODE_KEY = "flixml.studio.viewMode";
 
 interface StudioViewProps {
   items: MediaItem[];
@@ -74,7 +78,14 @@ export function StudioView({
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [viewSize, setViewSize] = useState<ViewSize>("large");
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    localStorage.getItem(VIEW_MODE_KEY) === "table" ? "table" : "grid"
+  );
+  useEffect(() => {
+    localStorage.setItem(VIEW_MODE_KEY, viewMode);
+  }, [viewMode]);
   const [importOpen, setImportOpen] = useState(false);
+  const activeFilterCount = [characterFilter, tagFilter, trainingDatasetOnly ? "1" : ""].filter(Boolean).length;
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importCharacter, setImportCharacter] = useState("");
   const [importTags, setImportTags] = useState("reference");
@@ -182,7 +193,7 @@ export function StudioView({
   const gridClass = {
     compact: "grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3",
     comfortable: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4",
-    large: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6",
+    large: "grid grid-cols-2 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6",
   }[viewSize];
 
 
@@ -244,7 +255,7 @@ export function StudioView({
     });
 
     // Build unified entries: jobs first (newest), then items
-    const entries: ({ kind: "job"; job: JobItem } | { kind: "item"; item: MediaItem })[] = [];
+    const entries: GalleryEntry[] = [];
 
     for (const job of filteredJobs) {
       entries.push({ kind: "job", job });
@@ -279,155 +290,39 @@ export function StudioView({
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   return (
-    <div className="p-5 lg:p-7 space-y-6">
-      <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-rose-400/70">Workspace</p>
-          <h1 className="text-2xl font-bold tracking-tight mt-1">Studio</h1>
-          <p className="text-sm text-gray-500 mt-2">Your gallery for quick image and video generation — freeform, no structure. Generate, browse, iterate.</p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-xs min-w-[260px]">
-          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-3 py-2">
-            <p className="text-gray-600">Total</p>
-            <p className="text-lg font-semibold text-gray-200">{counts.total}</p>
-          </div>
-          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-3 py-2">
-            <p className="text-gray-600">Images</p>
-            <p className="text-lg font-semibold text-gray-200">{imageCount}</p>
-          </div>
-          <div className="rounded-xl border border-gray-800 bg-gray-900/40 px-3 py-2">
-            <p className="text-gray-600">Videos</p>
-            <p className="text-lg font-semibold text-gray-200">{videoCount}</p>
-          </div>
-        </div>
+    <div className="p-5 lg:p-7 space-y-4">
+      {/* One line: what this is, how much of it there is, and the way out to Projects. */}
+      <section className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h1 className="text-2xl font-bold tracking-tight">Studio</h1>
+        <p className="text-xs text-gray-500">
+          {counts.total} in your gallery · {imageCount} images · {videoCount} videos
+        </p>
+        <button
+          onClick={onOpenProjects}
+          className="ml-auto inline-flex items-center gap-1.5 text-xs text-gray-500 transition hover:text-brand"
+          title="Projects are for finished pieces — scenes, shots, and a stitched render"
+        >
+          <Film className="h-3.5 w-3.5" aria-hidden /> Projects
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+        </button>
       </section>
 
-      <button
-        onClick={onOpenProjects}
-        className="group w-full rounded-2xl border border-violet-600/30 bg-gradient-to-r from-violet-950/30 via-indigo-950/20 to-gray-900/30 hover:border-violet-500/50 hover:from-violet-950/50 transition flex items-center gap-4 px-5 py-4 text-left"
-      >
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-500/20 ring-1 ring-white/10 flex-shrink-0">
-          <Film className="w-5 h-5 text-white" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-violet-100">Got a specific idea? Turn it into a Project.</p>
-          <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-            Studio is great for quick shots. <span className="text-gray-300">Projects</span> are for finished pieces — outline scenes, plan shots, generate, animate, and stitch together a real video.
-          </p>
-        </div>
-        <ArrowRight className="w-5 h-5 text-violet-400 group-hover:translate-x-1 transition flex-shrink-0" />
-      </button>
-
-      <section className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-2.5 flex flex-wrap items-center gap-2">
-        {/* Filter tabs */}
-        <div className="flex gap-1">
-          {[
-            ["all", "All", SlidersHorizontal],
-            ["images", "Images", Image],
-            ["videos", "Videos", Video],
-          ].map(([id, label, Icon]) => (
-            <button
-              key={id as string}
-              onClick={() => onFilterChange(id as Filter)}
-              title={label as string}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
-                filter === id ? "bg-rose-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{label as string}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Character filter */}
-        <select
-          value={characterFilter}
-          onChange={(event) => onCharacterFilterChange(event.target.value)}
-          className="rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-300 focus:outline-none focus:border-rose-600 min-w-[120px]"
-        >
-          <option value="">All characters</option>
-          <option value="__unassigned__">Unassigned</option>
-          {characters.map((character) => (
-            <option key={character.id} value={character.id}>{character.name}</option>
-          ))}
-        </select>
-
-        {/* Tag filter (grows) */}
-        <input
-          value={tagFilter}
-          onChange={(event) => onTagFilterChange(event.target.value)}
-          placeholder="Filter by tag…"
-          title="Filter by tag, e.g. keeper, portrait, reference"
-          className="flex-1 min-w-[120px] rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
-        />
-
-        {/* Search (grows) */}
-        <label className="relative flex-1 min-w-[140px]">
-          <Search className="w-4 h-4 text-gray-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
-          <input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search studio"
-            className="w-full rounded-lg bg-black/40 border border-gray-800 pl-8 pr-2.5 py-2 text-xs text-gray-200 focus:outline-none focus:border-rose-600 placeholder:text-gray-700"
-          />
-        </label>
-
-        {/* Dataset only */}
-        <button
-          onClick={() => onTrainingDatasetOnlyChange(!trainingDatasetOnly)}
-          className={`rounded-lg px-2.5 py-2 text-xs font-medium transition ${trainingDatasetOnly ? "bg-fuchsia-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
-          title="Show only images marked for LoRA training dataset"
-        >
-          Dataset
-        </button>
-
-        {/* Import */}
-        <button
-          onClick={() => setImportOpen((value) => !value)}
-          title="Import media"
-          className={`rounded-lg px-2.5 py-2 text-xs font-medium transition ${importOpen ? "bg-violet-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
-        >
-          <Upload className="inline h-3.5 w-3.5 sm:mr-1.5" />
-          <span className="hidden sm:inline">Import</span>
-        </button>
-
-        {/* Select */}
-        <button
-          onClick={() => { setSelectionMode((value) => !value); if (selectionMode) setSelectedKeys(new Set()); }}
-          className={`rounded-lg px-2.5 py-2 text-xs font-medium transition ${selectionMode ? "bg-rose-600 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
-        >
-          {selectionMode ? "Selecting" : "Select"}
-        </button>
-
-        {/* View density */}
-        <div className="flex rounded-lg border border-gray-800 bg-black/30 p-0.5">
-          {(["compact", "comfortable", "large"] as ViewSize[]).map((size) => (
-            <button
-              key={size}
-              onClick={() => setViewSize(size)}
-              title={size}
-              className={`rounded-md px-2 py-1 text-xs capitalize transition ${viewSize === size ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
-            >
-              <span className="sm:hidden">{size.charAt(0).toUpperCase()}</span>
-              <span className="hidden sm:inline">{size}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Selection-mode actions — own wrapped row when active */}
-        {selectionMode && (
-          <div className="w-full flex flex-wrap items-center gap-2 border-t border-gray-800/60 pt-2 mt-0.5">
-            <button onClick={selectVisible} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 hover:text-white transition">Select visible</button>
-            <button onClick={clearSelection} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-500 hover:text-white transition">Clear</button>
-            <span className="text-xs text-gray-500">{selectedItems.length} selected</span>
+      {/* One row of what's used constantly; everything occasional sits behind Filters. */}
+      <section className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-2.5">
+        {selectionMode ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-1 text-xs font-medium text-gray-200">
+              {selectedItems.length} selected
+            </span>
+            <button onClick={selectVisible} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white">Select visible</button>
+            <button onClick={clearSelection} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-500 transition hover:text-white">Clear</button>
             {selectedItems.length > 0 && (
               <>
                 <select
                   disabled={bulkBusy}
                   defaultValue=""
                   onChange={(event) => { const value = event.target.value; event.target.value = ""; bulkAssignCharacter(value === "__none__" ? "" : value); }}
-                  className="rounded-lg bg-black/40 border border-gray-800 px-2.5 py-2 text-xs text-gray-300 focus:outline-none focus:border-rose-600 disabled:opacity-50"
+                  className="rounded-lg border border-gray-800 bg-black/40 px-2.5 py-2 text-xs text-gray-300 focus:border-brand focus:outline-none disabled:opacity-50"
                 >
                   <option value="">Assign character…</option>
                   <option value="__none__">No character</option>
@@ -435,21 +330,176 @@ export function StudioView({
                     <option key={character.id} value={character.id}>{character.name}</option>
                   ))}
                 </select>
-                <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(true)} className="rounded-lg bg-fuchsia-600 px-2.5 py-2 text-xs font-medium text-white hover:bg-fuchsia-500 disabled:bg-gray-800 disabled:text-gray-500 transition">Include in dataset</button>
-                <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(false)} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 hover:text-white disabled:opacity-50 transition">Remove from dataset</button>
-                <button disabled={bulkBusy} onClick={bulkAddTags} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 hover:text-white disabled:opacity-50 transition">Add tags</button>
-                <button disabled={bulkBusy} onClick={bulkDeleteSelected} className="rounded-lg bg-red-600 px-2.5 py-2 text-xs font-medium text-white hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-500 transition">Delete selected</button>
+                <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(true)} className="rounded-lg bg-brand px-2.5 py-2 text-xs font-medium text-brand-foreground transition hover:brightness-110 disabled:bg-gray-800 disabled:text-gray-500">Include in dataset</button>
+                <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(false)} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white disabled:opacity-50">Remove from dataset</button>
+                <button disabled={bulkBusy} onClick={bulkAddTags} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white disabled:opacity-50">Add tags</button>
+                <button disabled={bulkBusy} onClick={bulkDeleteSelected} className="rounded-lg bg-red-600 px-2.5 py-2 text-xs font-medium text-white transition hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-500">Delete</button>
               </>
             )}
+            <button
+              onClick={() => { setSelectionMode(false); setSelectedKeys(new Set()); }}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs text-gray-400 transition hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden /> Done
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="relative w-full min-w-0 sm:w-auto sm:flex-1">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" aria-hidden />
+              <input
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                placeholder="Search studio"
+                className="w-full rounded-lg border border-gray-800 bg-black/40 py-2 pl-8 pr-2.5 text-xs text-gray-200 placeholder:text-gray-700 focus:border-brand focus:outline-none"
+              />
+            </label>
+
+            <div className="flex shrink-0 gap-1">
+              {([
+                ["all", "All", SlidersHorizontal],
+                ["images", "Images", Image],
+                ["videos", "Videos", Video],
+              ] as const).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  onClick={() => onFilterChange(id as Filter)}
+                  title={label}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
+                    filter === id ? "bg-brand text-brand-foreground" : "bg-gray-900 text-gray-500 hover:text-gray-200"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" aria-hidden />
+                  <span className="hidden sm:inline">{label}</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              popoverTarget="gallery-filters"
+              id="gallery-filters-button"
+              className={`shrink-0 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
+                activeFilterCount > 0 ? "bg-gray-800 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"
+              }`}
+            >
+              Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
+            </button>
+
+            <div className="flex shrink-0 rounded-lg border border-gray-800 bg-black/30 p-0.5">
+              {([
+                ["grid", "Grid", LayoutGrid],
+                ["table", "Table", Table2],
+              ] as const).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  title={label}
+                  aria-pressed={viewMode === mode}
+                  className={`rounded-md px-2 py-1 transition ${viewMode === mode ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
+                >
+                  <Icon className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setImportOpen((value) => !value)}
+              title="Import media"
+              className={`shrink-0 rounded-lg px-2.5 py-2 text-xs font-medium transition ${importOpen ? "bg-gray-800 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
+            >
+              <Upload className="inline h-3.5 w-3.5 sm:mr-1.5" aria-hidden />
+              <span className="hidden sm:inline">Import</span>
+            </button>
+
+            <button
+              onClick={() => setSelectionMode(true)}
+              className="shrink-0 rounded-lg bg-gray-900 px-2.5 py-2 text-xs font-medium text-gray-500 transition hover:text-gray-200"
+            >
+              Select
+            </button>
           </div>
         )}
+
+        {/* Occasional controls: character, tag, dataset, density */}
+        <div
+          id="gallery-filters"
+          popover="auto"
+          onBeforeToggle={(event) => {
+            const rect = document.getElementById("gallery-filters-button")?.getBoundingClientRect();
+            if (event.newState !== "open" || !rect) return;
+            event.currentTarget.style.top = `${rect.bottom + 8}px`;
+            event.currentTarget.style.left = `${Math.max(8, rect.right - 288)}px`;
+          }}
+          className="fixed m-0 w-72 [inset:auto] space-y-3 rounded-2xl border border-gray-800 bg-gray-950 p-3 text-white shadow-2xl shadow-black/60"
+        >
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-gray-400">Character</span>
+            <select
+              value={characterFilter}
+              onChange={(event) => onCharacterFilterChange(event.target.value)}
+              className="w-full rounded-lg border border-gray-800 bg-black/40 px-2.5 py-2 text-xs text-gray-200 focus:border-brand focus:outline-none"
+            >
+              <option value="">All characters</option>
+              <option value="__unassigned__">Unassigned</option>
+              {characters.map((character) => (
+                <option key={character.id} value={character.id}>{character.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium text-gray-400">Tag</span>
+            <input
+              value={tagFilter}
+              onChange={(event) => onTagFilterChange(event.target.value)}
+              placeholder="keeper, portrait, reference…"
+              className="w-full rounded-lg border border-gray-800 bg-black/40 px-2.5 py-2 text-xs text-gray-200 placeholder:text-gray-700 focus:border-brand focus:outline-none"
+            />
+          </label>
+
+          <button
+            onClick={() => onTrainingDatasetOnlyChange(!trainingDatasetOnly)}
+            className="flex w-full items-center justify-between rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white"
+            title="Show only images marked for a LoRA training dataset"
+          >
+            Training dataset only
+            {trainingDatasetOnly && <Check className="h-3.5 w-3.5 text-brand" aria-hidden />}
+          </button>
+
+          {viewMode === "grid" && (
+            <div className="space-y-1">
+              <span className="text-[11px] font-medium text-gray-400">Tile size</span>
+              <div className="flex rounded-lg border border-gray-800 bg-black/30 p-0.5">
+                {(["compact", "comfortable", "large"] as ViewSize[]).map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setViewSize(size)}
+                    className={`flex-1 rounded-md px-2 py-1 text-xs capitalize transition ${viewSize === size ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeFilterCount > 0 && (
+            <button
+              onClick={() => { onCharacterFilterChange(""); onTagFilterChange(""); onTrainingDatasetOnlyChange(false); }}
+              className="w-full rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-400 transition hover:text-white"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       </section>
 
       {importOpen && (
-        <section className="rounded-2xl border border-violet-700/40 bg-violet-950/10 p-4 space-y-3">
+        <section className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-violet-100">Import media into gallery</p>
+              <p className="text-sm font-semibold text-gray-100">Import media into gallery</p>
               <p className="text-xs text-gray-500 mt-1">Files are stored under images/imports and indexed with character/tags.</p>
             </div>
             <span className="text-xs text-gray-500">{importFiles.length} selected</span>
@@ -465,7 +515,7 @@ export function StudioView({
             <select
               value={importCharacter}
               onChange={(event) => setImportCharacter(event.target.value)}
-              className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-violet-500"
+              className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-brand"
             >
               <option value="">No character</option>
               {characters.map((character) => (
@@ -476,12 +526,12 @@ export function StudioView({
               value={importTags}
               onChange={(event) => setImportTags(event.target.value)}
               placeholder="tags: reference, training-candidate"
-              className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500 placeholder:text-gray-700"
+              className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-brand placeholder:text-gray-700"
             />
             <button
               onClick={importSelectedFiles}
               disabled={importing || importFiles.length === 0}
-              className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:bg-gray-800 disabled:text-gray-500 transition"
+              className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:brightness-110 disabled:bg-gray-800 disabled:text-gray-500 transition"
             >
               {importing ? "Importing…" : "Import"}
             </button>
@@ -504,6 +554,15 @@ export function StudioView({
             <span>Showing {items.length} of {filteredTotal}</span>
             {isFetchingNextPage && <span>Loading more…</span>}
           </div>
+          {viewMode === "table" ? (
+            <GalleryTable
+              entries={merged}
+              onOpen={onOpen}
+              selectionMode={selectionMode}
+              isSelected={(item) => selectedKeys.has(itemKey(item))}
+              onToggleSelected={toggleSelected}
+            />
+          ) : (
           <div className={gridClass}>
           {merged.map((entry) => {
             if (entry.kind === "job") {
@@ -527,6 +586,7 @@ export function StudioView({
             );
           })}
           </div>
+          )}
           <div ref={loadMoreRef} className="h-8 flex items-center justify-center text-xs text-gray-600">
             {hasNextPage ? (isFetchingNextPage ? "Loading more…" : "Scroll for more") : items.length > 0 ? "End of gallery" : null}
           </div>

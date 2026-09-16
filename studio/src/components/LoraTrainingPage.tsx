@@ -317,8 +317,8 @@ export function LoraTrainingPage() {
 
       {/* New training form */}
       {showForm && (
-        <div className="rounded-xl border border-fuchsia-500/30 bg-gray-950 p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide">Start Training Job</h2>
+        <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-brand uppercase tracking-wide">Start Training Job</h2>
 
           {/* Before-you-train guidance — follows RunComfy FLUX.2 LoRA guide */}
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-100/90 space-y-2">
@@ -364,7 +364,7 @@ export function LoraTrainingPage() {
               <select
                 value={formCharacterId}
                 onChange={e => setFormCharacterId(e.target.value)}
-                className="w-full rounded-md border border-gray-700 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-fuchsia-500"
+                className="w-full rounded-md border border-gray-700 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand"
               >
                 <option value="">Select character…</option>
                 {ctx.characters.map(character => (
@@ -373,11 +373,11 @@ export function LoraTrainingPage() {
               </select>
             </div>
           </div>
-          {submitError && <p className="text-sm text-rose-400">{submitError}</p>}
+          {submitError && <p className="text-sm text-red-400">{submitError}</p>}
           <Button
             onClick={submitTraining}
             disabled={submitting || !formJobName || !formTrigger || !formCharacterId}
-            className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white"
+            className="bg-brand hover:brightness-110 text-white"
           >
             {submitting ? "Starting…" : "Start Training"}
           </Button>
@@ -388,7 +388,7 @@ export function LoraTrainingPage() {
       <section className="rounded-xl border border-gray-800/60 bg-gray-950 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-800/60 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Database className="w-4 h-4 text-fuchsia-400" />
+            <Database className="w-4 h-4 text-brand" />
             <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
               Training Datasets
               <span className="ml-2 text-xs font-mono text-gray-500">{datasets.length}</span>
@@ -396,7 +396,7 @@ export function LoraTrainingPage() {
           </div>
           <button
             onClick={() => setShowAddDataset(!showAddDataset)}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 px-3 py-1.5 text-xs text-gray-300 hover:text-white hover:border-fuchsia-500/50 transition"
+            className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 px-3 py-1.5 text-xs text-gray-300 hover:text-white hover:border-brand transition"
           >
             {showAddDataset ? <X className="w-3.5 h-3.5" /> : <FolderPlus className="w-3.5 h-3.5" />}
             {showAddDataset ? "Cancel" : "Add Dataset"}
@@ -448,11 +448,11 @@ export function LoraTrainingPage() {
                 />
               </div>
             </div>
-            {addDatasetError && <p className="text-sm text-rose-400">{addDatasetError}</p>}
+            {addDatasetError && <p className="text-sm text-red-400">{addDatasetError}</p>}
             <Button
               onClick={submitAddDataset}
               disabled={addDatasetSubmitting || !addDatasetId}
-              className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-sm"
+              className="bg-brand hover:brightness-110 text-white text-sm"
             >
               {addDatasetSubmitting ? "Registering…" : "Register Dataset"}
             </Button>
@@ -472,8 +472,8 @@ export function LoraTrainingPage() {
                 key={ds.id}
                 className="px-5 py-3 flex items-center gap-4 hover:bg-gray-900/30 transition cursor-pointer"
               >
-                <div className="w-8 h-8 rounded-lg bg-fuchsia-900/30 border border-fuchsia-500/20 flex items-center justify-center flex-shrink-0">
-                  <Database className="w-4 h-4 text-fuchsia-400" />
+                <div className="w-8 h-8 rounded-lg bg-brand-faint border border-brand-soft flex items-center justify-center flex-shrink-0">
+                  <Database className="w-4 h-4 text-brand" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-white truncate">{ds.name}</p>
@@ -492,9 +492,9 @@ export function LoraTrainingPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatBox label="Total Jobs" value={jobs.length} />
-        <StatBox label="Running" value={running} color="text-fuchsia-400" />
+        <StatBox label="Running" value={running} color="text-brand" />
         <StatBox label="Completed" value={completed} color="text-emerald-400" />
-        <StatBox label="Failed" value={failed} color="text-rose-400" />
+        <StatBox label="Failed" value={failed} color="text-red-400" />
       </div>
 
       {/* Jobs */}
@@ -552,8 +552,8 @@ export function LoraTrainingPage() {
                   {isTraining && (
                     <div className="mt-3 space-y-1.5">
                       <div className="flex items-center gap-2">
-                        <Progress value={progress} className="h-1.5 flex-1 bg-gray-800 [&>div]:bg-fuchsia-500" />
-                        <span className="text-[11px] font-mono text-fuchsia-400 tabular-nums w-8 text-right">{progress}%</span>
+                        <Progress value={progress} className="h-1.5 flex-1 bg-gray-800 [&>div]:bg-brand" />
+                        <span className="text-[11px] font-mono text-brand tabular-nums w-8 text-right">{progress}%</span>
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500 font-mono">
                         <span>Step {job.current_step}/{job.total_steps}</span>
@@ -566,8 +566,8 @@ export function LoraTrainingPage() {
                   )}
 
                   {isInitializing && (
-                    <div className="flex items-center gap-2 mt-2 text-sm text-amber-400">
-                      <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                    <div className="flex items-center gap-2 mt-2 text-sm text-brand">
+                      <span className="inline-block w-2 h-2 rounded-full bg-brand animate-pulse flex-shrink-0" />
                       {job.info || "Initializing — loading models, caching latents…"}
                     </div>
                   )}
@@ -581,7 +581,7 @@ export function LoraTrainingPage() {
                   )}
 
                   {job.status === "failed" && (
-                    <p className="text-[11px] text-rose-400/70 mt-1.5 line-clamp-2">
+                    <p className="text-[11px] text-red-400/70 mt-1.5 line-clamp-2">
                       {job._dead ? "Process died or was abandoned" : job.error || "Job failed"}
                     </p>
                   )}
@@ -626,7 +626,7 @@ export function LoraTrainingPage() {
                             <div className="space-y-1">
                               {checkpoints.map((ck) => (
                                 <div key={ck.name} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 transition-colors">
-                                  <span className="text-xs font-mono text-violet-300 w-10 flex-shrink-0">{ck.step ?? "final"}</span>
+                                  <span className="text-xs font-mono text-brand w-10 flex-shrink-0">{ck.step ?? "final"}</span>
                                   <span className="text-xs font-mono text-gray-400 flex-1 min-w-0 truncate">{ck.name}</span>
                                   <span className="text-xs text-gray-500 flex-shrink-0">{(ck.size_bytes / 1024 / 1024).toFixed(0)} MB</span>
                                   <span className="text-xs text-gray-600 flex-shrink-0 hidden sm:block">{new Date(ck.modified_at).toLocaleDateString()}</span>

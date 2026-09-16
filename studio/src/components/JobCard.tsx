@@ -30,16 +30,16 @@ export function JobCard({ job }: JobCardProps) {
       transition-all duration-300
       ${isFailed
         ? "border-red-800/40 bg-red-950/10"
-        : "border-amber-800/30 bg-gray-950/80 hover:border-amber-700/60 hover:shadow-lg hover:shadow-amber-900/10"
+        : "border-gray-800 bg-gray-950/80 hover:border-brand hover:shadow-lg hover:shadow-black/20"
       }
     `}>
       {/* Ambient gradient */}
-      <div className={`absolute inset-0 bg-gradient-to-br from-amber-500/5 via-transparent to-rose-600/5 transition-opacity ${isFailed ? "opacity-20" : "opacity-100"}`} />
+      <div className={`absolute inset-0 bg-gradient-to-br from-brand-faint via-transparent to-transparent transition-opacity ${isFailed ? "opacity-20" : "opacity-100"}`} />
 
       {/* Status header */}
       <div className={`relative flex items-center justify-between gap-2 text-xs font-medium uppercase tracking-wide ${isFailed ? "text-red-400" : "text-amber-400"}`}>
         <span className="flex items-center gap-2">
-          {isRunning && <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
+          {isRunning && <span className="inline-block w-2 h-2 rounded-full bg-brand animate-pulse" />}
           {statusLabel(job.status)}
           {job.queue_position ? ` · Queue ${job.queue_position}` : ""}
         </span>
