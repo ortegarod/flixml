@@ -108,9 +108,10 @@ Prompt = Motion + Camera movement
 ```
 Because the image already defines entity, scene, and style, the i2v prompt should focus **only**
 on:
-- **Motion** — what the elements do. Describe amplitude, speed, effect. Use modifiers like
-  "slowly," "quickly," "gently," "violently." e.g. *"the subject slowly turns her head and
-  smiles," "fabric sways in a gentle breeze."*
+- **Motion** — what the elements *do*. Name an action a viewer could describe afterwards:
+  *"she stands up and walks toward the camera," "he throws the bag over his shoulder and
+  turns."* Describe the full movement with strong verbs. `subtle / slightly / gently /
+  slowly / drifting / breeze` are instructions to do nothing — see §6.
 - **Camera movement** — explicit camera instructions: *"camera pushes in," "camera moves
   left," "slow pan right," "orbit around the subject."* To hold the camera still, say
   **"fixed camera"** — if you omit camera direction the model tends to invent a default move.
@@ -172,6 +173,20 @@ tutorial. These are third-party accelerations, not core model behavior.
 4. Ambient/subtle language is **only** for talking-head or deliberately-still shots (lip-sync
    clips where the character just speaks). Know which mode you're in before writing the prompt.
 5. Always state a camera instruction — even "fixed camera" — or the model picks one for you.
-6. Two-stage denoise: coarse motion/structure is set in the **high-noise** stage, so its step
-   count (`steps_high`) is the lever for *how much* motion you get. **Real motion needs the full
-   step count (default 15/15 = 30); a 4-step Lightning preview kills the motion.**
+6. Two-stage denoise: coarse motion/structure is set in the **high-noise** stage, so that
+   stage is where motion is won or lost — but the lever is **LoRA strength and CFG, not step
+   count**. The Lightning LoRA is CFG-distilled, and at strength 1.0 it flattens motion into
+   the well-known slow-motion artifact; running 30 steps to fight that just pays for the same
+   near-still clip more slowly. Drop `high_lora_strength` to ~0.5 and give the high-noise
+   stage real CFG (`cfg_high` ~3.5); keep the low-noise stage at strength 1.0 / CFG 1.0.
+   Measured here: 480x832, 6 steps (3+3), `cfg_high` 3.5 / `cfg_low` 1.0, strengths 0.5/1.0
+   ran in a median **176 s** against **328 s** for the old 30-step CFG-1 config, with more
+   motion, not less.
+7. **`cfg_high` 1.0 disables your negative prompt.** At CFG 1 there is no unconditional
+   branch, so the negative is never evaluated. It only starts doing anything above 1.0.
+8. **A motion LoRA goes in the second slot, not the first.** `high_lora` / `low_lora` hold the
+   speed LoRA that buys you the 4-step render; overwriting them with a motion LoRA silently
+   costs you that and leaves 4 steps far too few to converge. Put the motion LoRA in
+   `high_lora_2` / `low_lora_2` instead and it stacks on top. Wan 2.2 LoRAs are trained as a
+   high/low pair — set both halves, or the stage you left empty fights the one you filled.
+   An empty slot is dropped from the graph, so leaving them blank costs nothing.

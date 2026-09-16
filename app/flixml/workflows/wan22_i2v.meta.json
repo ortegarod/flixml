@@ -15,7 +15,7 @@
     "prompt": {
       "type": "str",
       "required": true,
-      "description": "Motion prompt. Describe big physical action with strong verbs (walks, jumps, turns). Words like subtle, slowly, or gently produce a near-still clip."
+      "description": "Motion prompt. Name an action a viewer could describe afterwards - she stands up and walks toward the camera, he throws the bag over his shoulder. Add a camera instruction on top of it, never instead of it. Words like subtle, slowly or gently are instructions to do nothing."
     },
     "image": {
       "type": "str",
@@ -28,11 +28,11 @@
     },
     "width": {
       "type": "int",
-      "default": 512
+      "default": 480
     },
     "height": {
       "type": "int",
-      "default": 512
+      "default": 832
     },
     "length": {
       "type": "int",
@@ -49,26 +49,28 @@
     },
     "steps_high": {
       "type": "int",
-      "default": 15,
-      "description": "15+15=30 total. Lightning LoRA is 4-step-trained but 30 steps is needed for real motion (2026-08-25); low steps give a near-still 'breathing photo'. Pass 4 for a fast low-motion preview."
+      "default": 3,
+      "description": "3+3=6 total. Motion comes from LoRA strength and CFG, not step count: the Lightning LoRA is CFG-distilled and flattens motion at full strength, so extra steps buy a slower near-still clip, not a livelier one. Measured here at 176 s median against 328 s for the old 30-step CFG-1 config, with more motion."
     },
     "steps_low": {
       "type": "int",
-      "default": 15,
-      "description": "See steps_high. 15+15=30 total for real motion; 2 for fast preview."
+      "default": 3,
+      "description": "See steps_high. 3+3=6 total."
     },
     "total_steps": {
       "type": "int",
-      "default": 30,
+      "default": 6,
       "description": "steps_high + steps_low; passed to KSamplerAdvanced.steps"
     },
     "cfg_high": {
       "type": "float",
-      "default": 1.0
+      "default": 3.5,
+      "description": "Real CFG on the high-noise stage is what buys motion fluidity and shape definition. It also switches the negative prompt on: at 1.0 there is no unconditional branch, so negative_prompt is never evaluated."
     },
     "cfg_low": {
       "type": "float",
-      "default": 1.0
+      "default": 1.0,
+      "description": "Leave at 1.0; the low-noise stage runs the distilled LoRA."
     },
     "shift": {
       "type": "float",
@@ -112,11 +114,33 @@
     },
     "high_lora_strength": {
       "type": "float",
-      "default": 1.0
+      "default": 0.5,
+      "description": "Hold at ~0.5. At 1.0 the Lightning LoRA produces the well-known slow-motion artifact and flattens the action."
+    },
+    "high_lora_2": {
+      "type": "str",
+      "default": "",
+      "description": "Optional second LoRA stacked after the speed LoRA - this is where a motion or concept LoRA goes, e.g. a dance or action LoRA trained for Wan 2.2 i2v. Leave empty and the slot is removed from the graph entirely. Wan 2.2 LoRAs ship as a high/low pair: set both."
+    },
+    "high_lora_2_strength": {
+      "type": "float",
+      "default": 1.0,
+      "description": "Weight of the second high-noise LoRA. Ignored when high_lora_2 is empty."
     },
     "low_lora_strength": {
       "type": "float",
-      "default": 1.0
+      "default": 1.0,
+      "description": "Leave at 1.0."
+    },
+    "low_lora_2": {
+      "type": "str",
+      "default": "",
+      "description": "Low-noise half of the pair in high_lora_2. Leave empty to disable."
+    },
+    "low_lora_2_strength": {
+      "type": "float",
+      "default": 1.0,
+      "description": "Weight of the second low-noise LoRA. Ignored when low_lora_2 is empty."
     }
   },
   "compatible_providers": [

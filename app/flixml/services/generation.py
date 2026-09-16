@@ -220,7 +220,12 @@ class GenerationService:
             template_params["width"] = width
         if height is not None:
             template_params["height"] = height
-        template_params["seed"] = seed if seed is not None else random.randint(0, 2**32 - 1)
+        # The seed that actually ran, not the one the caller asked for. A caller who sends
+        # no seed gets a random one here, and this is the only place it exists — nothing
+        # reads it back off the node afterwards. It goes into the job metadata below so a
+        # clip your human liked can be rolled again.
+        resolved_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
+        template_params["seed"] = resolved_seed
         if filename_prefix is not None:
             template_params["filename_prefix"] = filename_prefix
         
@@ -289,7 +294,6 @@ class GenerationService:
                 "prompt": prompt,
                 "width": width,
                 "height": height,
-                "seed": seed,
                 "filename_prefix": filename_prefix,
                 "workflow_params": workflow_params,
                 "owner_id": owner_id,
@@ -297,6 +301,8 @@ class GenerationService:
                 "provider": gpu_provider.provider_id,
                 "output_type": workflow_meta.output_type,
                 **(extra_metadata or {}),
+                # After the caller's echo, which carries seed=None when they let us pick.
+                "seed": resolved_seed,
             }
             await db.save_job(
                 prompt_id=str(uuid.uuid4()),
@@ -317,7 +323,6 @@ class GenerationService:
             "prompt": prompt,
             "width": width,
             "height": height,
-            "seed": seed,
             "filename_prefix": filename_prefix,
             "workflow_params": workflow_params,
             "owner_id": owner_id,
@@ -325,6 +330,8 @@ class GenerationService:
             "provider": gpu_provider.provider_id,
             "output_type": workflow_meta.output_type,
             **(extra_metadata or {}),
+            # After the caller's echo, which carries seed=None when they let us pick.
+            "seed": resolved_seed,
         }
         
         await db.save_job(

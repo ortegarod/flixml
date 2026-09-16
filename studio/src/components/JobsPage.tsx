@@ -17,7 +17,7 @@ function StatusIcon({ status }: { status: string }) {
 
 /** A job in flight: how long it's been running, against how long this workflow usually takes. */
 function ActiveJob({ job, workflows, now }: { job: JobItem; workflows: WorkflowMeta[]; now: number }) {
-  const { rendering, elapsed, typical, overdue, percent } = useJobProgress(job, now, workflows);
+  const { rendering, elapsed, waiting, typical, overdue, percent } = useJobProgress(job, now, workflows);
 
   return (
     <li className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-4">
@@ -34,11 +34,15 @@ function ActiveJob({ job, workflows, now }: { job: JobItem; workflows: WorkflowM
           {job.prompt && <p className="mt-1 line-clamp-2 text-sm text-gray-400">{job.prompt}</p>}
         </div>
         <p className="shrink-0 text-right">
-          <span className="font-mono text-lg tabular-nums text-gray-100">
-            {elapsed === null ? "—" : clock(elapsed)}
+          <span className={`font-mono text-lg tabular-nums ${elapsed === null ? "text-gray-500" : "text-gray-100"}`}>
+            {elapsed !== null ? clock(elapsed) : waiting !== null ? clock(waiting) : "—"}
           </span>
           <span className="mt-0.5 block text-xs text-gray-500">
-            {typical ? `usually ${approxDuration(typical.seconds)}` : "since submitted"}
+            {elapsed === null
+              ? "waiting for a node"
+              : typical
+                ? `usually ${approxDuration(typical.seconds)}`
+                : "on the node"}
           </span>
         </p>
       </div>

@@ -24,7 +24,7 @@ from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_read_file
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
 from .workflows.registry import init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
@@ -602,6 +602,13 @@ class JobOutput(BaseModel):
 
 
 class JobStatusResponse(BaseModel):
+    """Status, outputs, and what made them.
+
+    The provenance fields let an agent answer "do that again but ..." from a bare
+    prompt_id, without asking its human for the workflow, model, seed or params.
+    They are null while a job is still queued on a node that never accepted it.
+    """
+
     ok: bool
     prompt_id: str
     status: str
@@ -610,6 +617,21 @@ class JobStatusResponse(BaseModel):
     outputs_count: int | None = None
     outputs: list[JobOutput] = []
     raw: dict[str, Any] | None = None
+
+    workflow: str | None = None
+    provider: str | None = None
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    image: str | None = None
+    models: list[str] = []
+    loras: list[str] = []
+    seed: int | None = None
+    width: int | None = None
+    height: int | None = None
+    workflow_params: dict[str, Any] | None = None
+    error: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class LoraTrainingStatus(BaseModel):
@@ -747,6 +769,9 @@ _RECONCILE_INTERVAL_SECONDS = 3.0
 # How long a job may be unknown to its node before we call it abandoned. Covers the
 # window between our DB insert and the node registering the prompt.
 _ABANDON_AFTER_SECONDS = 600
+# Node statuses that mean the GPU is on this job right now, as opposed to holding it
+# in the queue behind another one.
+_RUNNING_STATUSES = {"running", "in_progress"}
 
 
 async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]:
@@ -777,7 +802,17 @@ async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]
         outputs = _extract_outputs(raw, client)
         status = "completed" if outputs else "unknown"
 
-    await update_job_run_times(prompt_id, *_run_times(comfy_job, raw.get(prompt_id) if comfy_job is None else None))
+    node_started, node_finished = _run_times(comfy_job, raw.get(prompt_id) if comfy_job is None else None)
+    if node_started is not None:
+        await update_job_run_times(prompt_id, node_started, node_finished, exact_start=True)
+    elif status in _RUNNING_STATUSES:
+        # A node reports execution_start_time only once the job has finished, so a job
+        # in flight has no start time at all and nothing can tell how long it has been
+        # on the GPU. Stamp the first cycle that sees it running — within the reconcile
+        # interval of the truth, and replaced by the node's exact figure when it lands.
+        await update_job_run_times(prompt_id, datetime.now(UTC), node_finished)
+    elif node_finished is not None:
+        await update_job_run_times(prompt_id, None, node_finished)
 
     # ComfyUI saying "completed" means generation finished, not that we hold the files.
     # Only report completed once _persist_outputs has actually imported them.
@@ -877,7 +912,11 @@ async def start_reconciler() -> None:
     await init_db()
     init_default_providers()  # Register GPU providers
     init_registry(Path(__file__).parent / "workflows")  # Load workflow metadata
-    await _sync_media_catalog()
+    # Backgrounded on purpose: this walks every output file and shells out to
+    # ffprobe for the ones it has not catalogued yet. Awaiting it here held the
+    # port closed for ~2.5 minutes on a 1500-file gallery, so a restart looked
+    # like an outage.
+    asyncio.create_task(_sync_media_catalog())
     if _RECONCILE_TASK is None or _RECONCILE_TASK.done():
         _RECONCILE_TASK = asyncio.create_task(_reconcile_loop())
 
@@ -920,11 +959,21 @@ async def _sync_media_catalog() -> None:
     and any output files missing from the table are upserted so the catalog
     stays in sync with the filesystem. Project renders are excluded from the
     gallery catalog.
+
+    Files already catalogued at the same size and mtime with known dimensions
+    are skipped, because reading dimensions shells out to ffprobe once per
+    video. This runs as a background task (see the startup hook) so a restart
+    never waits on it.
     """
     try:
         files = [p for p in _OUTPUT_DIR.rglob("*") if _is_media_file(p)]
     except Exception:  # noqa: BLE001
         return
+
+    try:
+        known = await media_catalog_fingerprints()
+    except Exception:  # noqa: BLE001
+        known = {}
 
     for path in files:
         rel = path.relative_to(_OUTPUT_DIR).as_posix()
@@ -936,6 +985,16 @@ async def _sync_media_catalog() -> None:
             continue
         try:
             stat = path.stat()
+            modified = utc_from_timestamp(stat.st_mtime)
+            row = known.get(rel)
+            if (
+                row is not None
+                and row[0] == stat.st_size
+                and row[1] == modified
+                and row[2] is not None
+                and row[3] is not None
+            ):
+                continue
             width, height = _read_dimensions(path)
             await upsert_media({
                 "filename": rel,
@@ -943,7 +1002,7 @@ async def _sync_media_catalog() -> None:
                 "width": width,
                 "height": height,
                 "size": stat.st_size,
-                "modified": utc_from_timestamp(stat.st_mtime),
+                "modified": modified,
             })
         except Exception:  # noqa: BLE001
             continue
@@ -2279,6 +2338,179 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
     return False
 
 
+async def _clip_video_name(prompt_id: str, agent: Agent | None) -> str:
+    """The video a finished job produced, named the way the output directory holds it."""
+    record = await get_job(prompt_id)
+    if not record or not owns(agent, record.get("metadata")):
+        raise HTTPException(status_code=404, detail=f"No job {prompt_id}")
+
+    # Outputs arrive as dicts off the job row and as JobOutput models off a live
+    # reconcile, so normalise before reading either.
+    def videos(items) -> list[dict[str, Any]]:
+        rows = [i if isinstance(i, dict) else i.model_dump() for i in (items or [])]
+        return [r for r in rows if str(r.get("filename", "")).lower().endswith(tuple(_VIDEO_SUFFIXES))]
+
+    outputs = videos(record.get("outputs"))
+    if not outputs:
+        # A just-finished job may not have its outputs written to the row yet.
+        outputs = videos((await _reconcile_job(prompt_id, record.get("provider")))["outputs"])
+    if not outputs:
+        raise HTTPException(status_code=409, detail=f"Job {prompt_id} has no video output yet")
+    last = outputs[-1]
+    subfolder = last.get("subfolder") or ""
+    return f"{subfolder}/{last['filename']}" if subfolder else last["filename"]
+
+
+async def _resolve_clip(ref: str, agent: Agent | None) -> Path:
+    """Resolve a clip named by either prompt_id or filename to a local video file."""
+    target = _resolve_output_file(ref)
+    if target is None:
+        target = _resolve_output_file(await _clip_video_name(ref, agent))
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"No file {ref}")
+    if target.suffix.lower() not in _VIDEO_SUFFIXES:
+        raise HTTPException(status_code=422, detail=f"{ref} is not a video")
+    return target
+
+
+class LastFrameRequest(BaseModel):
+    """Name the clip to take the last frame of, by job or by filename."""
+
+    prompt_id: str | None = None
+    video: str | None = None
+
+
+class StitchRequest(BaseModel):
+    """The clips to join, in playing order, named by prompt_id or by filename."""
+
+    clips: list[str]
+
+
+@app.post("/api/video/last-frame")
+async def video_last_frame(body: LastFrameRequest, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """Extract a clip's final frame as an image, so the next shot can start where it ended.
+
+    Chaining shots this way is what turns separate clips into one continuous take:
+    animate a start frame, take the last frame of the result, animate that. Without it
+    a caller would have to download the video, run ffmpeg itself and upload the frame
+    back, which a remote agent cannot do at all.
+
+    The frame is cataloged like an upload, so it appears in the gallery and can be
+    passed straight back as `image` — or edited first, if the next shot needs a change
+    that motion alone can't make.
+    """
+    source = body.video or (await _clip_video_name(body.prompt_id, agent) if body.prompt_id else None)
+    if not source:
+        raise HTTPException(status_code=422, detail="Pass prompt_id or video")
+
+    target = await _resolve_clip(source, agent)
+
+    name = f"lastframe_{uuid.uuid4().hex}.png"
+    out_path = _OUTPUT_DIR / name
+
+    # -sseof seeks relative to the end; -update rewrites the same file for every frame
+    # decoded after that point, so the file left behind is the final one. Clips shorter
+    # than the seek window decode nothing, so fall back to reading the whole clip.
+    async def extract(seek: str | None) -> bool:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+        if seek:
+            cmd += ["-sseof", seek]
+        cmd += ["-i", str(target), "-update", "1", "-q:v", "1", str(out_path)]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            logger.warning("last-frame ffmpeg failed for %s: %s", source, err.decode()[:300])
+        return proc.returncode == 0 and out_path.is_file()
+
+    if not await extract("-1") and not await extract(None):
+        raise HTTPException(status_code=500, detail=f"Could not read a frame from {source}")
+
+    width, height = _read_dimensions(out_path)
+    await upsert_media({
+        "filename": name,
+        "type": _media_type_from_path(out_path),
+        "width": width,
+        "height": height,
+        "size": out_path.stat().st_size,
+        "modified": utc_from_timestamp(out_path.stat().st_mtime),
+        "metadata": json.dumps({"owner_id": agent.id, "last_frame_of": source} if agent else {"last_frame_of": source}),
+    })
+    return {"ok": True, "filename": name, "image": name, "source": source, "width": width, "height": height}
+
+
+@app.post("/api/video/stitch")
+async def video_stitch(body: StitchRequest, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """Join finished clips into one video, in the order given.
+
+    The other half of shot chaining: last-frame lets each clip start where the last
+    one ended, and this puts them back together as a single take. A project render
+    does the same thing for a whole movie, but building a project to join two clips
+    is more scaffolding than the job needs.
+
+    Clips are normalised to the first one's frame size and to the render fps before
+    concatenation, so mismatched shots join without the stream-copy artefacts that a
+    raw concat produces.
+    """
+    if len(body.clips) < 2:
+        raise HTTPException(status_code=422, detail="Pass at least two clips")
+
+    sources = [await _resolve_clip(ref, agent) for ref in body.clips]
+    target_w, target_h = _read_dimensions(sources[0])
+    if not target_w or not target_h:
+        raise HTTPException(status_code=422, detail=f"Could not read the size of {body.clips[0]}")
+
+    name = f"videos/stitch_{uuid.uuid4().hex}.mp4"
+    out_path = _OUTPUT_DIR / name
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="flixml_stitch_"))
+    try:
+        normalised: list[Path] = []
+        for index, source in enumerate(sources):
+            dst = work / f"{index:03d}.mp4"
+            ok, err = await _normalize_clip(dst, target_w, target_h, video_src=source)
+            if not ok:
+                raise HTTPException(status_code=500, detail=f"Could not prepare {body.clips[index]}: {err[-300:]}")
+            normalised.append(dst)
+
+        listing = work / "concat.txt"
+        listing.write_text("".join(f"file '{p}'\n" for p in normalised))
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(listing),
+            "-c:v", "copy", "-c:a", "copy", str(out_path),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, err_bytes = await proc.communicate()
+        if proc.returncode != 0 or not out_path.is_file():
+            raise HTTPException(status_code=500, detail=f"Could not join the clips: {err_bytes.decode(errors='replace')[-300:]}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    stat = out_path.stat()
+    await upsert_media({
+        "filename": name,
+        "type": "video",
+        "width": target_w,
+        "height": target_h,
+        "size": stat.st_size,
+        "modified": utc_from_timestamp(stat.st_mtime),
+        "workflow_type": "stitch",
+        "metadata": json.dumps(
+            {"owner_id": agent.id, "stitched_from": body.clips} if agent else {"stitched_from": body.clips}
+        ),
+    })
+    return {
+        "ok": True,
+        "filename": name,
+        "clips": body.clips,
+        "width": target_w,
+        "height": target_h,
+        "duration": round(await _probe_duration(out_path), 2),
+    }
+
+
 @app.get("/api/jobs")
 async def jobs(include_completed: bool = True, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Return jobs from durable Postgres state — a pure DB read, no live ComfyUI calls.
@@ -2303,9 +2535,9 @@ async def jobs(include_completed: bool = True, agent: Agent | None = Depends(cur
 
 @app.get("/api/jobs/{prompt_id}", response_model=JobStatusResponse)
 async def job(prompt_id: str) -> JobStatusResponse:
-    """Get status and outputs for a single job, reconciled live against its node."""
-    record = await get_job(prompt_id)
-    provider = (record or {}).get("provider")  # _job_row flattens metadata keys to top level
+    """Get status, outputs and provenance for a single job, reconciled live against its node."""
+    record = await get_job(prompt_id) or {}
+    provider = record.get("provider")  # _job_row flattens metadata keys to top level
     result = await _reconcile_job(prompt_id, provider)
     status = result["status"]
     return JobStatusResponse(
@@ -2315,6 +2547,23 @@ async def job(prompt_id: str) -> JobStatusResponse:
         progress=100.0 if status == "completed" else None,
         outputs=result["outputs"],
         raw=result["raw"],
+        # _job_row already merges the jobs columns, the models and LoRAs read back
+        # from the submitted graph, and the metadata saved at submit time.
+        workflow=record.get("workflow"),
+        provider=provider,
+        prompt=record.get("prompt"),
+        negative_prompt=record.get("negative_prompt"),
+        # The staged filename the node actually loaded, not the caller's spelling of it.
+        image=record.get("resolved_image") or record.get("image"),
+        models=record.get("models") or [],
+        loras=record.get("loras") or [],
+        seed=record.get("seed"),
+        width=record.get("width") or None,
+        height=record.get("height") or None,
+        workflow_params=record.get("workflow_params"),
+        error=record.get("error"),
+        started_at=record.get("started_at"),
+        finished_at=record.get("finished_at"),
     )
 
 
@@ -2556,13 +2805,32 @@ def _safe_output_path(rel: str) -> Path | None:
 
 
 def _read_dimensions(path: Path) -> tuple[int, int]:
-    if path.suffix.lower() in {".mp4", ".webm", ".gif"}:
-        return 1280, 720
+    """Read a media file's real pixel size with ffprobe, for images and video alike.
+
+    ffprobe ships with the ffmpeg install this app already requires, so this needs
+    nothing extra installed. It replaced a Pillow import that was never declared as a
+    dependency — it raised ModuleNotFoundError on a clean install and the except
+    swallowed it, so every image in the library was stored 0x0 — and a hardcoded
+    1280x720 for video, which reported portrait clips as landscape.
+    """
     try:
-        from PIL import Image
-        with Image.open(path) as im:
-            return im.width, im.height
-    except Exception:
+        proc = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0:s=x",
+                str(path),
+            ],
+            capture_output=True, text=True, timeout=20,
+        )
+        width, _, height = proc.stdout.strip().partition("x")
+        return int(width), int(height)
+    except Exception as exc:
+        # Expected while a file is still being imported: ffprobe reads nothing from a
+        # half-written mp4. The reconcile cycle reads it again once the copy lands, so
+        # this is one line rather than a traceback per poll.
+        logger.warning("could not read dimensions of %s: %s", path, exc)
         return 0, 0
 
 
