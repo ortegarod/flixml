@@ -221,21 +221,38 @@ async def update_job_metadata(prompt_id: str, metadata: dict[str, Any]) -> None:
         )
 
 
-async def update_job_run_times(prompt_id: str, started_at: datetime | None, finished_at: datetime | None) -> None:
-    """Record when the node started and finished running a job. Never overwrites a known time with NULL."""
+async def update_job_run_times(
+    prompt_id: str,
+    started_at: datetime | None,
+    finished_at: datetime | None,
+    exact_start: bool = False,
+) -> None:
+    """Record when the node started and finished running a job. Never overwrites a known time with NULL.
+
+    A start time is normally kept once written, since the first one recorded is the
+    observation closest to the event. `exact_start` is for the node's own
+    execution_start_time, which it only reports once the job has finished: that figure
+    is exact, so it replaces the provisional stamp taken when the job was first seen
+    running, and run-time medians stay the node's numbers rather than ours.
+    """
     if started_at is None and finished_at is None:
         return
     async with get_pool().acquire() as conn:
         await conn.execute(
             """
             UPDATE jobs
-            SET started_at=COALESCE($2, started_at),
-                finished_at=COALESCE($3, finished_at)
+            -- Casts are required: Postgres cannot infer a parameter's type from a CASE arm alone.
+            SET started_at=CASE
+                    WHEN $4::boolean AND $2::timestamptz IS NOT NULL THEN $2::timestamptz
+                    ELSE COALESCE(started_at, $2::timestamptz)
+                END,
+                finished_at=COALESCE($3::timestamptz, finished_at)
             WHERE prompt_id=$1
             """,
             prompt_id,
             started_at,
             finished_at,
+            exact_start,
         )
 
 
@@ -1162,6 +1179,17 @@ async def update_media_metadata(
 async def get_media_by_filename(filename: str) -> dict[str, Any] | None:
     row = await get_pool().fetchrow("SELECT * FROM media WHERE filename=$1", filename)
     return dict(row) if row else None
+
+
+async def media_catalog_fingerprints() -> dict[str, tuple[int | None, Any, int | None, int | None]]:
+    """Return {filename: (size, modified, width, height)} for every catalogued file.
+
+    One query, used by the startup catalog sweep to skip files it has already
+    seen unchanged. Without it the sweep re-probes every video on disk on every
+    boot, which costs an ffprobe process per file.
+    """
+    rows = await get_pool().fetch("SELECT filename, size, modified, width, height FROM media")
+    return {r["filename"]: (r["size"], r["modified"], r["width"], r["height"]) for r in rows}
 
 
 async def delete_media_rows(files: list[str]) -> None:

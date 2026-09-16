@@ -138,6 +138,37 @@ curl -X POST <your-api-url>/api/image/generate \
 
 Leave out the `Authorization` header if your install doesn't require keys. For agents: [SKILL.md](./SKILL.md) covers images, video, lip-sync, and multi-shot projects. The field reference is `GET /openapi.json`.
 
+## MCP Server
+
+`scripts/mcp_server.py` exposes a running Studio over the [Model Context
+Protocol](https://modelcontextprotocol.io), so an MCP host — Claude Desktop, Claude
+Code, Cursor — can drive it without being taught the HTTP API first. It covers the
+whole pipeline: workflows and nodes, image and video generation, job lookup, media
+search and upload, characters, and projects through to a rendered movie. It also
+serves `SKILL.md` and the OpenAPI schema as MCP resources, read live from your
+install, so the host learns your workflows rather than a hardcoded list.
+
+Python standard library only — no install step, nothing to add to your environment.
+
+```json
+{
+  "mcpServers": {
+    "flixml": {
+      "command": "python",
+      "args": ["/path/to/flixml/scripts/mcp_server.py"],
+      "env": {
+        "FLIXML_API_URL": "http://localhost:8191",
+        "FLIXML_API_KEY_FILE": "~/.config/flixml/key"
+      }
+    }
+  }
+}
+```
+
+`FLIXML_API_KEY_FILE` points at a file holding the key, so it stays out of the host's
+config. `FLIXML_API_KEY` works too if you'd rather set it inline. Omit both if your
+install doesn't require keys.
+
 ## LoRA Training
 
 Register a dataset, start training, monitor checkpoints — all through the API. The examples below use `<your-api-url>` as a placeholder for your Studio API base URL.
@@ -196,6 +227,7 @@ Training runs on AMD ROCm via the Ostris AI Toolkit.
 | `studio/` | React + Vite frontend |
 | `migrations/` | Database migrations |
 | `docker/` | Container setup |
+| `scripts/` | MCP server, key management, install helpers |
 | `SKILL.md` | Agent guide (also served raw at `/api/guide`) |
 
 ## License

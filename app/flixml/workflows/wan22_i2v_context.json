@@ -90,6 +90,38 @@
       "shift": "{{shift}}"
     }
   },
+  "100": {
+    "class_type": "ContextWindowsManual",
+    "inputs": {
+      "model": ["54", 0],
+      "context_length": "{{context_length}}",
+      "context_overlap": "{{context_overlap}}",
+      "context_schedule": "{{context_schedule}}",
+      "context_stride": 1,
+      "closed_loop": false,
+      "fuse_method": "{{fuse_method}}",
+      "dim": 2,
+      "freenoise": true,
+      "cond_retain_index_list": "{{cond_retain_index_list}}",
+      "split_conds_to_windows": false
+    }
+  },
+  "101": {
+    "class_type": "ContextWindowsManual",
+    "inputs": {
+      "model": ["55", 0],
+      "context_length": "{{context_length}}",
+      "context_overlap": "{{context_overlap}}",
+      "context_schedule": "{{context_schedule}}",
+      "context_stride": 1,
+      "closed_loop": false,
+      "fuse_method": "{{fuse_method}}",
+      "dim": 2,
+      "freenoise": true,
+      "cond_retain_index_list": "{{cond_retain_index_list}}",
+      "split_conds_to_windows": false
+    }
+  },
   "57": {
     "class_type": "KSamplerAdvanced",
     "inputs": {
@@ -103,7 +135,7 @@
       "start_at_step": 0,
       "end_at_step": "{{steps_high}}",
       "return_with_leftover_noise": "enable",
-      "model": ["54", 0],
+      "model": ["100", 0],
       "positive": ["63", 0],
       "negative": ["63", 1],
       "latent_image": ["63", 2]
@@ -122,7 +154,7 @@
       "start_at_step": "{{steps_high}}",
       "end_at_step": 10000,
       "return_with_leftover_noise": "disable",
-      "model": ["55", 0],
+      "model": ["101", 0],
       "positive": ["63", 0],
       "negative": ["63", 1],
       "latent_image": ["57", 0]

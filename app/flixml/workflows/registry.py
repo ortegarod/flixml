@@ -204,9 +204,39 @@ class WorkflowRegistry:
 
         workflow = json.loads(json.dumps(template))
         self._substitute(workflow, merged)
+        self._drop_empty_loras(workflow)
 
         return workflow
-    
+
+    @staticmethod
+    def _drop_empty_loras(workflow: dict[str, Any]) -> None:
+        """Remove LoRA loader nodes whose lora_name came out empty.
+
+        A workflow can offer more LoRA slots than a job uses. ComfyUI has no
+        "off" value for lora_name, so an unused slot is an empty string here:
+        drop the node and wire whatever it fed straight to its own model input.
+        """
+        for node_id, node in list(workflow.items()):
+            if not isinstance(node, dict):
+                continue
+            if "LoraLoader" not in node.get("class_type", ""):
+                continue
+            name = node.get("inputs", {}).get("lora_name")
+            if name not in (None, "", "none", "None"):
+                continue
+
+            upstream = node["inputs"].get("model")
+            if not isinstance(upstream, list):
+                continue
+            del workflow[node_id]
+
+            for other in workflow.values():
+                if not isinstance(other, dict):
+                    continue
+                for key, value in other.get("inputs", {}).items():
+                    if isinstance(value, list) and value and value[0] == node_id:
+                        other["inputs"][key] = upstream
+
     def _substitute(self, obj: Any, params: dict[str, Any]) -> None:
         """Recursively substitute template variables in a JSON object."""
         if isinstance(obj, dict):

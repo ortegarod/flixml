@@ -20,6 +20,9 @@ If your human gave you an API key, send it on every request as `Authorization: B
 - `README.md` in the repo (github.com/ortegarod/flixml): install, config, and core concepts.
 - `docs/wan22-i2v.md` in the repo: how to write motion prompts that actually move.
 
+If your host speaks MCP, `scripts/mcp_server.py` in the repo exposes all of this as
+tools instead, and your human can point the host at it rather than giving you a URL.
+
 ## See what you have
 
 ```bash
@@ -57,9 +60,12 @@ When `status` is `completed`, each file is in `outputs[*]` with its `filename` a
 They will hand you one line from the Studio UI — `FlixML asset <prompt_id>`, or a filename — and then say what they want in plain language. Look the rest up yourself; never ask them for the workflow, checkpoint, seed or params.
 
 ```bash
-curl -s $API/api/jobs/<prompt_id> | jq '{prompt, workflow, provider, models, loras, seed, steps, width, height, workflow_params}'
+curl -s $API/api/jobs/<prompt_id> | jq '{prompt, workflow, provider, models, loras, seed, width, height, workflow_params}'
 curl -s "$API/api/listing?q=<filename>" | jq '.images[0]'   # uploads and imports have no job
 ```
+
+`workflow_params` holds every param that isn't one of the top-level fields — `steps`
+and `guidance` among them, for the workflows that take them.
 
 That gives you what made it. Reuse the parts their request keeps, change the parts it asks for, and keep the same `seed` only when they want the same image back.
 
@@ -90,7 +96,56 @@ curl -s -X POST $API/api/video/generate -H 'Content-Type: application/json' -d '
 }'
 ```
 
-Write motion with strong verbs. "Slowly" or "gently" gives a near-still clip. To make the person in an image speak, upload a voice recording and run `infinitetalk_i2v` with `image` and `audio`.
+Name an action, not an atmosphere. A clip should show an event someone could describe
+afterwards — she stands up, he turns and walks toward the camera, the door slams.
+"Slowly", "gently", "subtly" and "softly" are instructions to do nothing, and a camera
+move on its own is not motion: push-ins and pans ride on top of an action, never
+replace it. A still image with four seconds of drift on it is a failed render even when
+the job succeeds.
+
+Image-to-video animates the pose in the start frame and cannot change it, so choose or
+generate a start frame that is already mid-action.
+
+`wan22_i2v` renders 81 frames, about five seconds at 16 fps. For one continuous clip
+past that, use `wan22_i2v_context` and set `length` — 161 frames is about ten seconds.
+It samples the whole clip in overlapping windows rather than stitching separate takes,
+so the action carries through instead of restarting. It costs roughly twice the time of
+an 81-frame render.
+
+To make the person in an image speak, upload a voice recording and run
+`infinitetalk_i2v` with `image` and `audio`.
+
+## Chain shots into one take
+
+Chaining is for a *new* shot — a different action, angle or place. To keep one action
+running longer, raise `length` on `wan22_i2v_context` instead: each chained clip starts
+the model from a still, so the motion restarts, and its grade can shift between clips.
+
+To chain, start the next shot on the frame the last one ended on:
+
+```bash
+curl -s -X POST $API/api/video/last-frame -H 'Content-Type: application/json' \
+  -d '{"prompt_id": "<prompt_id of the finished video>"}'     # returns "filename"
+```
+
+Pass that `filename` as `image` to the next `wan22_i2v` job and name the action that
+follows on from the one before. Repeat to extend the take. The frame lands in the
+gallery like any other image, so you can also edit it first when the next shot needs a
+change that motion alone can't make.
+
+One clip holds one action. Give each shot a single beat — "she plants a foot and cuts
+left" — rather than a sequence the clip has no time to reach.
+
+Join the finished clips into one video, in playing order, by job id or by filename:
+
+```bash
+curl -s -X POST $API/api/video/stitch -H 'Content-Type: application/json' \
+  -d '{"clips": ["<prompt_id>", "<prompt_id>"]}'     # returns "filename" and "duration"
+```
+
+Clips are matched to the first one's frame size before joining, so shots of different
+sizes still join cleanly. The result lands in the gallery like any other video. For a
+whole film with scenes and audio, build a project instead.
 
 ## Make a movie
 

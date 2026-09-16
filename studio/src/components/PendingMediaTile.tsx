@@ -38,7 +38,7 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
   }, [isFailed, isCompleted]);
 
   const { data: workflows = [] } = useWorkflowRunTimes();
-  const { rendering, elapsed, typical, overdue, percent } = useJobProgress(job, now, workflows);
+  const { rendering, elapsed, waiting, typical, overdue, percent } = useJobProgress(job, now, workflows);
   const isRunning = rendering;
   const statusText = isFailed ? "Failed" : isCompleted ? "Done" : rendering ? "Rendering" : "Queued";
 
@@ -115,17 +115,26 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
         ) : (
           <>
             <span className="loading loading-ring loading-md text-brand opacity-70" />
-            {elapsed !== null && (
+            {elapsed !== null ? (
               <span className={`font-mono text-2xl font-bold tabular-nums leading-none ${overdue ? "text-red-300/80" : "text-white/70"}`}>
                 {clock(elapsed)}
               </span>
-            )}
+            ) : waiting !== null ? (
+              // Queued: this is time spent waiting for a node, not time spent rendering.
+              <span className="font-mono text-2xl font-bold tabular-nums leading-none text-white/30">
+                {clock(waiting)}
+              </span>
+            ) : null}
             <span className="text-[9px] font-mono text-white/30">
-              {typical
-                ? overdue
-                  ? `over the usual ${approxDuration(typical.seconds)}`
-                  : `usually ${approxDuration(typical.seconds)}`
-                : "no run history yet"}
+              {elapsed === null
+                ? typical
+                  ? `waiting for a node · takes ${approxDuration(typical.seconds)}`
+                  : "waiting for a node"
+                : typical
+                  ? overdue
+                    ? `over the usual ${approxDuration(typical.seconds)}`
+                    : `usually ${approxDuration(typical.seconds)}`
+                  : "no run history yet"}
             </span>
             {(nodeStep || sampleStep) && (
               <span className="text-[9px] font-mono text-white/30">
@@ -177,21 +186,28 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label={
-            typical
-              ? `Estimated: ${percent}% of the usual run time for this workflow`
-              : "Rendering, no time estimate available"
+            elapsed === null
+              ? "Queued, not started on a node yet"
+              : typical
+                ? `Estimated: ${percent}% of the usual run time for this workflow`
+                : "Rendering, no time estimate available"
           }
           title={
-            typical
-              ? `Elapsed against the median of the last ${typical.samples} run${typical.samples === 1 ? "" : "s"} on ${job.provider ?? "this node"} — an estimate, not sampler progress`
-              : "No run history for this workflow on this node yet"
+            elapsed === null
+              ? "Queued behind another job on this node — the run time clock starts when it does"
+              : typical
+                ? `Elapsed against the median of the last ${typical.samples} run${typical.samples === 1 ? "" : "s"} on ${job.provider ?? "this node"} — an estimate, not sampler progress`
+                : "No run history for this workflow on this node yet"
           }
           className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/5 z-20"
         >
-          <div
-            className={`h-full transition-all duration-1000 ease-linear ${overdue ? "bg-red-400/70" : "bg-brand"}`}
-            style={{ width: `${Math.max(2, percent)}%` }}
-          />
+          {/* Empty while queued: none of the run time has been spent yet. */}
+          {elapsed !== null && (
+            <div
+              className={`h-full transition-all duration-1000 ease-linear ${overdue ? "bg-red-400/70" : "bg-brand"}`}
+              style={{ width: `${Math.max(2, percent)}%` }}
+            />
+          )}
         </div>
       )}
       {isCompleted && (
