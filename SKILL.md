@@ -115,11 +115,12 @@ an 81-frame render.
 To make the person in an image speak, upload a voice recording and run
 `infinitetalk_i2v` with `image` and `audio`.
 
-## Chain shots into one take
+## Chain into the next shot
 
-Chaining is for a *new* shot — a different action, angle or place. To keep one action
-running longer, raise `length` on `wan22_i2v_context` instead: each chained clip starts
-the model from a still, so the motion restarts, and its grade can shift between clips.
+Chaining is for a *new* shot — a different action, angle or place. It is not a way to
+make one action run longer: each chained clip starts the model from a still, so the
+motion restarts, and the grade can shift between clips. For a longer single action,
+raise `length` on `wan22_i2v_context` instead.
 
 To chain, start the next shot on the frame the last one ended on:
 
@@ -129,7 +130,7 @@ curl -s -X POST $API/api/video/last-frame -H 'Content-Type: application/json' \
 ```
 
 Pass that `filename` as `image` to the next `wan22_i2v` job and name the action that
-follows on from the one before. Repeat to extend the take. The frame lands in the
+follows on from the one before. Repeat for each further shot. The frame lands in the
 gallery like any other image, so you can also edit it first when the next shot needs a
 change that motion alone can't make.
 

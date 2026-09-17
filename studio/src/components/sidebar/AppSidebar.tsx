@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Settings, Terminal, X, Cpu, Users, Search, Image, Box, Film, Activity } from "lucide-react";
+import { Settings, Terminal, X, Cpu, Users, Search, Image, Box, Film, Activity, Code2 } from "lucide-react";
 import type { ProjectModeData } from "../../types";
 import { GenerateTab } from "./GenerateTab";
 import { NodesTab } from "./NodesTab";
@@ -104,6 +104,19 @@ export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose,
           {activeTab === "generate" && <GenerateTab />}
           {activeTab === "projects" && (projectMode ? <ProjectSidebar data={projectMode} onDeleteScene={(id) => projectMode.onDeleteScene(id)} /> : <ProjectsGuide compact />)}
           {activeTab === "nodes" && <NodesTab />}
+        </div>
+
+        {/* AGPL-3.0 section 13: anyone using this over a network is offered the source. */}
+        <div className="flex-shrink-0 px-4 py-2 border-t border-gray-800/40">
+          <a
+            href="https://github.com/ortegarod/flixml"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[10px] text-gray-600 hover:text-gray-400 transition inline-flex items-center gap-1.5"
+          >
+            <Code2 className="w-3 h-3" />
+            Source code — AGPL-3.0
+          </a>
         </div>
       </div>
       )}
