@@ -1686,6 +1686,27 @@ async def _probe_duration(path: Path) -> float:
         return 5.0
 
 
+async def _probe_fps(path: Path) -> float | None:
+    """Frame rate of a clip, or None if it can't be read.
+
+    ffprobe reports r_frame_rate as a rational like ``16/1``.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    text = stdout.decode().strip()
+    try:
+        num, _, den = text.partition("/")
+        value = float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return value if value > 0 else None
+
+
 # Render master defaults. Shots are normalized to these before concat so clips
 # with mismatched resolution / fps / audio can be stitched into one clean movie.
 _RENDER_FPS = 25          # matches InfiniteTalk lip-sync output fps; avoids re-timing drift
@@ -1755,6 +1776,7 @@ async def _normalize_clip(
     image_src: Path | None = None,
     duration: float = 5.0,
     subtitle_text: str = "",
+    fps: float = _RENDER_FPS,
 ) -> tuple[bool, str]:
     """Re-encode one shot to the master format so clips can be concatenated.
 
@@ -1774,7 +1796,7 @@ async def _normalize_clip(
     vf = (
         f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
         f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2,"
-        f"setsar=1,fps={_RENDER_FPS},format=yuv420p"
+        f"setsar=1,fps={fps},format=yuv420p"
     )
     if subtitle_text:
         vf += "," + _drawtext_filter(subtitle_text)
@@ -2449,9 +2471,11 @@ async def video_stitch(body: StitchRequest, agent: Agent | None = Depends(curren
     does the same thing for a whole movie, but building a project to join two clips
     is more scaffolding than the job needs.
 
-    Clips are normalised to the first one's frame size and to the render fps before
+    Clips are normalised to the first one's frame size and frame rate before
     concatenation, so mismatched shots join without the stream-copy artefacts that a
-    raw concat produces.
+    raw concat produces. The first clip sets the rate because resampling generated
+    footage to some other number duplicates frames unevenly and shows up as judder in
+    exactly the motion the clip was made for.
     """
     if len(body.clips) < 2:
         raise HTTPException(status_code=422, detail="Pass at least two clips")
@@ -2461,6 +2485,8 @@ async def video_stitch(body: StitchRequest, agent: Agent | None = Depends(curren
     if not target_w or not target_h:
         raise HTTPException(status_code=422, detail=f"Could not read the size of {body.clips[0]}")
 
+    target_fps = await _probe_fps(sources[0]) or _RENDER_FPS
+
     name = f"videos/stitch_{uuid.uuid4().hex}.mp4"
     out_path = _OUTPUT_DIR / name
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2469,7 +2495,7 @@ async def video_stitch(body: StitchRequest, agent: Agent | None = Depends(curren
         normalised: list[Path] = []
         for index, source in enumerate(sources):
             dst = work / f"{index:03d}.mp4"
-            ok, err = await _normalize_clip(dst, target_w, target_h, video_src=source)
+            ok, err = await _normalize_clip(dst, target_w, target_h, video_src=source, fps=target_fps)
             if not ok:
                 raise HTTPException(status_code=500, detail=f"Could not prepare {body.clips[index]}: {err[-300:]}")
             normalised.append(dst)

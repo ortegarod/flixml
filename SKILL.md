@@ -143,8 +143,9 @@ curl -s -X POST $API/api/video/stitch -H 'Content-Type: application/json' \
   -d '{"clips": ["<prompt_id>", "<prompt_id>"]}'     # returns "filename" and "duration"
 ```
 
-Clips are matched to the first one's frame size before joining, so shots of different
-sizes still join cleanly. The result lands in the gallery like any other video. For a
+Clips are matched to the first one's frame size and frame rate before joining, so shots
+that differ still join cleanly and nothing gets re-timed. The result lands in the gallery
+like any other video. For a
 whole film with scenes and audio, build a project instead.
 
 ## Make a movie
