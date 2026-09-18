@@ -295,7 +295,8 @@ export function StudioView({
       <section className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Studio</h1>
         <p className="text-xs text-gray-500">
-          {counts.total} in your gallery · {imageCount} images · {videoCount} videos
+          {counts.total} in your gallery · {imageCount} {imageCount === 1 ? "image" : "images"} ·{" "}
+          {videoCount} {videoCount === 1 ? "video" : "videos"}
         </p>
         <button
           onClick={onOpenProjects}

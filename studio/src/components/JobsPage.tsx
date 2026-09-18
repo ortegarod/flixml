@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { useApp } from "../App";
 import type { JobItem } from "../types";
 import type { WorkflowMeta } from "./sidebar/GenerateTab";
-import { approxDuration, clock, secondsBetween, timeAgo } from "../lib/duration";
+import { clock, secondsBetween, timeAgo } from "../lib/duration";
 import { isActive, useJobProgress, useWorkflowRunTimes } from "../lib/jobProgress";
 
 const RECENT_LIMIT = 25;
@@ -17,7 +17,7 @@ function StatusIcon({ status }: { status: string }) {
 
 /** A job in flight: how long it's been running, against how long this workflow usually takes. */
 function ActiveJob({ job, workflows, now }: { job: JobItem; workflows: WorkflowMeta[]; now: number }) {
-  const { rendering, elapsed, waiting, typical, overdue, percent } = useJobProgress(job, now, workflows);
+  const { rendering, elapsed, typical, overdue, percent } = useJobProgress(job, now, workflows);
 
   return (
     <li className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-4">
@@ -34,14 +34,15 @@ function ActiveJob({ job, workflows, now }: { job: JobItem; workflows: WorkflowM
           {job.prompt && <p className="mt-1 line-clamp-2 text-sm text-gray-400">{job.prompt}</p>}
         </div>
         <p className="shrink-0 text-right">
+          {/* No clock while queued: the run time hasn't started. */}
           <span className={`font-mono text-lg tabular-nums ${elapsed === null ? "text-gray-500" : "text-gray-100"}`}>
-            {elapsed !== null ? clock(elapsed) : waiting !== null ? clock(waiting) : "—"}
+            {elapsed !== null ? clock(elapsed) : "—"}
           </span>
           <span className="mt-0.5 block text-xs text-gray-500">
             {elapsed === null
               ? "waiting for a node"
               : typical
-                ? `usually ${approxDuration(typical.seconds)}`
+                ? `usually ${clock(typical.seconds)}`
                 : "on the node"}
           </span>
         </p>
@@ -130,8 +131,9 @@ export function JobsPage() {
       </header>
 
       <section className="space-y-3">
+        {/* Queued and rendering both live here, so the heading can't claim they're all running. */}
         <h2 className="text-sm font-semibold text-gray-300">
-          Running {active.length > 0 && <span className="text-gray-500">· {active.length}</span>}
+          In flight {active.length > 0 && <span className="text-gray-500">· {active.length}</span>}
         </h2>
         {active.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-gray-800 px-4 py-8 text-center text-sm text-gray-500">

@@ -36,10 +36,10 @@ export function typicalSeconds(
 /**
  * Live state for one job in flight.
  *
- * The clock runs from `started_at` and nothing else. A job sitting behind another on
- * the same node hasn't spent any of its run time yet, so counting from submission
- * would show it a minute in and "overdue" against a workflow it never started —
- * a number the node never earned. Queue wait is reported separately as `waiting`.
+ * `started_at` is the only thing that decides whether a job is rendering, and the
+ * clock runs from it. A job sitting behind another on the same node has spent none
+ * of its run time yet, so it gets no clock at all — an elapsed number next to a job
+ * the node hasn't touched is a number it never earned, whatever the label says.
  *
  * The jobs list reports "pending" until a job is reconciled, and `started_at` is
  * written by that same reconcile, so the single-job route below is what turns the
@@ -59,16 +59,8 @@ export function useJobProgress(job: JobItem, now: number, workflows: WorkflowMet
   });
 
   const startedAt = live?.started_at ?? job.started_at ?? null;
-  const rendering =
-    !!startedAt ||
-    job.status === "running" ||
-    live?.status === "running" ||
-    live?.status === "in_progress";
-
+  const rendering = startedAt !== null;
   const elapsed = startedAt ? Math.max(0, (now - Date.parse(startedAt)) / 1000) : null;
-  const submittedAt = job.created_at ?? null;
-  const waiting =
-    !startedAt && submittedAt ? Math.max(0, (now - Date.parse(submittedAt)) / 1000) : null;
 
   const typical = typicalSeconds(job, workflows);
   const ratio = elapsed !== null && typical ? elapsed / typical.seconds : null;
@@ -77,8 +69,6 @@ export function useJobProgress(job: JobItem, now: number, workflows: WorkflowMet
     rendering,
     /** Seconds on the node. Null until it starts — a queued job has none. */
     elapsed,
-    /** Seconds spent waiting for a free node, once submitted and before it starts. */
-    waiting,
     typical,
     overdue: ratio !== null && ratio > 1,
     /** Share of the usual run time spent, capped at 100. Time-based, not sampler progress. */
