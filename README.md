@@ -1,5 +1,7 @@
 # FlixML Studio
 
+![FlixML Studio: a plain-language request on a phone, and Studio rendering it on a local GPU](docs/assets/flixml-studio.webp)
+
 FlixML Studio is a media generation workbench. It runs image and video generation through ComfyUI workflows, trains LoRAs, and exposes everything through a clean REST API with a React UI for browsing, organizing, and queuing work. Jobs are tracked from queue to completion, routed across GPU providers, and organized into projects, scenes, and shots with persistent characters.
 
 It ships with built-in workflows and lets you add your own.
