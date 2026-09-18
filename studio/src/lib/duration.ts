@@ -1,13 +1,10 @@
 /** Duration and timestamp formatting shared by the workflow catalog and the jobs page. */
 
-/** Rough human duration for typical run times: "45s", "3 min", "1.2 h". */
-export function approxDuration(seconds: number): string {
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
-  return `${(seconds / 3600).toFixed(1)} h`;
-}
-
-/** Running clock for a job in flight: "0:42", "3:07", "1:02:11". */
+/** Every duration in the app, live or measured: "0:42", "3:07", "1:02:11".
+ *
+ * One format, so the run time on a workflow card and the clock ticking on that job's
+ * tile are the same number in the same shape. A measured median is not rounded to the
+ * nearest minute — that throws away the precision the run history actually has. */
 export function clock(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
   const h = Math.floor(whole / 3600);

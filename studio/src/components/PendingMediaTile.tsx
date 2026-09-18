@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { JobItem } from "../types";
-import { approxDuration, clock } from "../lib/duration";
+import { clock } from "../lib/duration";
 import { useJobProgress, useWorkflowRunTimes } from "../lib/jobProgress";
 
 interface PendingMediaTileProps {
@@ -38,7 +38,7 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
   }, [isFailed, isCompleted]);
 
   const { data: workflows = [] } = useWorkflowRunTimes();
-  const { rendering, elapsed, waiting, typical, overdue, percent } = useJobProgress(job, now, workflows);
+  const { rendering, elapsed, typical, overdue, percent } = useJobProgress(job, now, workflows);
   const isRunning = rendering;
   const statusText = isFailed ? "Failed" : isCompleted ? "Done" : rendering ? "Rendering" : "Queued";
 
@@ -115,25 +115,21 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
         ) : (
           <>
             <span className="loading loading-ring loading-md text-brand opacity-70" />
-            {elapsed !== null ? (
+            {/* No clock while queued: the run time hasn't started. */}
+            {elapsed !== null && (
               <span className={`font-mono text-2xl font-bold tabular-nums leading-none ${overdue ? "text-red-300/80" : "text-white/70"}`}>
                 {clock(elapsed)}
               </span>
-            ) : waiting !== null ? (
-              // Queued: this is time spent waiting for a node, not time spent rendering.
-              <span className="font-mono text-2xl font-bold tabular-nums leading-none text-white/30">
-                {clock(waiting)}
-              </span>
-            ) : null}
+            )}
             <span className="text-[9px] font-mono text-white/30">
               {elapsed === null
                 ? typical
-                  ? `waiting for a node · takes ${approxDuration(typical.seconds)}`
+                  ? `waiting for a node · ${clock(typical.seconds)} once it starts`
                   : "waiting for a node"
                 : typical
                   ? overdue
-                    ? `over the usual ${approxDuration(typical.seconds)}`
-                    : `usually ${approxDuration(typical.seconds)}`
+                    ? `over the usual ${clock(typical.seconds)}`
+                    : `usually ${clock(typical.seconds)}`
                   : "no run history yet"}
             </span>
             {(nodeStep || sampleStep) && (

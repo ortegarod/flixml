@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { copyText } from "../../lib/agentContext";
-import { approxDuration } from "../../lib/duration";
+import { clock } from "../../lib/duration";
 
 // Shape of a registry workflow as served by GET /api/workflows. Everything the
 // docs below render is derived live from this — no static workflow doc to drift.
@@ -132,16 +132,16 @@ function RunTimeChip({ runTime }: { runTime: WorkflowMeta["run_time"] }) {
   const medians = nodes.map(([, s]) => s.median_seconds);
   const low = Math.min(...medians);
   const high = Math.max(...medians);
-  const label = approxDuration(low) === approxDuration(high) ? approxDuration(low) : `${approxDuration(low)}–${approxDuration(high)}`;
+  const label = low === high ? clock(low) : `${clock(low)}–${clock(high)}`;
   const title = nodes
     .map(([node, s]) => {
-      const spread = approxDuration(s.min_seconds) === approxDuration(s.max_seconds) ? "" : `${approxDuration(s.min_seconds)}–${approxDuration(s.max_seconds)}, `;
-      return `${node}: typically ${approxDuration(s.median_seconds)} (${spread}last ${s.samples} run${s.samples === 1 ? "" : "s"})`;
+      const spread = s.min_seconds === s.max_seconds ? "" : `${clock(s.min_seconds)}–${clock(s.max_seconds)}, `;
+      return `${node}: typically ${clock(s.median_seconds)} (${spread}last ${s.samples} run${s.samples === 1 ? "" : "s"})`;
     })
     .join("\n");
   return (
     <Chip cls="bg-white/5 text-gray-300">
-      <span title={title}>~{label} run</span>
+      <span title={title}>{label} run</span>
     </Chip>
   );
 }
