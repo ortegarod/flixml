@@ -112,8 +112,18 @@ It samples the whole clip in overlapping windows rather than stitching separate 
 so the action carries through instead of restarting. It costs roughly twice the time of
 an 81-frame render.
 
-To make the person in an image speak, upload a voice recording and run
-`infinitetalk_i2v` with `image` and `audio`.
+To make the person in an image speak, get a voice line and run `infinitetalk_i2v`
+with `image` and `audio`. Speak the line yourself instead of uploading a recording:
+
+```bash
+curl -s -X POST $API/api/tts/generate -H 'Content-Type: application/json' \
+  -d '{"text": "You were supposed to wait for my signal.", "character": "<character_id>"}'
+```
+
+It returns `audio` — pass that straight to the video job. With no `character` it uses
+the voice on the project's `narrator_voice`, or the server default; `GET /api/tts/voices`
+lists what is available and `voice_id` picks one directly. Voice belongs at this stage,
+not at assembly: audio laid over a finished clip does not move the mouth.
 
 ## Chain into the next shot
 
@@ -165,6 +175,11 @@ curl -s $API/api/projects/<project_id>/render | jq '{status, final_video_url}'
 ```
 
 `aspect_ratio` is `9:16`, `16:9`, or `1:1`. Render plays scenes and shots in number order, burns in each `subtitle`, and keeps each clip's own audio. It does not add voiceovers.
+
+To give a project spoken dialogue, voice each shot before you render it: speak the line
+with `/api/tts/generate`, run `infinitetalk_v2v` with that `audio` and the shot's clip as
+`video`, then PATCH the shot's `video_file` to the voiced clip and clear its `subtitle`.
+Render last, and every shot arrives with the voice already in it.
 
 ## Rules
 

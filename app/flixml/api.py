@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+import wave
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -30,8 +31,19 @@ from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
 
 
-async def _generate_tts(text: str, output_path: Path, voice_id: str | None = None, voice_settings: dict[str, Any] | None = None) -> tuple[bool, float | None]:
+async def _generate_tts(
+    text: str,
+    output_path: Path,
+    voice_id: str | None = None,
+    voice_settings: dict[str, Any] | None = None,
+    output_format: str = "pcm_24000",
+) -> tuple[bool, float | None]:
     """Generate TTS audio via ElevenLabs with-timestamps endpoint.
+
+    `output_format` is passed straight to ElevenLabs. A `pcm_*` format comes back
+    as headerless 16-bit mono samples and is wrapped into a wav container here,
+    because that is what ComfyUI's LoadAudio (InfiniteTalk lip-sync) reads; any
+    other format is written through untouched.
 
     Returns (success, speech_end_seconds) where speech_end_seconds is the exact
     moment the last character is spoken, or None if unavailable.
@@ -59,13 +71,21 @@ async def _generate_tts(text: str, output_path: Path, voice_id: str | None = Non
         resp = await client.post(
             f"https://api.elevenlabs.io/v1/text-to-speech/{resolved_voice_id}/with-timestamps",
             headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+            params={"output_format": output_format},
             json=payload,
         )
         resp.raise_for_status()
         data = resp.json()
         audio_bytes = base64.b64decode(data["audio_base64"])
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(audio_bytes)
+        if output_format.startswith("pcm_"):
+            with wave.open(str(output_path), "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(int(output_format.split("_")[1]))
+                wav.writeframes(audio_bytes)
+        else:
+            output_path.write_bytes(audio_bytes)
         alignment = data["alignment"]
         end_times = alignment["character_end_times_seconds"]
         speech_end = float(end_times[-1])
@@ -521,6 +541,44 @@ class VideoGenerateResponse(BaseModel):
     number: int | None = None
     node_errors: dict[str, Any] | None = None
     workflow: dict[str, Any] | None = None
+
+
+class TTSGenerateRequest(BaseModel):
+    text: str = Field(
+        min_length=1,
+        description="The line to speak.",
+        json_schema_extra={"examples": ["You were supposed to wait for my signal."]},
+    )
+    character: str | None = Field(
+        default=None,
+        description="Character id. Speaks in that character's stored voice (characters.voice).",
+    )
+    project: str | None = Field(
+        default=None,
+        description="Project id. Falls back to its narrator_voice when the character has none.",
+    )
+    voice_id: str | None = Field(
+        default=None,
+        description="ElevenLabs voice id (see GET /api/tts/voices). Overrides the character and project voices.",
+    )
+    voice_settings: dict[str, Any] | None = Field(
+        default=None,
+        description="ElevenLabs voice settings: stability, similarity_boost, style, use_speaker_boost.",
+        json_schema_extra={"examples": [{"stability": 0.4, "style": 0.5}]},
+    )
+    filename_prefix: str | None = Field(
+        default=None,
+        description="Output path for the wav, with no `.wav` suffix. None → a random name under voice/.",
+        json_schema_extra={"examples": ["voice/line-01"]},
+    )
+
+
+class TTSGenerateResponse(BaseModel):
+    ok: bool
+    audio: str = Field(description="Output path to pass as `audio` to POST /api/video/generate")
+    audio_url: str
+    duration: float | None = Field(default=None, description="Seconds until the last character is spoken")
+    voice_id: str
 
 
 class ShotGenerateRequest(BaseModel):
@@ -1967,6 +2025,64 @@ async def list_tts_voices() -> dict[str, Any]:
     """List available ElevenLabs voices for TTS."""
     voices = await _tts_voices()
     return {"voices": voices}
+
+
+@app.post("/api/tts/generate", response_model=TTSGenerateResponse)
+async def generate_tts(body: TTSGenerateRequest, agent: Agent | None = Depends(current_agent)) -> TTSGenerateResponse:
+    """Speak a line and land it in the output dir as a wav.
+
+    This is the front of the voiced-clip flow: pass the returned `audio` straight
+    to POST /api/video/generate with an InfiniteTalk workflow, which bakes the
+    voice in as lip-sync. Laying audio over a finished clip at assembly time is
+    the wrong end — the mouth won't match.
+    """
+    voice_id = body.voice_id
+    voice_settings = body.voice_settings
+
+    if voice_id is None and body.character:
+        if agent is not None:
+            agent.require_characters([body.character])
+        record = await get_character(body.character)
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Character not found: {body.character}")
+        voice = record.get("voice") or {}
+        voice_id = voice.get("voice_id")
+        voice_settings = voice_settings or voice.get("settings")
+
+    if voice_id is None and body.project:
+        project = await get_project(body.project)
+        if not project or (owner_scope(agent) is not None and not owns(agent, project.get("metadata"))):
+            raise HTTPException(status_code=404, detail=f"Project not found: {body.project}")
+        voice = project.get("narrator_voice") or {}
+        voice_id = voice.get("voice_id")
+        voice_settings = voice_settings or voice.get("settings")
+
+    if voice_id is None:
+        voice_id = get_settings().elevenlabs_voice_id
+    if not voice_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No voice to speak with: pass voice_id, give the character or project a voice, or set ELEVENLABS_VOICE_ID.",
+        )
+
+    prefix = _resolve_filename_prefix(body.filename_prefix, "voice")
+    output_path = _OUTPUT_DIR / f"{prefix}.wav"
+
+    try:
+        ok, duration = await _generate_tts(body.text, output_path, voice_id, voice_settings)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"ElevenLabs rejected the request: {exc.response.text[:300]}") from exc
+    if not ok:
+        raise HTTPException(status_code=503, detail="TTS unavailable: no ElevenLabs API key configured.")
+
+    audio = f"{prefix}.wav"
+    return TTSGenerateResponse(
+        ok=True,
+        audio=audio,
+        audio_url=f"/media/{audio}",
+        duration=duration,
+        voice_id=voice_id,
+    )
 
 
 @app.get("/api/projects/{project_id}/render")

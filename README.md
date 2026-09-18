@@ -119,7 +119,8 @@ A fresh install requires no key, so anyone who can reach the API or the UI has f
 | `FLIXML_TRAINING_DIR` | Required. Local folder for LoRA training datasets and configs |
 | `FLIXML_LORA_OUTPUT_DIR` | Required. Local folder where trained LoRAs are saved |
 | `FLIXML_COMFY_LORA_DIR` | Required. ComfyUI `models/loras` folder trained LoRAs are copied to |
-| `ELEVENLABS_API_KEY` | Optional. Lists ElevenLabs voices at `/api/tts/voices`. |
+| `ELEVENLABS_API_KEY` | Optional. Lists ElevenLabs voices at `/api/tts/voices` and speaks lines at `/api/tts/generate`. |
+| `ELEVENLABS_VOICE_ID` | Optional. Default voice for `/api/tts/generate` when the request names none. |
 
 ## Quick API Example
 
