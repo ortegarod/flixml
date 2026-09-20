@@ -264,7 +264,7 @@ function Shell() {
           <button
             onClick={() => {
               navigate("/studio");
-              ctx.setActiveSidebarTab("generate");
+              ctx.setActiveSidebarTab("workflows");
             }}
             className="flex items-center gap-3 min-w-0 hover:opacity-80 transition"
             title="Studio home"
@@ -273,7 +273,8 @@ function Shell() {
               <Sparkles className="w-4 h-4 text-black" />
             </div>
             <div className="min-w-0 hidden sm:block">
-              <h1 className="font-heading text-base font-bold tracking-tight leading-none">FlixML<span className="text-brand"> Studio</span></h1>
+              {/* The app's name, on every page. The <h1> belongs to the page itself. */}
+              <p className="font-heading text-base font-bold tracking-tight leading-none">FlixML<span className="text-brand"> Studio</span></p>
               <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">Cinematic AI Studio</p>
             </div>
           </button>
@@ -325,7 +326,7 @@ function Shell() {
               }
               ctx.setSidebarCollapsed(false);
               ctx.setActiveSidebarTab(tab);
-              if (tab === "generate") navigate("/studio");
+              if (tab === "workflows") navigate("/studio");
               if (tab === "projects") navigate("/studio/projects");
               if (tab === "characters") navigate("/studio/lora-training");
               // On mobile the sidebar is an overlay — close it after picking a destination
@@ -464,7 +465,7 @@ function CharacterRoute() {
       onDelete={deleteItem}
       onGenerate={() => {
         setSidebarOpen(true);
-        setActiveSidebarTab("generate");
+        setActiveSidebarTab("workflows");
         navigate(`/studio?character=${characterId}`);
       }}
     />
@@ -554,7 +555,7 @@ function AppRoutes() {
     typeof window !== "undefined" ? window.innerWidth >= 768 : true
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>("generate");
+  const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab>("workflows");
   const [projectData, setProjectData] = useState<{
     project: Project;
     scenes: Scene[];

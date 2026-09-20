@@ -130,9 +130,128 @@ def graph_models(workflow_json: Any) -> dict[str, list[str]]:
     return {"models": models, "loras": loras}
 
 
+# Sampler nodes and the inputs each one names its settings with. A graph can hold
+# several: Wan runs a high-noise pass and a low-noise pass over the same latent, and
+# each gets its own entry so "6 steps, CFG 3.5 then CFG 1.0" survives intact.
+_SAMPLER_INPUTS = {
+    "KSampler": {"seed": "seed", "steps": "steps", "cfg": "cfg", "sampler": "sampler_name", "scheduler": "scheduler", "denoise": "denoise"},
+    "KSamplerAdvanced": {"seed": "noise_seed", "steps": "steps", "cfg": "cfg", "sampler": "sampler_name", "scheduler": "scheduler", "start_step": "start_at_step", "end_step": "end_at_step"},
+    "WanVideoSampler": {"seed": "seed", "steps": "steps", "cfg": "cfg", "scheduler": "scheduler", "shift": "shift", "denoise": "denoise_strength"},
+    "HiDreamO1Sampler": {"seed": "seed", "steps": "steps", "cfg": "guidance_scale", "shift": "shift"},
+    # Flux splits one sampling pass across four nodes; they are merged into a single
+    # entry below, because a user reading "what made this" wants one pass, not four.
+    "RandomNoise": {"seed": "noise_seed"},
+    "KSamplerSelect": {"sampler": "sampler_name"},
+    "Flux2Scheduler": {"steps": "steps"},
+    "BasicScheduler": {"steps": "steps", "scheduler": "scheduler", "denoise": "denoise"},
+    "FluxGuidance": {"cfg": "guidance"},
+}
+_SPLIT_SAMPLER_NODES = {"RandomNoise", "KSamplerSelect", "Flux2Scheduler", "BasicScheduler", "FluxGuidance"}
+
+# Nodes that fix the output geometry, and the inputs naming it.
+_SIZE_INPUTS = {
+    "EmptyLatentImage": ("width", "height", None),
+    "EmptyFlux2LatentImage": ("width", "height", None),
+    "EmptyImage": ("width", "height", None),
+    "EmptyHunyuanLatentVideo": ("width", "height", "length"),
+    "WanImageToVideo": ("width", "height", "length"),
+    "WanFirstLastFrameToVideo": ("width", "height", "length"),
+    "WanCameraImageToVideo": ("width", "height", "length"),
+    "WanVaceToVideo": ("width", "height", "length"),
+    "HiDreamO1Sampler": ("width", "height", None),
+}
+_FPS_NODES = {"CreateVideo", "VHS_VideoCombine"}
+
+
+def _number(value: Any) -> Any:
+    """Keep a real number, drop an unfilled `{{placeholder}}` or a node reference."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    if isinstance(value, str):
+        with contextlib.suppress(TypeError, ValueError):
+            return int(value) if value.lstrip("-").isdigit() else float(value)
+        return None
+    return value
+
+
+def graph_settings(workflow_json: Any) -> dict[str, Any]:
+    """Read the settings a submitted ComfyUI graph actually ran with.
+
+    The metadata saved at submit time only records what the caller typed, so every
+    param left at its default reads back as null — a clip generated at 6 steps and
+    CFG 3.5 reports neither. The graph is what the node received, so it answers
+    "what made this" for any workflow, including ones whose values are fixed in the
+    template and never passed through the API at all.
+    """
+    if isinstance(workflow_json, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            workflow_json = json.loads(workflow_json)
+    if not isinstance(workflow_json, dict):
+        return {}
+
+    passes: list[dict[str, Any]] = []
+    split: dict[str, Any] = {}
+    size: dict[str, Any] = {}
+    fps: Any = None
+    loras: list[dict[str, Any]] = []
+
+    for node in workflow_json.values():
+        if not isinstance(node, dict):
+            continue
+        class_type = node.get("class_type")
+        inputs = node.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            continue
+
+        if class_type in _SAMPLER_INPUTS:
+            found = {
+                label: _number(inputs.get(key)) if label != "sampler" and label != "scheduler" else inputs.get(key)
+                for label, key in _SAMPLER_INPUTS[class_type].items()
+            }
+            found = {k: v for k, v in found.items() if v is not None and not isinstance(v, list) and not str(v).startswith("{{")}
+            if not found:
+                continue
+            if class_type in _SPLIT_SAMPLER_NODES:
+                split.update(found)
+            else:
+                passes.append(found)
+
+        if class_type in _SIZE_INPUTS:
+            width_key, height_key, length_key = _SIZE_INPUTS[class_type]
+            for label, key in (("width", width_key), ("height", height_key), ("frames", length_key)):
+                if key is None:
+                    continue
+                value = _number(inputs.get(key))
+                if value is not None:
+                    size.setdefault(label, value)
+
+        if class_type in _FPS_NODES and fps is None:
+            fps = _number(inputs.get("fps") or inputs.get("frame_rate"))
+
+        if class_type in _LORA_NODES:
+            name = inputs.get("lora_name")
+            strength = _number(inputs.get("strength_model", inputs.get("strength")))
+            if isinstance(name, str) and name and name != "none" and not name.startswith("{{") and strength != 0:
+                loras.append({"name": Path(name).name, "strength": strength})
+
+    if split:
+        passes.append(split)
+
+    settings: dict[str, Any] = {}
+    if passes:
+        settings["passes"] = passes
+    settings.update(size)
+    if fps is not None:
+        settings["fps"] = fps
+    if loras:
+        settings["loras"] = loras
+    return settings
+
+
 def _job_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
     data.update(graph_models(data.get("workflow_json")))
+    data["settings"] = graph_settings(data.get("workflow_json"))
     metadata = data.get("metadata")
     if isinstance(metadata, str):
         with contextlib.suppress(json.JSONDecodeError):
@@ -194,7 +313,10 @@ async def update_job_status(prompt_id: str, status: str, *, error: str | None = 
                 error=$3,
                 output_filename=COALESCE($4, output_filename),
                 updated_at=NOW(),
-                completed_at=CASE WHEN $5 THEN NOW() ELSE completed_at END
+                -- Stamp once. _reconcile_job re-runs for a finished job on every
+                -- /api/jobs/{id} read, and an unguarded NOW() walked completed_at
+                -- forward on each one, inflating every run time derived from it.
+                completed_at=CASE WHEN $5 AND completed_at IS NULL THEN NOW() ELSE completed_at END
             WHERE prompt_id=$1
             """,
             prompt_id,
@@ -358,7 +480,10 @@ async def update_training_job_status(
                 error        = $3,
                 metadata     = COALESCE(training_jobs.metadata, '{}'::jsonb) || COALESCE($4::jsonb, '{}'::jsonb),
                 updated_at   = NOW(),
-                completed_at = CASE WHEN $5 THEN NOW() ELSE training_jobs.completed_at END
+                -- Stamp once, same as jobs. GET /api/lora-training/status re-runs this for
+                -- a finished job on every poll, and an unguarded NOW() walks completed_at
+                -- forward each time.
+                completed_at = CASE WHEN $5 AND training_jobs.completed_at IS NULL THEN NOW() ELSE training_jobs.completed_at END
             WHERE job_name   = $1
             """,
             job_name, status, error, _json(metadata), completed,
@@ -1118,6 +1243,50 @@ async def media_count(
     where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id)
     sql = f"SELECT COUNT(*) FROM media WHERE {where}"
     return int(await get_pool().fetchval(sql, *params) or 0)
+
+
+async def workflow_examples(owner_id: str | None = None) -> dict[str, dict[str, Any]]:
+    """One example output per workflow, from what this install has actually made.
+
+    A catalog of image and video tools has to show images. The media row records the
+    file; the workflow that made it lives on the job, so the two are joined on
+    prompt_id. Tag a file `showcase` to pin it as that workflow's example — otherwise
+    the newest output wins, so the catalog stays current with nobody curating it.
+    """
+    media_where, params = _media_where(None, None, None, owner_id=owner_id)
+    rows = await get_pool().fetch(
+        f"""
+        WITH picks AS (
+            SELECT j.metadata->>'workflow' AS workflow,
+                   m.filename, m.type, m.width, m.height, m.prompt_id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY j.metadata->>'workflow'
+                       ORDER BY EXISTS (
+                                  SELECT 1 FROM unnest(m.tags) t WHERE LOWER(t) = 'showcase'
+                                ) DESC,
+                                m.created_at DESC
+                   ) AS n
+            FROM (SELECT * FROM media WHERE {media_where}) m
+            JOIN jobs j ON j.prompt_id = m.prompt_id
+            -- Status is deliberately not checked: the reconciler marks a job failed when
+            -- the node forgets it, which happens to old jobs whose output files are fine
+            -- and still in the gallery. The media row existing is the proof it ran.
+            WHERE j.metadata->>'workflow' IS NOT NULL
+        )
+        SELECT workflow, filename, type, width, height, prompt_id FROM picks WHERE n = 1
+        """,
+        *params,
+    )
+    return {
+        row["workflow"]: {
+            "filename": row["filename"],
+            "type": row["type"],
+            "width": row["width"],
+            "height": row["height"],
+            "prompt_id": row["prompt_id"],
+        }
+        for row in rows
+    }
 
 
 async def list_training_dataset_media(character_id: str) -> list[dict[str, Any]]:

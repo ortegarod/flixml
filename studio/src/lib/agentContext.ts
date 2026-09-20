@@ -12,6 +12,17 @@ export function assetReference(item: MediaItem): string {
   return `FlixML asset ${item.prompt_id || item.filename || item.name}`;
 }
 
+/**
+ * The same one piece of information, for a workflow rather than an asset.
+ *
+ * Copied out of the workflows catalog: the human says what they want and names
+ * this, and the agent reads the params, defaults and requirements it needs from
+ * `GET /api/workflows`.
+ */
+export function workflowReference(id: string): string {
+  return `FlixML workflow ${id}`;
+}
+
 /** Copy helper that works without the async clipboard API, which http origins don't get. */
 export function copyText(text: string): void {
   if (navigator.clipboard?.writeText) {

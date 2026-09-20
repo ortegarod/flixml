@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { copyText } from "../../lib/agentContext";
+import { Check, Copy, ExternalLink } from "lucide-react";
+import { copyText, workflowReference } from "../../lib/agentContext";
+import { MediaPreview } from "../MediaPreview";
+import { workflowExamples } from "../../data/workflowExamples";
 import { clock } from "../../lib/duration";
+
+// The public workflow catalog. Studio is the browsing surface — what a workflow is
+// good for, what it needs and how it behaves is written once, there, instead of
+// inside every install. A page per shipped id; a workflow from the local tier has
+// none, which is why only shipped cards carry the link.
+const siteWorkflowUrl = (id: string) => `https://flixml.com/workflows/${id}`;
 
 // Shape of a registry workflow as served by GET /api/workflows. Everything the
 // docs below render is derived live from this — no static workflow doc to drift.
@@ -10,6 +19,9 @@ export interface WorkflowMeta {
   description?: string;
   task?: string;
   output_type?: "image" | "video";
+  // "shipped" is a workflow FlixML ships and documents; "local" is one the operator
+  // dropped into workflows/local/, which nothing here describes or vouches for.
+  source?: "shipped" | "local";
   requirements?: {
     vram_gb?: number;
     workflow_type?: string;
@@ -20,6 +32,17 @@ export interface WorkflowMeta {
   // Measured on this install from recent completed jobs; null until one finishes.
   run_time?: {
     by_provider: Record<string, { median_seconds: number; min_seconds: number; max_seconds: number; samples: number }>;
+  } | null;
+  // One output this install made with the workflow — tagged `showcase`, else the
+  // newest. Null until the workflow has produced something here.
+  example?: {
+    filename: string;
+    type: string;
+    url: string;
+    thumb: string;
+    width?: number;
+    height?: number;
+    prompt_id?: string;
   } | null;
 }
 
@@ -74,7 +97,7 @@ const TASKS: Record<
     input: "Image",
     output: "Video",
     order: 1,
-    example: "Animate this image — slow push-in, hair moving in the wind.",
+    example: "Animate this image: she turns to the camera and pulls her jacket closed as the wind hits.",
   },
   "first-last-frame-to-video": {
     group: "Videos",
@@ -95,15 +118,16 @@ const TASKS: Record<
 };
 
 // Model family badge, derived from the workflow id (more human than workflow_type,
-// which lumps lip-sync under wanvideo_wrapper). Workflows from the private local/
-// tier fall through to the generic badge — the public build knows nothing about them.
-function modelFamily(id: string): { label: string; cls: string } {
+// which lumps lip-sync under wanvideo_wrapper). No match means no badge: text_logo runs
+// no model at all, and a workflow from the local/ tier is one this build has never heard
+// of. A chip reading "Model" claimed a model in both cases and named one in neither.
+function modelFamily(id: string): { label: string; cls: string } | null {
   if (id.startsWith("flux2")) return { label: "FLUX.2", cls: "bg-amber-500/15 text-amber-200" };
   if (id.startsWith("sdxl")) return { label: "SDXL", cls: "bg-white/5 text-gray-300" };
   if (id.startsWith("qwen")) return { label: "Qwen", cls: "bg-white/5 text-gray-300" };
   if (id.startsWith("infinitetalk")) return { label: "InfiniteTalk", cls: "bg-white/5 text-gray-300" };
   if (id.startsWith("wan22")) return { label: "Wan 2.2", cls: "bg-white/5 text-gray-300" };
-  return { label: "Model", cls: "bg-white/10 text-gray-300" };
+  return null;
 }
 
 function InOut({ input, output }: { input: string; output: string }) {
@@ -146,34 +170,101 @@ function RunTimeChip({ runTime }: { runTime: WorkflowMeta["run_time"] }) {
   );
 }
 
-// One workflow row. The factual, workflow-authored description is always visible —
-// that's what makes two same-family workflows legibly different — alongside
-// objective spec chips only (model, VRAM, measured run time, LoRA, needs-image/voice). No opinions.
-function WorkflowCard({ w }: { w: WorkflowMeta }) {
+// The card's face: the sample that ships with FlixML, identical on every install.
+// It is never the user's own output — a card says what the workflow makes, and what
+// this box has made with it is the gallery's job. A video plays while the card is on
+// screen as the list scrolls. A workflow with no sample says what it takes instead.
+function Example({ w, taskLabel }: { w: WorkflowMeta; taskLabel: string }) {
+  const ex = workflowExamples[w.id];
+
+  if (!ex) {
+    return (
+      <div className="aspect-[4/3] rounded-lg border border-dashed border-gray-800 bg-black/20 flex flex-col items-center justify-center gap-1 text-center px-3">
+        <p className="text-[11px] text-gray-500">No sample yet</p>
+        <p className="text-[10px] text-gray-600">{taskLabel}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="aspect-[4/3] rounded-lg overflow-hidden bg-black/40 relative">
+      <MediaPreview
+        type={ex.type}
+        url={ex.src}
+        thumb={ex.poster}
+        alt={ex.alt}
+        className="w-full h-full object-cover"
+      />
+      {ex.type === "video" && (
+        <span className="absolute bottom-1.5 right-1.5 rounded bg-black/70 px-1 py-0.5 text-[9px] text-gray-300">
+          video
+        </span>
+      )}
+    </div>
+  );
+}
+
+// One workflow card, led by what it actually produced here. The spec chips under it are
+// objective only (model, VRAM, measured run time, LoRA, needs-image/voice) — no opinions,
+// and no description paragraph: that's what the picture replaced.
+function WorkflowCard({ w, taskLabel }: { w: WorkflowMeta; taskLabel: string }) {
   const req = w.requirements ?? {};
   const fam = modelFamily(w.id);
+  const [copied, setCopied] = useState(false);
+
+  // The id is what the human hands their agent — one piece of information, and the
+  // agent reads the params off the API from there.
+  const copyId = () => {
+    copyText(workflowReference(w.id));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-950/50 px-3 py-2.5 space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
+    <div className="rounded-xl border border-gray-800 bg-gray-950/50 p-2 space-y-1.5">
+      <Example w={w} taskLabel={taskLabel} />
+      <div className="flex items-center justify-between gap-2 px-1">
         <span className="text-xs font-semibold text-gray-100 truncate">{w.name ?? w.id}</span>
-        <span className="shrink-0 font-mono text-[9px] text-gray-600">{w.id}</span>
+        <button
+          onClick={copyId}
+          title={`Copy "${workflowReference(w.id)}" to give your agent`}
+          className="shrink-0 inline-flex items-center gap-1 rounded px-1 py-0.5 font-mono text-[9px] text-gray-600 hover:bg-white/5 hover:text-gray-300 transition"
+        >
+          {w.id}
+          {copied ? <Check className="w-2.5 h-2.5 text-brand" /> : <Copy className="w-2.5 h-2.5" />}
+        </button>
       </div>
-      {w.description && (
-        <p className="text-[11px] text-gray-400 leading-snug">{w.description}</p>
-      )}
-      <div className="flex flex-wrap items-center gap-1">
-        <Chip cls={fam.cls}>{fam.label}</Chip>
+      <div className="flex flex-wrap items-center gap-1 px-1">
+        {w.source === "local" && (
+          <Chip cls="border border-white/20 bg-white/5 text-gray-200 uppercase tracking-wide">Local</Chip>
+        )}
+        {fam && <Chip cls={fam.cls}>{fam.label}</Chip>}
         {typeof req.vram_gb === "number" && <Chip>{req.vram_gb} GB VRAM</Chip>}
         <RunTimeChip runTime={w.run_time} />
         {req.supports_lora && <Chip cls="bg-white/5 text-gray-300">LoRA</Chip>}
         {req.requires_image && <Chip>needs image</Chip>}
         {req.requires_audio && <Chip cls="bg-white/5 text-gray-300">needs voice</Chip>}
+        {/* Only a shipped workflow is in the site's catalog. A local one is the operator's
+            own file: flixml.com has never heard of it, and linking would send them to a
+            page that doesn't describe what they're looking at. */}
+        {w.source !== "local" && (
+          <a
+            href={siteWorkflowUrl(w.id)}
+            target="_blank"
+            rel="noreferrer"
+            title={`What ${w.name ?? w.id} is good for, what it needs, and how to drive it`}
+            className="ml-auto inline-flex items-center gap-0.5 text-[9px] text-gray-500 hover:text-brand transition"
+          >
+            Docs
+            <ExternalLink className="w-2.5 h-2.5" />
+          </a>
+        )}
       </div>
     </div>
   );
 }
 
-export function GenerateTab() {
+export function WorkflowsTab() {
   const [workflows, setWorkflows] = useState<WorkflowMeta[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -190,10 +281,16 @@ export function GenerateTab() {
     setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
   };
 
+  // Workflows dropped into workflows/local/ are the operator's own files — unreviewed,
+  // undocumented, and possibly nothing like what FlixML ships. They get their own
+  // section rather than sitting among ours where the difference is invisible.
+  const shipped = useMemo(() => workflows.filter((w) => w.source !== "local"), [workflows]);
+  const local = useMemo(() => workflows.filter((w) => w.source === "local"), [workflows]);
+
   // Group → task → workflows[], all live from the registry so it stays in sync.
   const tree = useMemo(() => {
     const byTask = new Map<string, WorkflowMeta[]>();
-    for (const w of workflows) {
+    for (const w of shipped) {
       const t = w.task ?? "";
       if (!TASKS[t]) continue; // skip anything we don't have a framing for
       if (!byTask.has(t)) byTask.set(t, []);
@@ -206,7 +303,7 @@ export function GenerateTab() {
         .map(([t, ws]) => ({ task: t, meta: TASKS[t], workflows: ws }));
       return { group, tasks };
     }).filter((g) => g.tasks.length > 0);
-  }, [workflows]);
+  }, [shipped]);
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-5">
@@ -223,8 +320,8 @@ export function GenerateTab() {
         <div>
           <h3 className="text-sm font-semibold text-white">What can you make here?</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Grouped by what goes in and what comes out. Tap a workflow for details, or copy an example
-            and paste it to your agent.
+            Grouped by what goes in and what comes out. Copy an example and paste it to your agent,
+            or copy a workflow's id to name it exactly. Docs opens that workflow's page on flixml.com.
           </p>
         </div>
 
@@ -243,7 +340,7 @@ export function GenerateTab() {
                 </div>
                 <div className="space-y-1.5">
                   {ws.map((w) => (
-                    <WorkflowCard key={w.id} w={w} />
+                    <WorkflowCard key={w.id} w={w} taskLabel={meta.label} />
                   ))}
                 </div>
                 <button
@@ -257,6 +354,29 @@ export function GenerateTab() {
             ))}
           </div>
         ))}
+
+        {/* The operator's own workflows, kept visibly apart from what FlixML ships. */}
+        {local.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              Your own workflows
+            </p>
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              Found in <span className="font-mono text-gray-400">workflows/local/</span> on this
+              install. FlixML didn't ship these and doesn't document them — what they make, what
+              they need and what they put in your gallery is whatever their author wrote.
+            </p>
+            <div className="space-y-1.5">
+              {local.map((w) => (
+                <WorkflowCard
+                  key={w.id}
+                  w={w}
+                  taskLabel={TASKS[w.task ?? ""]?.label ?? "Local workflow"}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Movies — lives in the Projects tab, not a single workflow */}
         <div className="space-y-2">

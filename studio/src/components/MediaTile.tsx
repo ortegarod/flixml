@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { Trash2, X, Play, Wand2, ArrowRight, Expand, Check, Bot } from "lucide-react";
 import type { MediaItem } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
+import { MediaPreview } from "./MediaPreview";
 
 interface MediaTileProps {
   item: MediaItem;
@@ -23,19 +24,6 @@ export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFro
   const [showI2VInput, setShowI2VInput] = useState(false);
   const [motionPrompt, setMotionPrompt] = useState("");
   const [copied, setCopied] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  function handleMouseEnter() {
-    const v = videoRef.current;
-    if (v) v.play().catch(() => {});
-  }
-
-  function handleMouseLeave() {
-    const v = videoRef.current;
-    if (!v) return;
-    v.pause();
-    v.currentTime = 0;
-  }
 
   async function confirmRemoveDataset(event: React.MouseEvent) {
     event.stopPropagation();
@@ -64,16 +52,18 @@ export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFro
   return (
     <div
       onClick={() => selectionMode ? onToggleSelected?.(item) : onOpen()}
-      onMouseEnter={item.type === "video" ? handleMouseEnter : undefined}
-      onMouseLeave={item.type === "video" ? handleMouseLeave : undefined}
       className={`cursor-pointer rounded-xl overflow-hidden border aspect-[3/4] bg-gray-900/50 relative group transition-all duration-200 hover:shadow-xl hover:shadow-black/30 hover:-translate-y-0.5 ${selected ? "border-brand ring-2 ring-brand-soft" : "border-gray-800/60 hover:border-gray-600"}`}
     >
       {/* Media */}
-      {item.type === "video" ? (
-        <video ref={videoRef} src={item.url} poster={item.thumb} className="w-full h-full object-cover" preload="none" muted loop playsInline />
-      ) : (
-        <img src={item.thumb || item.url} alt={item.name || ""} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" />
-      )}
+      <MediaPreview
+        type={item.type}
+        url={item.url}
+        thumb={item.thumb}
+        alt={item.name || ""}
+        className={item.type === "video"
+          ? "w-full h-full object-cover"
+          : "w-full h-full object-cover group-hover:scale-105 transition duration-500"}
+      />
 
       {selectionMode && (
         <div className={`absolute top-2 left-2 z-30 w-7 h-7 rounded-lg border flex items-center justify-center backdrop-blur-sm ${selected ? "bg-brand border-brand text-brand-foreground" : "bg-black/60 border-white/20 text-transparent"}`}>

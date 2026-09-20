@@ -105,7 +105,7 @@ class GenerationService:
             filename_prefix: Output filename prefix (workflow decides if None)
             workflow_params: Workflow-specific params passed to builder.
                 Examples:
-                - flux2_lora: {"loras": [...], "guidance": 4.0, "steps": 20, "cfg": 4.0}
+                - flux2_dev_lora: {"loras": [...], "guidance": 4.0, "steps": 20, "cfg": 4.0}
                 - wan22_i2v: {"image": "...", "steps_high": 2, "cfg_high": 1.0}
             owner_id, session_id: Tracking metadata
             extra_metadata: Additional metadata to store in DB

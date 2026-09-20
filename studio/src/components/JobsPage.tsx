@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { useApp } from "../App";
 import type { JobItem } from "../types";
-import type { WorkflowMeta } from "./sidebar/GenerateTab";
+import type { WorkflowMeta } from "./sidebar/WorkflowsTab";
 import { clock, secondsBetween, timeAgo } from "../lib/duration";
 import { isActive, useJobProgress, useWorkflowRunTimes } from "../lib/jobProgress";
 

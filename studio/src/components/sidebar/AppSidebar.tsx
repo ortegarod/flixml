@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { Settings, Terminal, X, Cpu, Users, Search, Image, Box, Film, Activity, Code2 } from "lucide-react";
+import { Settings, Terminal, X, Cpu, Users, Search, Box, Film, Activity, Code2, Workflow } from "lucide-react";
 import type { ProjectModeData } from "../../types";
-import { GenerateTab } from "./GenerateTab";
+import { WorkflowsTab } from "./WorkflowsTab";
 import { NodesTab } from "./NodesTab";
 import { ProjectSidebar } from "./ProjectSidebar";
 import { ProjectsGuide } from "../ProjectsGuide";
 
-export type SidebarTab = "generate" | "jobs" | "characters" | "projects" | "nodes" | "settings";
+export type SidebarTab = "workflows" | "jobs" | "characters" | "projects" | "nodes" | "settings";
 export const SIDEBAR_WIDTH = 380;
 
 interface CharacterSummary {
@@ -30,7 +30,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose, onSelectCharacter, projectMode }: AppSidebarProps) {
   const topTabs: { id: SidebarTab; icon: React.ReactNode; label: string }[] = [
-    { id: "generate", icon: <Image className="w-4 h-4" />, label: "Generate" },
+    { id: "workflows", icon: <Workflow className="w-4 h-4" />, label: "Workflows" },
     { id: "jobs", icon: <Activity className="w-4 h-4" />, label: "Jobs" },
     { id: "characters", icon: <Users className="w-4 h-4" />, label: "Characters & LoRA Training" },
     { id: "projects", icon: <Film className="w-4 h-4" />, label: "Projects" },
@@ -101,7 +101,7 @@ export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose,
 
         <div className="flex-1 min-h-0 overflow-hidden">
           {activeTab === "characters" && <CharactersTab onSelectCharacter={onSelectCharacter} />}
-          {activeTab === "generate" && <GenerateTab />}
+          {activeTab === "workflows" && <WorkflowsTab />}
           {activeTab === "projects" && (projectMode ? <ProjectSidebar data={projectMode} onDeleteScene={(id) => projectMode.onDeleteScene(id)} /> : <ProjectsGuide compact />)}
           {activeTab === "nodes" && <NodesTab />}
         </div>
