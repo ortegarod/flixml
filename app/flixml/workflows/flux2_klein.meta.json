@@ -1,0 +1,69 @@
+{
+  "id": "flux2_klein",
+  "name": "FLUX.2 Klein Image",
+  "description": "Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt — no LoRA, no source image.",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 8,
+    "model_files_gb": 8.3,
+    "workflow_type": "flux2",
+    "supports_lora": false,
+    "notes": "Defaults to FLUX.2 Klein 4B fp8 (4.07 GB) plus the fp4 Qwen3-4B encoder (3.85 GB), about 8.3 GB of weights with the VAE. Klein is the distilled line and renders in 4 steps. TESTED 2026-09-19 at 1024x1024, 4 steps, same prompt and seed on both cards: fp8 on an 8 GB RTX 2060 Super took 29 s, bf16 (7.75 GB) on a 12 GB RTX 4070 Ti took 37 s, and the two outputs are visually identical — fp8 costs nothing here. The unet and clip params reach any FLUX.2 weights present on the node; FLUX.2-dev (35 GB fp8 plus a 12 GB Mistral encoder) wants 24 GB VRAM and spills badly below that — 32 min for a single image on the 4070 Ti — so dev belongs on flux2_dev_lora, the only workflow the dev-trained LoRAs load into."
+  },
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "description": "Text prompt"
+    },
+    "width": {
+      "type": "int",
+      "default": 832,
+      "description": "Output width"
+    },
+    "height": {
+      "type": "int",
+      "default": 832,
+      "description": "Output height"
+    },
+    "seed": {
+      "type": "int",
+      "required": false,
+      "description": "Random seed (auto if omitted)"
+    },
+    "steps": {
+      "type": "int",
+      "default": 4,
+      "min": 1,
+      "max": 50,
+      "description": "Klein is distilled to 4 steps; raise it only when running undistilled FLUX.2 weights through the unet param"
+    },
+    "sampler": {
+      "type": "str",
+      "default": "euler"
+    },
+    "guidance": {
+      "type": "float",
+      "default": 4.0,
+      "description": "FLUX guidance scale"
+    },
+    "unet": {
+      "type": "str",
+      "default": "flux-2-klein-4b-fp8.safetensors"
+    },
+    "clip": {
+      "type": "str",
+      "default": "qwen_3_4b_fp4_flux2.safetensors"
+    },
+    "vae": {
+      "type": "str",
+      "default": "flux2-vae.safetensors"
+    }
+  },
+  "compatible_providers": [
+    "local",
+    "cloud_serverless"
+  ],
+  "examples": []
+}

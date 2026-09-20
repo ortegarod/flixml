@@ -25,7 +25,7 @@ from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_read_file
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_examples, workflow_run_times
 from .workflows.registry import init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, WorkflowNotFoundError
@@ -687,6 +687,9 @@ class JobStatusResponse(BaseModel):
     width: int | None = None
     height: int | None = None
     workflow_params: dict[str, Any] | None = None
+    # Read back from the submitted graph: the sampler passes, geometry, frame rate and
+    # LoRA strengths the node ran with, including values never passed through the API.
+    settings: dict[str, Any] = {}
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -940,20 +943,36 @@ async def _reconcile_loop() -> None:
 
 
 @app.get("/api/workflows")
-async def list_workflows() -> list[dict]:
+async def list_workflows(agent: Agent | None = Depends(current_agent)) -> list[dict]:
     """List all available workflows an agent can request, including each one's params.
 
     `run_time` holds measured run times per node from this install's recent completed
     jobs, or null if the workflow has never finished here. Times reflect the params
     those jobs used; longer videos and bigger sizes take longer.
+
+    `example` is one output this install made with that workflow — the file tagged
+    `showcase`, or else the newest one — so a catalog can show what a workflow makes
+    rather than describe it. Null until the workflow has produced something here.
+
+    `source` is `shipped` for the workflows FlixML ships and documents, or `local` for
+    one the operator dropped into `workflows/local/` on their own install. Nothing in
+    the docs or on flixml.com describes a `local` workflow: read its `params` rather
+    than assuming it behaves like the shipped one whose name it resembles.
     """
     registry = get_registry()
     run_times = await workflow_run_times()
+    examples = await workflow_examples(owner_id=owner_scope(agent))
     workflows = []
     for w in registry.list_workflows():
         entry = w.to_dict()
         by_provider = run_times.get(w.id)
         entry["run_time"] = {"by_provider": by_provider} if by_provider else None
+        example = examples.get(w.id)
+        entry["example"] = (
+            {**example, "url": f"/media/{example['filename']}", "thumb": f"/api/thumb/{example['filename']}"}
+            if example
+            else None
+        )
         workflows.append(entry)
     return workflows
 
@@ -2703,6 +2722,7 @@ async def job(prompt_id: str) -> JobStatusResponse:
         width=record.get("width") or None,
         height=record.get("height") or None,
         workflow_params=record.get("workflow_params"),
+        settings=record.get("settings") or {},
         error=record.get("error"),
         started_at=record.get("started_at"),
         finished_at=record.get("finished_at"),
@@ -3482,6 +3502,9 @@ async def listing(
             "finished_at": row.get("job_finished_at"),
             "models": graph["models"],
             "loras": graph["loras"],
+            # What the node actually ran with. The metadata blob only records what the
+            # caller passed, so every param left at a default reads back null there.
+            "settings": db.graph_settings(row.get("job_workflow_json")),
         })
 
     return {

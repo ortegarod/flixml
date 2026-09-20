@@ -293,7 +293,13 @@ export function StudioView({
     <div className="p-5 lg:p-7 space-y-4">
       {/* One line: what this is, how much of it there is, and the way out to Projects. */}
       <section className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">Studio</h1>
+        {/* Studio and Workspace are the same page, set as a title and its subtitle. */}
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight leading-none">Studio</h1>
+          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-gray-500">
+            Workspace
+          </p>
+        </div>
         <p className="text-xs text-gray-500">
           {counts.total} in your gallery · {imageCount} {imageCount === 1 ? "image" : "images"} ·{" "}
           {videoCount} {videoCount === 1 ? "video" : "videos"}
@@ -351,7 +357,7 @@ export function StudioView({
               <input
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
-                placeholder="Search studio"
+                placeholder="Search gallery"
                 className="w-full rounded-lg border border-gray-800 bg-black/40 py-2 pl-8 pr-2.5 text-xs text-gray-200 placeholder:text-gray-700 focus:border-brand focus:outline-none"
               />
             </label>

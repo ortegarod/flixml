@@ -1,6 +1,6 @@
 {
-  "id": "flux2_lora",
-  "name": "FLUX.2 + LoRA Image",
+  "id": "flux2_dev_lora",
+  "name": "FLUX.2 dev + LoRA Image",
   "description": "Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt.",
   "task": "text-to-image",
   "output_type": "image",
@@ -9,7 +9,7 @@
     "model_files_gb": 48.1,
     "workflow_type": "flux2",
     "supports_lora": true,
-    "notes": "TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Untested with more system RAM or a 24 GB+ GPU (e.g. RunPod); both reduce spilling. For fast local iteration use SDXL and composite text separately."
+    "notes": "Stays on the FLUX.2-dev weights, and a LoRA is bound to the exact variant it was trained on: a dev-trained LoRA will not load into Klein, whose transformer is a different width and block count, so this workflow cannot follow flux2_klein down to the small models. TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Needs a 24 GB+ GPU to run without spilling. For fast local iteration use flux2_klein (Klein 4B) or SDXL."
   },
   "params": {
     "prompt": {

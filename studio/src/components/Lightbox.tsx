@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { X, ChevronLeft, ChevronRight, Trash2, Copy, Check, Download } from "lucide-react";
-import type { CharacterSummary, MediaItem } from "../types";
+import type { CharacterSummary, GraphSettings, MediaItem, SamplerPass } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
 
 // Minimal shape of the /api/workflows entries we surface as agent-guidance options.
@@ -71,6 +71,82 @@ function formatMetaValue(value: unknown): string | null {
   return String(value);
 }
 
+// A sampling pass as one line: "6 steps · CFG 3.5 · euler". Wan's second pass reads
+// the same way, so two passes stack into two lines rather than a merged fiction.
+function passSummary(pass: SamplerPass): string {
+  const parts: string[] = [];
+  if (pass.steps !== undefined) parts.push(`${pass.steps} steps`);
+  if (pass.cfg !== undefined) parts.push(`CFG ${pass.cfg}`);
+  if (pass.denoise !== undefined && pass.denoise !== 1) parts.push(`denoise ${pass.denoise}`);
+  if (pass.shift !== undefined) parts.push(`shift ${pass.shift}`);
+  if (pass.sampler) parts.push(pass.sampler);
+  if (pass.scheduler) parts.push(pass.scheduler);
+  return parts.join(" · ");
+}
+
+// "3 seconds · 832×480 vertical" — what you would ask for again. Frames and frame
+// rate are arithmetic homework, so they become a duration; orientation is named
+// because that's how a phone user describes a clip.
+function outputSummary(settings: GraphSettings | null | undefined, item: MediaItem | null): string {
+  const width = settings?.width ?? item?.width;
+  const height = settings?.height ?? item?.height;
+  const parts: string[] = [];
+  if (settings?.frames && settings?.fps) {
+    const seconds = settings.frames / settings.fps;
+    parts.push(`${seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10} seconds`);
+  }
+  if (width && height) {
+    parts.push(`${width}×${height}${height > width ? " vertical" : ""}`);
+  }
+  return parts.join(" · ");
+}
+
+// Speed LoRAs (Lightning and friends) are plumbing — they buy render time, not a
+// look. Nobody asks for another clip "like that one, with the 4-step LoRA".
+const SPEED_LORA = /lightning|lightx2v|4.?step|8.?step|turbo|hyper|distill/i;
+
+// LoRA filename without its extension. Strengths are tuning, so they stay in the drawer.
+function loraSummary(lora: { name: string; strength?: number }): string {
+  return lora.name.replace(/\.(safetensors|ckpt|pt)$/i, "");
+}
+
+// "2 hours ago" — how people refer to a clip. Falls back down the chain of times a
+// row might carry, ending at the file's own mtime.
+function whenMade(item: MediaItem): string | null {
+  const stamp = item.finished_at || item.submitted_at || (item.mtime ? item.mtime * 1000 : null);
+  if (!stamp) return null;
+  const then = new Date(stamp).getTime();
+  if (Number.isNaN(then)) return null;
+  const minutes = Math.round((Date.now() - then) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  return new Date(then).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// The graph's own settings, as drawer rows. They leave the top of the rail but not the
+// record: seed, steps, CFG, strengths and frame counts stay one tap away, and unlike
+// metadata they report what the node actually ran with.
+function settingsRows(settings: GraphSettings | null | undefined): Array<{ label: string; value: string }> {
+  if (!settings) return [];
+  const rows: Array<{ label: string; value: string }> = [];
+  const passes = settings.passes || [];
+  passes.forEach((pass, index) => {
+    const summary = passSummary(pass);
+    if (summary) rows.push({ label: passes.length > 1 ? (index === 0 ? "Pass (high)" : "Pass (low)") : "Sampling", value: summary });
+  });
+  const seed = passes.find((pass) => pass.seed !== undefined && pass.seed !== 0)?.seed;
+  if (seed !== undefined) rows.push({ label: "Seed", value: String(seed) });
+  if (settings.frames) rows.push({ label: "Frames", value: `${settings.frames}${settings.fps ? ` @ ${settings.fps}fps` : ""}` });
+  for (const lora of settings.loras || []) {
+    rows.push({ label: "LoRA", value: lora.strength === undefined ? lora.name : `${lora.name} @ ${lora.strength}` });
+  }
+  return rows;
+}
+
 // Preferred ordering so the common knobs read first; everything else follows alphabetically.
 const META_ORDER = [
   "workflow", "provider", "checkpoint", "model", "output_type",
@@ -117,6 +193,65 @@ function buildMetaRows(detail: ImageDetail, item: MediaItem | null): Array<{ lab
   for (const key of META_ORDER) if (key in merged) emit(key);
   for (const key of Object.keys(merged).sort()) emit(key);
   return rows;
+}
+
+// The top of the rail: what this clip is and where it came from — the lines someone
+// could point at and ask for another like it. Everything nobody says out loud (seed,
+// steps, CFG, strengths, filenames) lives in Everything else.
+function Recipe({
+  item,
+  meta,
+  onOpenSource,
+}: {
+  item: MediaItem;
+  meta: Record<string, any>;
+  onOpenSource: (path: string) => void;
+}) {
+  const settings = item.settings || null;
+  const sourcePath: string | null = meta.image || null;
+  const output = outputSummary(settings, item);
+  const loras = (settings?.loras?.length
+    ? settings.loras
+    : (item.loras || []).map((name) => ({ name }))
+  ).filter((lora) => !SPEED_LORA.test(lora.name));
+  const workflow = meta.workflow || null;
+  const made = whenMade(item);
+
+  return (
+    <div className="mb-4 space-y-3">
+      {(workflow || made) && (
+        <div>
+          {workflow && <p className="text-sm font-semibold text-white break-all">{workflow}</p>}
+          {made && <p className="text-[11px] text-gray-500">{made}</p>}
+        </div>
+      )}
+
+      {sourcePath && (
+        <button
+          onClick={() => onOpenSource(sourcePath)}
+          className="flex w-full items-center gap-2.5 rounded-lg border border-gray-800 bg-black/30 p-1.5 text-left hover:border-brand transition"
+          title="Open the image this started from"
+        >
+          <img src={`/api/thumb/${sourcePath}`} alt="" className="h-12 w-12 shrink-0 rounded object-cover" />
+          <span className="min-w-0">
+            <span className="block text-[10px] uppercase tracking-wider text-gray-500">Started from</span>
+            <span className="block truncate text-[11px] text-gray-300">{sourcePath.split("/").pop()}</span>
+          </span>
+        </button>
+      )}
+
+      {(output || loras.length > 0) && (
+        <div className="space-y-0.5">
+          {output && <p className="text-[11px] text-gray-300">{output}</p>}
+          {loras.map((lora) => (
+            <p key={lora.name} className="truncate text-[11px] text-gray-400" title={lora.name}>
+              {loraSummary(lora)}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface LightboxProps {
@@ -285,6 +420,14 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
 
   const characterName = (id: string) => characters.find((character) => character.id === id)?.name || id;
 
+  // Jump to the image a clip was generated from. It is usually a few rows further
+  // down the same gallery page; when it isn't loaded, open the file itself.
+  function openSource(path: string) {
+    const match = items.find((candidate) => candidate.filename === path || candidate.name === path.split("/").pop());
+    if (match) onSelect(match.url);
+    else window.open(`/media/${path}`, "_blank");
+  }
+
   // Copy this asset's reference plus what the human wants done with it. The agent
   // looks the asset up itself, so nothing technical has to be pasted by hand.
   function copyBuild(instruction: string, key: string) {
@@ -324,6 +467,9 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
           {copiedKey === "__context__" ? "Copied — paste to your agent" : "Copy reference for agent"}
         </button>
       )}
+      {current && detail && (
+        <Recipe item={current} meta={detail.meta || {}} onOpenSource={openSource} />
+      )}
       {current && (
         <div className="mb-4 space-y-2">
           <a
@@ -347,21 +493,6 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
                 </button>
               ))}
             </>
-          )}
-        </div>
-      )}
-      {(identifier || current?.prompt_id) && (
-        <div className="mb-4 pb-3 border-b border-gray-800 space-y-2">
-          {identifier && <MetaRow label="File" value={identifier} />}
-          {current?.prompt_id && <MetaRow label="ID" value={current.prompt_id} />}
-          {current && !isVideo && (
-            <button
-              onClick={toggleTrainingDataset}
-              disabled={savingMetadata}
-              className={`w-full rounded-lg px-3 py-2 text-xs font-semibold transition ${current.included_in_training_dataset ? "bg-brand text-brand-foreground hover:brightness-110" : "bg-gray-900 text-gray-300 hover:bg-gray-800 hover:text-white"} disabled:opacity-50`}
-            >
-              {current.included_in_training_dataset ? "Included in training dataset" : "Include in training dataset"}
-            </button>
           )}
         </div>
       )}
@@ -418,7 +549,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
         const wp = (meta.workflow_params as Record<string, any>) || {};
         const promptText = meta.prompt || current?.prompt || null;
         const negativeText = meta.negative_prompt || wp.negative_prompt || null;
-        const rows = buildMetaRows(detail, current);
+        const rows = [...settingsRows(current?.settings), ...buildMetaRows(detail, current)];
         return (
           <>
             {promptText && (
@@ -436,20 +567,27 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, characters, on
                 <p className="text-[11px] text-gray-200 leading-relaxed">{promptText}</p>
               </div>
             )}
-            {negativeText && (
-              <div className="mb-4">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Negative</p>
-                <p className="text-[11px] text-gray-400 leading-relaxed">{negativeText}</p>
-              </div>
-            )}
-            {rows.length > 0 && (
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Parameters</p>
-                {rows.map((row) => (
-                  <MetaRow key={row.label} label={row.label} value={row.value} />
+            {/* The complete record, one tap away. Nothing is dropped — it just stops
+                competing with the handful of fields that say how this was made. */}
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between py-1 text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300">
+                <span>Everything else</span>
+                <span className="normal-case tracking-normal text-gray-600 group-open:hidden">{rows.length} fields</span>
+              </summary>
+              <div className="mt-2">
+                {negativeText && (
+                  <div className="mb-3">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Negative</p>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">{negativeText}</p>
+                  </div>
+                )}
+                {identifier && <MetaRow label="File" value={identifier} />}
+                {current?.prompt_id && <MetaRow label="ID" value={current.prompt_id} />}
+                {rows.map((row, index) => (
+                  <MetaRow key={`${row.label}-${index}`} label={row.label} value={row.value} />
                 ))}
               </div>
-            )}
+            </details>
           </>
         );
       })()}

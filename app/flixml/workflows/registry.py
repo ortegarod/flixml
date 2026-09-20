@@ -10,7 +10,7 @@ Usage:
     registry = get_registry()
     
     # Build workflow with variables substituted
-    workflow_json = registry.build_workflow("flux2_lora", {
+    workflow_json = registry.build_workflow("flux2_dev_lora", {
         "prompt": "a beautiful sunset",
         "seed": 42,
         "width": 1248,
@@ -48,7 +48,11 @@ class WorkflowMetadata:
         self.params = data.get("params", {})
         self.compatible_providers = data.get("compatible_providers", [])
         self.examples = data.get("examples", [])
-    
+        # "shipped" for the workflows this project ships and documents; "local" for
+        # anything found in local/, which is the operator's own file. Nothing here
+        # describes a local workflow, so no caller may present one as documented.
+        self.source = data.get("source", "shipped")
+
     def to_dict(self) -> dict[str, Any]:
         """Return metadata as dict (for API responses)."""
         return {
@@ -57,6 +61,7 @@ class WorkflowMetadata:
             "description": self.description,
             "task": self.task,
             "output_type": self.output_type,
+            "source": self.source,
             "requirements": self.requirements,
             "params": self.params,
             "compatible_providers": self.compatible_providers,
@@ -94,17 +99,22 @@ class WorkflowRegistry:
             if not source_dir.exists():
                 continue
 
+            # A workflow's tier comes from where it was found, never from its own file:
+            # a local .meta.json claiming "source": "shipped" would otherwise dress an
+            # unknown graph up as one of ours.
+            source = "local" if source_dir.name == "local" else "shipped"
+
             # Load metadata files (optional)
             for meta_file in source_dir.glob("*.meta.json"):
-                self._load_meta_file(meta_file)
+                self._load_meta_file(meta_file, source)
 
             # Load workflow JSON templates
             for json_file in source_dir.glob("*.json"):
                 if json_file.name.endswith(".meta.json") or json_file.name.startswith("."):
                     continue
-                self._load_template_file(json_file)
-    
-    def _load_meta_file(self, meta_file: Path) -> None:
+                self._load_template_file(json_file, source)
+
+    def _load_meta_file(self, meta_file: Path, source: str = "shipped") -> None:
         """Load a .meta.json metadata file."""
         with open(meta_file) as f:
             data = json.load(f)
@@ -113,9 +123,9 @@ class WorkflowRegistry:
         if not workflow_id:
             raise ValueError(f"Metadata file {meta_file.name} missing required 'id' field")
 
-        self._workflows[workflow_id] = WorkflowMetadata(data)
+        self._workflows[workflow_id] = WorkflowMetadata({**data, "source": source})
 
-    def _load_template_file(self, json_file: Path) -> None:
+    def _load_template_file(self, json_file: Path, source: str = "shipped") -> None:
         """Load a workflow JSON template."""
         with open(json_file) as f:
             workflow_json = json.load(f)
@@ -124,7 +134,7 @@ class WorkflowRegistry:
         self._templates[workflow_id] = workflow_json
 
         if workflow_id not in self._workflows:
-            self._workflows[workflow_id] = WorkflowMetadata({"id": workflow_id})
+            self._workflows[workflow_id] = WorkflowMetadata({"id": workflow_id, "source": source})
     
     def get(self, workflow_id: str) -> WorkflowMetadata | None:
         """Get workflow metadata by ID."""

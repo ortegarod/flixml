@@ -34,6 +34,10 @@ Pick the workflow whose `task` matches what you start from and what you want bac
 
 Each workflow's `run_time.by_provider` gives the median, min and max seconds of its recent completed runs on each node of this install (`null` if it has never finished here). Use it when more than one workflow fits the request: a video can run 10 minutes or more where an image takes 30 seconds. Pick the long one only when the request needs what it makes, and tell your human the expected wait before you submit it.
 
+`example` points at one output this install already made with that workflow — `url`, `thumb` and the `prompt_id` you can look the rest up with. It's the fastest way to see what a workflow actually produces here rather than guessing from its description, and it's `null` until the workflow has made something.
+
+`source` is `shipped` for the workflows FlixML ships and documents, or `local` for one your human dropped into `workflows/local/` on their own install. Nothing in this skill, the docs or the site describes a `local` workflow — read its `params` and ask your human what it's for rather than assuming it behaves like the shipped one whose name it resembles.
+
 ## Make an image
 
 ```bash

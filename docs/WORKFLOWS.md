@@ -10,8 +10,8 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 
 | Workflow | Task | What it does |
 |---|---|---|
-| `flux2_base` | Text → Image | Text-to-image with the FLUX.2 base model |
-| `flux2_lora` | Text → Image | Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt |
+| `flux2_dev_lora` | Text → Image | Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt |
+| `flux2_klein` | Text → Image | Text-to-image with FLUX.2 Klein 4B |
 | `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint |
 | `sdxl_lora` | Text → Image | Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt |
 | `text_logo` | Text → Image | Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion |
@@ -26,33 +26,13 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 
 ## Text → Image
 
-### `flux2_base` — FLUX.2 Base Image
-
-Text-to-image with the FLUX.2 base model. High-fidelity stills from a prompt — no LoRA, no source image.
-
-- **Output:** image
-- **Requirements:** ~24 GB VRAM, loads ~48.1 GB of model files (VRAM + system RAM)
-- **Notes:** TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Untested with more system RAM or a 24 GB+ GPU (e.g. RunPod); both reduce spilling. For fast local iteration use SDXL and composite text separately.
-- **Providers:** local, cloud_serverless
-- **Params:**
-  - `prompt` · _str_ · **required** — Text prompt
-  - `width` · _int_ · default `832` — Output width
-  - `height` · _int_ · default `832` — Output height
-  - `seed` · _int_ — Random seed (auto if omitted)
-  - `steps` · _int_ · default `20`
-  - `sampler` · _str_ · default `euler`
-  - `guidance` · _float_ · default `4.0` — FLUX guidance scale
-  - `unet` · _str_ · default `flux2_dev_fp8mixed.safetensors`
-  - `clip` · _str_ · default `mistral_3_small_flux2_fp4_mixed.safetensors`
-  - `vae` · _str_ · default `flux2-vae.safetensors`
-
-### `flux2_lora` — FLUX.2 + LoRA Image
+### `flux2_dev_lora` — FLUX.2 dev + LoRA Image
 
 Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt.
 
 - **Output:** image
 - **Requirements:** supports LoRA, ~24 GB VRAM, loads ~48.1 GB of model files (VRAM + system RAM)
-- **Notes:** TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Untested with more system RAM or a 24 GB+ GPU (e.g. RunPod); both reduce spilling. For fast local iteration use SDXL and composite text separately.
+- **Notes:** Stays on the FLUX.2-dev weights, and a LoRA is bound to the exact variant it was trained on: a dev-trained LoRA will not load into Klein, whose transformer is a different width and block count, so this workflow cannot follow flux2_klein down to the small models. TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Needs a 24 GB+ GPU to run without spilling. For fast local iteration use flux2_klein (Klein 4B) or SDXL.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Text prompt
@@ -67,6 +47,26 @@ Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consist
   - `guidance` · _float_ · default `4.0` — FLUX guidance scale
   - `unet` · _str_ · default `flux2_dev_fp8mixed.safetensors`
   - `clip` · _str_ · default `mistral_3_small_flux2_fp4_mixed.safetensors`
+  - `vae` · _str_ · default `flux2-vae.safetensors`
+
+### `flux2_klein` — FLUX.2 Klein Image
+
+Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt — no LoRA, no source image.
+
+- **Output:** image
+- **Requirements:** ~8 GB VRAM, loads ~8.3 GB of model files (VRAM + system RAM)
+- **Notes:** Defaults to FLUX.2 Klein 4B fp8 (4.07 GB) plus the fp4 Qwen3-4B encoder (3.85 GB), about 8.3 GB of weights with the VAE. Klein is the distilled line and renders in 4 steps. TESTED 2026-09-19 at 1024x1024, 4 steps, same prompt and seed on both cards: fp8 on an 8 GB RTX 2060 Super took 29 s, bf16 (7.75 GB) on a 12 GB RTX 4070 Ti took 37 s, and the two outputs are visually identical — fp8 costs nothing here. The unet and clip params reach any FLUX.2 weights present on the node; FLUX.2-dev (35 GB fp8 plus a 12 GB Mistral encoder) wants 24 GB VRAM and spills badly below that — 32 min for a single image on the 4070 Ti — so dev belongs on flux2_dev_lora, the only workflow the dev-trained LoRAs load into.
+- **Providers:** local, cloud_serverless
+- **Params:**
+  - `prompt` · _str_ · **required** — Text prompt
+  - `width` · _int_ · default `832` — Output width
+  - `height` · _int_ · default `832` — Output height
+  - `seed` · _int_ — Random seed (auto if omitted)
+  - `steps` · _int_ · default `4` — Klein is distilled to 4 steps; raise it only when running undistilled FLUX.2 weights through the unet param
+  - `sampler` · _str_ · default `euler`
+  - `guidance` · _float_ · default `4.0` — FLUX guidance scale
+  - `unet` · _str_ · default `flux-2-klein-4b-fp8.safetensors`
+  - `clip` · _str_ · default `qwen_3_4b_fp4_flux2.safetensors`
   - `vae` · _str_ · default `flux2-vae.safetensors`
 
 ### `sdxl_base` — SDXL Base Image

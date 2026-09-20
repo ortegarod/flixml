@@ -28,6 +28,32 @@ export interface MediaItem {
   // Base model and LoRA files the producing job's ComfyUI graph loaded.
   models?: string[];
   loras?: string[];
+  // What the node actually ran with, read back from the submitted graph. Params the
+  // caller left at a default are missing from `metadata` but present here.
+  settings?: GraphSettings | null;
+}
+
+// One sampling pass. Wan runs two over the same latent — high noise, then low — so a
+// clip legitimately carries two sets of steps and CFG.
+export interface SamplerPass {
+  seed?: number;
+  steps?: number;
+  cfg?: number;
+  sampler?: string;
+  scheduler?: string;
+  denoise?: number;
+  shift?: number;
+  start_step?: number;
+  end_step?: number;
+}
+
+export interface GraphSettings {
+  passes?: SamplerPass[];
+  width?: number;
+  height?: number;
+  frames?: number;
+  fps?: number;
+  loras?: Array<{ name: string; strength?: number }>;
 }
 
 export interface LoraTrainingStatus {

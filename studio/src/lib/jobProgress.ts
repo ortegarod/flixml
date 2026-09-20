@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { JobItem } from "../types";
-import type { WorkflowMeta } from "../components/sidebar/GenerateTab";
+import type { WorkflowMeta } from "../components/sidebar/WorkflowsTab";
 
 /** Statuses that mean the job hasn't produced its output yet. */
 export const ACTIVE_STATUSES = new Set(["pending", "queued", "running", "in_progress"]);
