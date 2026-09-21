@@ -36,8 +36,8 @@
     },
     "length": {
       "type": "int",
-      "default": 49,
-      "description": "Frame count (must be 4k+1, e.g. 33/49/65/81)"
+      "default": 81,
+      "description": "Frame count, must be 4n+1 (33/49/65/81). Default 81 is the length Wan itself ships and generates at: wan_shared_cfg.frame_num = 81 with sample_fps = 16 in wan/configs/shared_config.py, i.e. 5.06 s. The 4n+1 rule is the authors' too - generate.py --frame_num help: \"How many frames of video are generated. The number should be 4n+1\". Source: github.com/Wan-Video/Wan2.2, both files read 2026-09-21. Going past 81 in this single-window workflow is untested here; use wan22_i2v_context for longer clips."
     },
     "fps": {
       "type": "int",
@@ -49,23 +49,23 @@
     },
     "steps_high": {
       "type": "int",
-      "default": 3,
-      "description": "3+3=6 total. Motion comes from LoRA strength and CFG, not step count: the Lightning LoRA is CFG-distilled and flattens motion at full strength, so extra steps buy a slower near-still clip, not a livelier one. Measured here at 176 s median against 328 s for the old 30-step CFG-1 config, with more motion."
+      "default": 2,
+      "description": "2+2=4 total. The model authors' published value, not one we tuned. The Lightning LoRA is step-distilled: it was trained on the noise schedule a 4-step run produces, and ComfyUI derives its sigma spacing from the step count you pass, so any other count denoises at noise levels the LoRA never saw. That shows up as rising contrast and a light that blooms across the clip. Source: lightx2v/Wan2.2-Lightning, official native-ComfyUI workflow Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1-NativeComfy.json — steps 4, split 0-2 / 2-4."
     },
     "steps_low": {
       "type": "int",
-      "default": 3,
-      "description": "See steps_high. 3+3=6 total."
+      "default": 2,
+      "description": "See steps_high. 2+2=4 total, per the authors' workflow."
     },
     "total_steps": {
       "type": "int",
-      "default": 6,
-      "description": "steps_high + steps_low; passed to KSamplerAdvanced.steps"
+      "default": 4,
+      "description": "steps_high + steps_low; passed to KSamplerAdvanced.steps. Fixed by what the distillation was trained on, not by quality preference — changing it means changing the LoRA."
     },
     "cfg_high": {
       "type": "float",
-      "default": 3.5,
-      "description": "Real CFG on the high-noise stage is what buys motion fluidity and shape definition. It also switches the negative prompt on: at 1.0 there is no unconditional branch, so negative_prompt is never evaluated."
+      "default": 1.0,
+      "description": "1.0 on both stages. The Lightning LoRA is CFG-distilled — there is no unconditional branch to guide, and raising CFG pushes it off its trained trajectory. Source: lightx2v/Wan2.2-Lightning official native-ComfyUI workflow, cfg 1 on both KSamplerAdvanced nodes. Consequence: negative_prompt is inert here, because at CFG 1.0 nothing evaluates it."
     },
     "cfg_low": {
       "type": "float",
@@ -114,8 +114,8 @@
     },
     "high_lora_strength": {
       "type": "float",
-      "default": 0.5,
-      "description": "Hold at ~0.5. At 1.0 the Lightning LoRA produces the well-known slow-motion artifact and flattens the action."
+      "default": 1.0,
+      "description": "1.0, same as low_lora_strength. Source: lightx2v/Wan2.2-Lightning official native-ComfyUI workflow — both LoraLoaderModelOnly nodes at 1.0. Lowering it to fight the Lightning slow-motion artifact is a community recipe, not the authors': it weakens the distillation that the 4-step schedule assumes, and we measured the cost on 2026-09-21 as a light blooming across the clip. If motion is flat, change the start frame or the action, not this."
     },
     "high_lora_2": {
       "type": "str",

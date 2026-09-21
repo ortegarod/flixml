@@ -4,7 +4,7 @@ import { PendingMediaTile } from "./PendingMediaTile";
 import { MediaTile } from "./MediaTile";
 import { GalleryTable, type GalleryEntry } from "./GalleryTable";
 import { generateVideo } from "../api";
-import type { CharacterSummary, JobItem, MediaItem } from "../types";
+import type { CharacterSummary, JobItem, MediaItem, MediaMetadataPatch } from "../types";
 
 type Filter = "all" | "images" | "videos";
 type ViewSize = "compact" | "comfortable" | "large";
@@ -37,7 +37,7 @@ interface StudioViewProps {
   trainingDatasetOnly: boolean;
   onTrainingDatasetOnlyChange: (enabled: boolean) => void;
   onBulkDelete: (items: MediaItem[]) => Promise<void>;
-  onBulkUpdateMetadata: (items: MediaItem[], patcher: (item: MediaItem) => { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => Promise<void>;
+  onBulkUpdateMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
   onImported?: () => Promise<void> | void;
 }
 
@@ -314,8 +314,11 @@ export function StudioView({
         </button>
       </section>
 
-      {/* One row of what's used constantly; everything occasional sits behind Filters. */}
-      <section className="rounded-2xl border border-gray-800/60 bg-gray-950/50 p-2.5">
+      {/* One row of what's used constantly; everything occasional sits behind Filters.
+          It sticks to the top of the scroll pane: search, filters and Select have to be
+          reachable a thousand tiles down, not only before the first scroll. */}
+      <section className="sticky top-0 z-30 -mx-5 -mt-1 bg-black/80 px-5 pb-2 pt-1 backdrop-blur-xl lg:-mx-7 lg:px-7">
+        <div className="rounded-2xl border border-gray-800/60 bg-gray-950/80 p-2.5">
         {selectionMode ? (
           <div className="flex flex-wrap items-center gap-2">
             <span className="px-1 text-xs font-medium text-gray-200">
@@ -499,6 +502,7 @@ export function StudioView({
               Clear filters
             </button>
           )}
+        </div>
         </div>
       </section>
 

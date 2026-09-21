@@ -1,12 +1,15 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, ShieldCheck } from "lucide-react";
+import { LogOut, ShieldCheck, UserCircle } from "lucide-react";
 import { Button } from "./ui/button";
 
 export interface SessionAgent {
   id: string;
   name: string;
   is_admin: boolean;
+  // A media filename under the output dir, rendered through /api/thumb. Null until
+  // the account picks one on its profile page.
+  avatar: string | null;
 }
 
 export interface SessionInfo {
@@ -71,6 +74,7 @@ export function SettingsPage() {
 
 export function AccountSettings() {
   const { data: session, isLoading, error } = useSession();
+  const navigate = useNavigate();
 
   if (isLoading) return <p className="text-sm text-gray-400">Loading…</p>;
   if (error) return <p role="alert" className="text-sm text-red-300">{(error as Error).message}</p>;
@@ -112,10 +116,16 @@ export function AccountSettings() {
             Studio stores only a hash of each key, so it can't show your key again. If you've lost it, an admin can issue a
             new one under API keys.
           </p>
-          <Button type="button" variant="outline" onClick={signOut}>
-            <LogOut aria-hidden />
-            Sign out
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => navigate(`/studio/agents/${agent.id}`)}>
+              <UserCircle aria-hidden />
+              View profile
+            </Button>
+            <Button type="button" variant="outline" onClick={signOut}>
+              <LogOut aria-hidden />
+              Sign out
+            </Button>
+          </div>
         </>
       ) : (
         <p className="text-sm text-gray-400">

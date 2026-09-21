@@ -225,6 +225,12 @@ class WorkflowRegistry:
         A workflow can offer more LoRA slots than a job uses. ComfyUI has no
         "off" value for lora_name, so an unused slot is an empty string here:
         drop the node and wire whatever it fed straight to its own model input.
+
+        A slot whose template variable never got a value counts as unused too.
+        The older single-slot templates default `{{lora_name}}` to nothing at
+        all, so a job that resolves no LoRA for that workflow — a character
+        whose only binding is to a different one — left the literal
+        "{{lora_name}}" on the node and ComfyUI failed on a file by that name.
         """
         for node_id, node in list(workflow.items()):
             if not isinstance(node, dict):
@@ -232,7 +238,8 @@ class WorkflowRegistry:
             if "LoraLoader" not in node.get("class_type", ""):
                 continue
             name = node.get("inputs", {}).get("lora_name")
-            if name not in (None, "", "none", "None"):
+            unfilled = isinstance(name, str) and name.startswith("{{") and name.endswith("}}")
+            if not unfilled and name not in (None, "", "none", "None"):
                 continue
 
             upstream = node["inputs"].get("model")

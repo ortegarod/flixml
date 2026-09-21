@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import db
@@ -45,9 +46,18 @@ bearer_scheme = HTTPBearer(
 # Routes a non-admin key can't use at all: key management, and LoRA training, which rents
 # GPUs and reads every dataset.
 _ADMIN_ONLY_PREFIXES = ("/api/agents", "/api/lora-training")
+# The one route under those prefixes a non-admin key may call: its own account profile.
+# Matched whole, not by prefix or suffix, so nothing else under /api/agents/ slips through;
+# the route still refuses a scoped caller asking about an account that isn't its own.
+_ADMIN_EXEMPT = re.compile(r"^/api/agents/[^/]+/profile$")
 # ComfyUI passthrough roots that describe the install rather than anyone's jobs.
 # history, queue, prompt and view expose every caller's prompts and outputs.
 _COMFY_DISCOVERY_ROOTS = ("system_stats", "object_info", "models", "features")
+
+
+def set_session_cookie(response: Response, raw_key: str) -> None:
+    """Sign the browser in with this key. Signing in and rotating your own key both land here."""
+    response.set_cookie(SESSION_COOKIE, raw_key, max_age=365 * 24 * 3600, httponly=True, samesite="lax")
 
 
 def hash_key(raw_key: str) -> str:
@@ -66,12 +76,14 @@ class Agent:
         self.id: str = row["id"]
         self.name: str = row["name"]
         self.is_admin: bool = bool(row.get("is_admin"))
+        # The public half of the row — the header shows it, so the session carries it.
+        self.avatar: str | None = row.get("avatar")
         self.allowed_characters: list[str] | None = row.get("allowed_characters") or None
         self.allowed_workflows: list[str] | None = row.get("allowed_workflows") or None
         self.max_concurrent_jobs: int | None = row.get("max_concurrent_jobs")
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "is_admin": self.is_admin}
+        return {"id": self.id, "name": self.name, "is_admin": self.is_admin, "avatar": self.avatar}
 
     def require_workflow(self, workflow: str) -> None:
         if self.allowed_workflows and workflow not in self.allowed_workflows:
@@ -171,7 +183,7 @@ async def authorize(
         return
 
     params = request.path_params
-    if path.startswith(_ADMIN_ONLY_PREFIXES):
+    if path.startswith(_ADMIN_ONLY_PREFIXES) and not _ADMIN_EXEMPT.match(path):
         raise HTTPException(status_code=403, detail="Requires an admin key")
     if path.startswith("/api/comfy/") and not params.get("path", "").startswith(_COMFY_DISCOVERY_ROOTS):
         raise HTTPException(status_code=403, detail="Requires an admin key")

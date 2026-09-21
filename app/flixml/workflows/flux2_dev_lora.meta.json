@@ -15,7 +15,7 @@
     "prompt": {
       "type": "str",
       "required": true,
-      "description": "Text prompt"
+      "description": "Natural language, written as sentences — FLUX.2 reads a description, not a tag list, and word order is weight, so lead with the subject and close with atmosphere. Subject, action, style, context; 30-80 words for most shots. There is no negative prompt in FLUX.2: describe what you want ('sharp focus throughout'), never what you don't. A camera, lens or film stock buys more photorealism than the word 'professional'. With a character LoRA loaded, put its trigger word at the front and then describe only what the LoRA doesn't carry — pose, clothing, setting, light. Re-describing a face the LoRA was trained on works against it."
     },
     "loras": {
       "type": "list",

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Check, Copy, KeyRound, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
@@ -310,6 +311,13 @@ export function ApiKeysPage() {
             Give each agent its own key. It sends the key as <code className="font-mono text-gray-300">Authorization: Bearer &lt;key&gt;</code>. An admin key sees everything. Any other key sees only the images, videos, jobs
             and projects it creates, and only the characters and workflows you allow.
           </p>
+          <p className="text-sm text-gray-500">
+            This page is the key half of an account.{" "}
+            <Link to="/studio/agents" className="text-gray-300 underline underline-offset-4 hover:text-white">
+              Accounts
+            </Link>{" "}
+            is the public half — who each one is and what they've made.
+          </p>
         </div>
         {!creating && (
           <Button type="button" onClick={() => { setCreating(true); setEditing(null); setRevealed(null); }}>
@@ -358,7 +366,10 @@ export function ApiKeysPage() {
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-100">
-                      {agent.name}
+                      {/* This list is the only place every account is named, so it's also the way into each profile. */}
+                      <Link to={`/studio/agents/${agent.id}`} className="rounded text-gray-100 underline-offset-4 hover:text-white hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
+                        {agent.name}
+                      </Link>
                       <span className="font-mono text-xs font-normal text-gray-400">{agent.id}</span>
                       {agent.is_admin && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-200">
@@ -380,7 +391,9 @@ export function ApiKeysPage() {
                     <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
                       <span>
                         {confirm === "rotate"
-                          ? "Replace this key? The current one stops working immediately."
+                          ? isMe
+                            ? "Replace your key? The current one stops working immediately, and this tab switches to the new one."
+                            : "Replace this key? The current one stops working immediately."
                           : "Delete this agent and its key? What it made stays, visible to admins."}
                       </span>
                       <Button
@@ -408,11 +421,13 @@ export function ApiKeysPage() {
                       <Button type="button" size="sm" variant="outline" aria-expanded={editing === agent.id} onClick={() => { setEditing(editing === agent.id ? null : agent.id); setCreating(false); }}>
                         Edit
                       </Button>
+                      {/* Rotating is offered on your own row too: a key can't be read back, so
+                          replacing it is the only way to get a copy for another machine. */}
+                      <Button type="button" size="sm" variant="outline" onClick={() => setConfirming({ id: agent.id, action: "rotate" })}>
+                        New key
+                      </Button>
                       {!isMe && (
                         <>
-                          <Button type="button" size="sm" variant="outline" onClick={() => setConfirming({ id: agent.id, action: "rotate" })}>
-                            New key
-                          </Button>
                           <Button
                             type="button"
                             size="sm"

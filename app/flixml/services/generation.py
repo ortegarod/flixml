@@ -175,7 +175,13 @@ class GenerationService:
             supports_lora=req.get("supports_lora", False),
         )
 
-        gpu_provider = get_provider(provider)
+        try:
+            gpu_provider = get_provider(provider)
+        except KeyError as e:
+            # The factory speaks in KeyError; unhandled it reaches the caller as a 500 for
+            # what is a caller mistake. The id is `local-<node>` (GET /api/providers), not
+            # the node's own name, and that is exactly the typo this catches.
+            raise ProviderNotFoundError(str(e).strip("'")) from e
 
         # Hard routing guard: a caller may choose a provider, but it must be
         # compatible with the workflow and its output role. This prevents video
@@ -235,7 +241,18 @@ class GenerationService:
         # Workflow-specific params
         if workflow_params:
             template_params.update(workflow_params)
-        
+
+        # Bridge the resolved LoRA list to the template slots. Callers build `loras`
+        # as a list of {name, strength} — one entry per character — but the templates
+        # take a single `{{lora_name}}`/`{{lora_strength}}` pair. Without this the
+        # placeholder never substitutes and the LoraLoader node ships the literal
+        # "{{lora_name}}" as its filename. Explicit params still win.
+        first_lora = next(iter(template_params.get("loras") or []), None)
+        if first_lora and first_lora.get("name"):
+            template_params.setdefault("lora_name", first_lora["name"])
+            if first_lora.get("strength") is not None:
+                template_params.setdefault("lora_strength", first_lora["strength"])
+
         # Compute derived values for templates
         if "steps_high" in template_params and "steps_low" in template_params:
             template_params["total_steps"] = template_params["steps_high"] + template_params["steps_low"]
