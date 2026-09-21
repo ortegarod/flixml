@@ -21,14 +21,14 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Requ
 from fastapi import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_read_file, current_agent, generate_key, hash_key, owner_scope, owns
+from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_read_file, current_agent, generate_key, hash_key, owner_scope, owns, set_session_cookie
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
 from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_examples, workflow_run_times
-from .workflows.registry import init_registry, get_registry
+from .workflows.registry import WorkflowMetadata, init_registry, get_registry
 from .providers import init_default_providers, list_providers
-from .services import GenerationService, GenerationError, WorkflowNotFoundError
+from .services import GenerationService, GenerationError, ProviderNotFoundError, WorkflowNotFoundError
 
 
 async def _generate_tts(
@@ -184,7 +184,7 @@ async def sign_in(body: SessionRequest, response: Response) -> dict[str, Any]:
     agent = await agent_for_key(body.key.strip())
     if agent is None:
         raise HTTPException(status_code=401, detail="Invalid or revoked API key")
-    response.set_cookie(SESSION_COOKIE, body.key.strip(), max_age=365 * 24 * 3600, httponly=True, samesite="lax")
+    set_session_cookie(response, body.key.strip())
     return {"agent": agent.to_dict()}
 
 
@@ -210,6 +210,8 @@ class AgentRecord(BaseModel):
     max_concurrent_jobs: int | None
     created_at: datetime
     last_used_at: datetime | None
+    avatar: str | None = None
+    bio: str | None = None
 
 
 class AgentCreateRequest(BaseModel):
@@ -260,6 +262,32 @@ async def list_agent_keys() -> list[AgentRecord]:
     return [_agent_record(row) for row in await db.list_agents()]
 
 
+@app.get("/api/agents/directory")
+async def agents_directory() -> dict[str, Any]:
+    """Every account and what it made — the index behind /studio/agents. Admin keys only.
+
+    The same public fields `/api/agents/{id}/profile` returns, for all accounts at once,
+    and nothing from the key half of the row. Accounts whose key was deleted still
+    appear while their media does, because the profile page still answers for them.
+    """
+    counts = await db.media_counts_by_owner()
+    rows = {row["id"]: row for row in await db.list_agents()}
+    accounts = []
+    for account_id in [*rows, *(owner for owner in counts if owner not in rows)]:
+        row = rows.get(account_id)
+        made = counts.get(account_id, {"images": 0, "videos": 0})
+        accounts.append({
+            "id": account_id,
+            "name": (row or {}).get("name") or account_id,
+            "avatar": (row or {}).get("avatar"),
+            "bio": (row or {}).get("bio"),
+            "created_at": (row or {}).get("created_at"),
+            "deleted": row is None,
+            "counts": {**made, "total": made["images"] + made["videos"]},
+        })
+    return {"accounts": accounts}
+
+
 @app.post("/api/agents", response_model=AgentKeyResponse)
 async def create_agent_key(body: AgentCreateRequest) -> AgentKeyResponse:
     """Create an agent and its API key. The key is in this response only. Admin keys only."""
@@ -295,13 +323,96 @@ async def update_agent_key(agent_id: str, body: AgentUpdateRequest, request: Req
 
 
 @app.post("/api/agents/{agent_id}/rotate", response_model=AgentKeyResponse)
-async def rotate_agent_key(agent_id: str, request: Request) -> AgentKeyResponse:
-    """Replace an agent's key. The old key stops working now; the new one is shown once. Admin keys only."""
+async def rotate_agent_key(agent_id: str, request: Request, response: Response) -> AgentKeyResponse:
+    """Replace an agent's key. The old key stops working now; the new one is shown once. Admin keys only.
+
+    Rotating your own key is allowed: the replacement comes back in this response, so it
+    hands your access over rather than taking it away. That is the only way to get a
+    readable copy of your own key again — Studio stores a hash, never the key. A browser
+    signed in with the cookie gets the cookie rewritten to the new key here, so the tab
+    that rotated stays signed in.
+    """
     await _existing_agent(agent_id)
-    _refuse_self_lockout(current_agent(request), agent_id, "rotate")
     raw_key = generate_key()
     await db.set_agent_key_hash(agent_id, hash_key(raw_key))
+    caller = current_agent(request)
+    if caller is not None and caller.id == agent_id and request.cookies.get(SESSION_COOKIE):
+        set_session_cookie(response, raw_key)
     return AgentKeyResponse(agent=_agent_record(await _existing_agent(agent_id)), key=raw_key)
+
+
+class AgentProfileUpdate(BaseModel):
+    """The public half of an account: the parts its own key may change."""
+
+    avatar: str | None = None
+    bio: str | None = Field(default=None, max_length=280)
+
+
+@app.patch("/api/agents/{agent_id}/profile")
+async def update_agent_profile(
+    agent_id: str,
+    body: AgentProfileUpdate,
+    agent: Agent | None = Depends(current_agent),
+) -> dict[str, Any]:
+    """Set an account's picture or bio. Its own key, or an admin key.
+
+    The avatar is a media filename the account can read, checked here — a profile
+    picture is never a way to point at someone else's file.
+    """
+    scope = owner_scope(agent)
+    if scope is not None and scope != agent_id:
+        raise HTTPException(status_code=404, detail="Account not found")
+    await _existing_agent(agent_id)
+
+    fields = body.model_dump(exclude_unset=True)
+    avatar = fields.get("avatar")
+    if avatar:
+        avatar = avatar.lstrip("/")
+        # Both halves matter: the row has to exist (an admin can reach any file, so
+        # can_read_file alone would accept a typo) and the caller has to be able to see it.
+        if await db.get_media_by_filename(avatar) is None or not await can_read_file(agent, avatar):
+            raise HTTPException(status_code=404, detail=f"File not found: {avatar}")
+        fields["avatar"] = avatar
+    if "bio" in fields and fields["bio"] is not None:
+        fields["bio"] = fields["bio"].strip() or None
+    if fields:
+        await db.update_agent(agent_id, fields)
+    return {"ok": True, "id": agent_id, **fields}
+
+
+@app.get("/api/agents/{agent_id}/profile")
+async def agent_profile(agent_id: str, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """Public profile for an account: who it is and how much it made.
+
+    Readable by any caller for its own id, and by admin keys for anyone — unlike the rest
+    of `/api/agents`, which is key management. Carries nothing secret: no key hash, no
+    scope lists. An account whose key was deleted keeps its page, because what it made
+    stays.
+    """
+    scope = owner_scope(agent)
+    if scope is not None and scope != agent_id:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    row = await db.get_agent(agent_id)
+    counts = {
+        "images": await media_count(type_filter="image", owner_id=agent_id),
+        "videos": await media_count(type_filter="video", owner_id=agent_id),
+    }
+    counts["total"] = counts["images"] + counts["videos"]
+    if row is None and counts["total"] == 0:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    return {
+        "account": {
+            "id": agent_id,
+            "name": (row or {}).get("name") or agent_id,
+            "avatar": (row or {}).get("avatar"),
+            "bio": (row or {}).get("bio"),
+            "created_at": (row or {}).get("created_at"),
+            "deleted": row is None,
+        },
+        "counts": counts,
+    }
 
 
 @app.delete("/api/agents/{agent_id}")
@@ -505,6 +616,11 @@ class VideoGenerateRequest(BaseModel):
         json_schema_extra={"examples": ["videos/motion-01.mp4"]},
     )
     negative: str | None = Field(default=None, json_schema_extra={"examples": ["blurry, low quality"]})
+    description: str | None = Field(
+        default=None,
+        description="Optional caption for the finished clip — what it is, for a human reading the gallery. Not sent to the model.",
+        json_schema_extra={"examples": ["The ridge shot, take 3 — the one where the light held"]},
+    )
     # All generation knobs below default to None → the workflow's meta.json default applies.
     # The workflow meta.json is the SINGLE SOURCE OF TRUTH for per-workflow defaults — do not
     # reintroduce hardcoded numbers here. Only values the caller explicitly sets override the meta.
@@ -605,6 +721,11 @@ class ImageGenerateRequest(BaseModel):
         json_schema_extra={"examples": ["portrait of a woman, natural window light, sharp focus"]},
     )
     negative: str | None = Field(default=None, json_schema_extra={"examples": ["blurry, low quality, watermark"]})
+    description: str | None = Field(
+        default=None,
+        description="Optional caption for the finished image — what it is, for a human reading the gallery. Not sent to the model.",
+        json_schema_extra={"examples": ["The ridge at dusk, second pass"]},
+    )
     width: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
     height: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
     seed: int | None = None
@@ -629,7 +750,7 @@ class ImageGenerateRequest(BaseModel):
     )
     checkpoint: str | None = Field(
         default=None,
-        description="Base model filename for workflows with a `checkpoint` param (list: GET /api/comfy/models/checkpoints).",
+        description="Base model filename for workflows with a `checkpoint` param (list: GET /api/comfy/models/checkpoints?provider=<the provider you are submitting to>).",
         json_schema_extra={"examples": ["sd_xl_base_1.0.safetensors"]},
     )
     workflow_params: dict[str, Any] | None = Field(
@@ -835,12 +956,20 @@ _ABANDON_AFTER_SECONDS = 600
 _RUNNING_STATUSES = {"running", "in_progress"}
 
 
-async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]:
+async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: str | None = None) -> dict[str, Any]:
     """Bring one job's DB row in line with its ComfyUI node.
 
     The single reconciliation path in the app: both the polling loop and
     GET /api/jobs/{prompt_id} go through here, so a job's status can only ever be
     decided in one place.
+
+    `stored_status` is the status already held in our DB. A job we have recorded as
+    completed has had its outputs imported once, and importing them again is what
+    resurrected deleted images: the node keeps the job in /history forever, so every
+    poll of a completed job's detail re-downloaded the files a user had just deleted
+    and re-inserted their media rows (2026-09-21: 49 deleted files came back inside
+    three minutes of ordinary gallery polling).
+    Import is a one-time step on the way to completed, never a repeated one after it.
     """
     client = comfy(comfy_node_for_provider(provider))
     error: str | None = None
@@ -877,7 +1006,7 @@ async def _reconcile_job(prompt_id: str, provider: str | None) -> dict[str, Any]
 
     # ComfyUI saying "completed" means generation finished, not that we hold the files.
     # Only report completed once _persist_outputs has actually imported them.
-    if status == "completed" and outputs:
+    if status == "completed" and outputs and stored_status != "completed":
         status = "completed" if await _persist_outputs(prompt_id, outputs) else "running"
 
     if status in {"pending", "running", "completed", "failed"}:
@@ -926,7 +1055,7 @@ async def _reconcile_loop() -> None:
                 if not isinstance(prompt_id, str):
                     continue
                 try:
-                    result = await _reconcile_job(prompt_id, job.get("provider"))
+                    result = await _reconcile_job(prompt_id, job.get("provider"), job.get("status"))
                 except Exception:
                     logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
                     continue
@@ -942,9 +1071,71 @@ async def _reconcile_loop() -> None:
         await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
 
 
+# The rest of the route, once a caller is looking at one workflow's params and has to
+# turn them into a finished job. It rides on the single-workflow response only: the
+# catalog is a list and stays a list, and nothing here is worth repeating sixteen
+# times. Nothing in Studio's own UI reads this route, so it can say as much as an
+# agent arriving without the guide needs.
+_AFTER_PARAMS = {
+    "nodes": "GET /api/nodes — which GPU nodes are up and how much VRAM each has. Check it against this workflow's requirements.vram_gb.",
+    "models": "GET /api/comfy/models/checkpoints?provider=<provider> — the checkpoint filenames installed on that node, if this workflow's params include `checkpoint`.",
+    "upload": "POST /api/images/upload — put a source image on the server first, if this workflow's params include `image`.",
+    "status": "GET /api/jobs/{prompt_id} — the submitted job's progress, and its output files once it finishes.",
+    "guide": "GET /api/guide — this install's agent guide as Markdown: how the pieces fit together, and where the docs are.",
+}
+
+
+def _workflow_entry(
+    w: WorkflowMetadata,
+    run_times: dict[str, Any],
+    examples: dict[str, Any],
+) -> dict:
+    """One workflow's full record: its metadata, plus what this install measured."""
+    entry = w.to_dict()
+    by_provider = run_times.get(w.id)
+    entry["run_time"] = {"by_provider": by_provider} if by_provider else None
+    example = examples.get(w.id)
+    entry["example"] = (
+        {**example, "url": f"/media/{example['filename']}", "thumb": f"/api/thumb/{example['filename']}"}
+        if example
+        else None
+    )
+    # One plain link, so a caller that lands on the catalog cold can see there is more
+    # and where it is. Everything else a caller might want here is derivable from what
+    # the entry already says, and a derived value repeated on every row is noise.
+    entry["details"] = f"/api/workflows/{w.id}"
+    return entry
+
+
+def _summarize(entry: dict) -> dict:
+    """Strip a workflow entry down to what picking between workflows needs.
+
+    Two fields go: `params`, and the `notes` inside `requirements`. Both are prose
+    about driving one workflow — how a param behaves, what a run measured — and both
+    are long on purpose. Neither helps a caller choose, so they live on the detail
+    route and the list says where that is.
+    """
+    summary = {k: v for k, v in entry.items() if k != "params"}
+    requirements = summary.get("requirements")
+    if isinstance(requirements, dict) and "notes" in requirements:
+        summary["requirements"] = {k: v for k, v in requirements.items() if k != "notes"}
+    return summary
+
+
 @app.get("/api/workflows")
-async def list_workflows(agent: Agent | None = Depends(current_agent)) -> list[dict]:
-    """List all available workflows an agent can request, including each one's params.
+async def list_workflows(
+    view: str | None = None, agent: Agent | None = Depends(current_agent)
+) -> list[dict]:
+    """Every workflow an agent can request, without their params.
+
+    A list, and it stays a list — Studio's own workflows sidebar reads this route, so
+    the shape it returns does not move. Each entry carries what choosing between
+    workflows needs: what it makes, what it needs to run, how long it took here, one
+    thing it produced, and a `details` link. Follow `details` for the workflow you
+    chose — that response has its params and every remaining call.
+
+    Pass `?view=full` to get every workflow's params in this response instead of
+    fetching them one at a time.
 
     `run_time` holds measured run times per node from this install's recent completed
     jobs, or null if the workflow has never finished here. Times reflect the params
@@ -956,25 +1147,49 @@ async def list_workflows(agent: Agent | None = Depends(current_agent)) -> list[d
 
     `source` is `shipped` for the workflows FlixML ships and documents, or `local` for
     one the operator dropped into `workflows/local/` on their own install. Nothing in
-    the docs or on flixml.com describes a `local` workflow: read its `params` rather
+    the docs or on flixml.com describes a `local` workflow: read its params rather
     than assuming it behaves like the shipped one whose name it resembles.
     """
     registry = get_registry()
     run_times = await workflow_run_times()
     examples = await workflow_examples(owner_id=owner_scope(agent))
-    workflows = []
-    for w in registry.list_workflows():
-        entry = w.to_dict()
-        by_provider = run_times.get(w.id)
-        entry["run_time"] = {"by_provider": by_provider} if by_provider else None
-        example = examples.get(w.id)
-        entry["example"] = (
-            {**example, "url": f"/media/{example['filename']}", "thumb": f"/api/thumb/{example['filename']}"}
-            if example
-            else None
+    entries = [_workflow_entry(w, run_times, examples) for w in registry.list_workflows()]
+    if view == "full":
+        return entries
+    return [_summarize(e) for e in entries]
+
+
+@app.get("/api/workflows/{workflow_id}")
+async def get_workflow(
+    workflow_id: str, agent: Agent | None = Depends(current_agent)
+) -> dict:
+    """One workflow's complete record — every param, and the rest of the route.
+
+    This is what to read once `GET /api/workflows` has told you which workflow you
+    want. `params` gives each input's type, whether it is required, its default, and
+    what the value does; `requirements.notes` carries what this workflow measured on
+    real hardware. Both are long because driving a workflow well needs them.
+
+    `next` names every call left between here and a finished job — where to check the
+    nodes, list checkpoints, upload a source image, submit, and poll. Nothing in the
+    Studio UI reads this route, so it can say as much as an agent needs.
+    """
+    registry = get_registry()
+    w = registry.get(workflow_id)
+    if w is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown workflow '{workflow_id}'. Available: {', '.join(sorted(x.id for x in registry.list_workflows()))}",
         )
-        workflows.append(entry)
-    return workflows
+    run_times = await workflow_run_times()
+    examples = await workflow_examples(owner_id=owner_scope(agent))
+    entry = _workflow_entry(w, run_times, examples)
+    entry.pop("details", None)  # you are already here
+    entry["next"] = {
+        "generate": "POST /api/video/generate" if w.output_type == "video" else "POST /api/image/generate",
+        **_AFTER_PARAMS,
+    }
+    return entry
 
 
 @app.get("/api/providers")
@@ -1332,6 +1547,7 @@ async def character_media(character_id: str, offset: int = 0, limit: int = 60, a
             "url": f"/media/{filename}",
             "thumb": f"/api/thumb/{filename}",
             "prompt": row.get("prompt"),
+            "description": row.get("description"),
             "prompt_id": row.get("prompt_id"),
             "character_ids": row.get("character_ids") or [],
             "tags": row.get("tags") or [],
@@ -1559,7 +1775,6 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
     resolved = await _resolve_characters(None, _character_bindings_from_ids(character_ids))
     bindings = [binding for binding, _ in resolved]
     records = [record for _, record in resolved]
-    resolved_prompt = _prompt_with_character_triggers(prompt, records)
     # Determine workflow from the shot (explicit, not inferred from characters)
     workflow = body.workflow
     if agent is not None:
@@ -1570,6 +1785,17 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
     loras = _character_loras(records, workflow, bindings)
     if not loras:
         raise HTTPException(status_code=400, detail=f"No character LoRA resolved for workflow: {workflow}")
+
+    # Same rule as POST /api/image/generate: a trigger word only means something when
+    # that character's LoRA loads for this workflow. A shot with two characters where
+    # only one has a LoRA here used to put the other's given name at the front of the
+    # prompt, where it carries the most weight and the base model renders its own idea
+    # of whoever that is.
+    triggered_ids = {lora.get("character_id") for lora in loras}
+    resolved_prompt = _prompt_with_character_triggers(
+        prompt,
+        [record for record in records if record.get("id") in triggered_ids],
+    )
 
     version_number = await next_shot_version_number(shot_id, "image")
     version_id = _new_id("ver")
@@ -1599,7 +1825,7 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
             submit=True,
         )
         prompt_id = job_handle.job_id  # type: ignore
-    except WorkflowNotFoundError as e:
+    except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -1694,7 +1920,7 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
             submit=True,
         )
         prompt_id = job_handle.job_id
-    except WorkflowNotFoundError as e:
+    except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -2224,12 +2450,24 @@ async def nodes() -> dict[str, Any]:
 
 
 @app.get("/api/comfy/{path:path}")
-async def comfy_get(path: str) -> Any:
-    """Read-only passthrough for Comfy discovery endpoints: models, queue, object_info, history, etc."""
+async def comfy_get(path: str, provider: str | None = None) -> Any:
+    """Read-only passthrough for Comfy discovery endpoints: models, queue, object_info, history, etc.
+
+    `provider` picks the node to ask (see GET /api/providers); without it the answer comes
+    from the default node. On a multi-node install that distinction is the whole point: each
+    node has its own model files, so a checkpoint list read from the wrong node says a file
+    is there when the node you are about to submit to has never seen it.
+    """
     allowed_roots = ("system_stats", "object_info", "models", "queue", "history", "prompt", "features", "view")
     if not path.startswith(allowed_roots):
         raise HTTPException(status_code=403, detail="Only read-only Comfy discovery/status paths are exposed here")
-    return await comfy().get(f"/{path}")
+    node = None
+    if provider:
+        node = comfy_node_for_provider(provider)
+        if node is None:
+            available = ", ".join(f"local-{n.id}" for n in get_settings().comfy_nodes())
+            raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}. Available: {available}")
+    return await comfy(node).get(f"/{path}")
 
 
 @app.post("/api/images/upload")
@@ -2351,7 +2589,7 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
             },
             submit=body.submit,
         )
-    except WorkflowNotFoundError as e:
+    except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -2419,21 +2657,25 @@ async def _download_output_if_missing(output: JobOutput) -> Path | None:
     if target.is_file():
         return target
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Every poll of /api/jobs/{id} runs this, so two polls can overlap on one output.
+    # The tmp name is per-attempt: a shared one let the loser's replace() land on a
+    # file the winner had already renamed away, and the failure path then deleted the
+    # good download (2026-09-21, images/cb8e43bb_00001_.png). The target is never
+    # unlinked on failure either — it is either ours and incomplete (still under tmp)
+    # or someone else's and finished.
+    tmp = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
     try:
         async with httpx.AsyncClient(timeout=get_settings().request_timeout_seconds) as client:
             async with client.stream("GET", output.url) as response:
                 response.raise_for_status()
-                tmp = target.with_suffix(target.suffix + ".tmp")
                 with tmp.open("wb") as fh:
                     async for chunk in response.aiter_bytes():
                         fh.write(chunk)
                 tmp.replace(target)
         return target
     except Exception:
-        target.unlink(missing_ok=True)
-        tmp = target.with_suffix(target.suffix + ".tmp")
         tmp.unlink(missing_ok=True)
-        return None
+        return target if target.is_file() else None
 
 
 async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
@@ -2443,6 +2685,11 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
     """
     first_filename: str | None = None
     job_meta = await get_job(prompt_id) or {}
+    # A caption passed at generate time rides in with the request echo. It lands in
+    # its own column, not left in the metadata blob, so the rail reads it the same
+    # way whether a human typed it afterwards or the caller sent it up front.
+    request_meta = _parse_jsonb(job_meta.get("metadata")) or {}
+    description = request_meta.get("description") if isinstance(request_meta, dict) else None
     for output in outputs:
         rel = _relative_output_path(output)
         target = await _download_output_if_missing(output)
@@ -2470,6 +2717,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
             "prompt_id": prompt_id,
             "source_image": job_meta.get("source_image"),
             "metadata": job_meta.get("metadata"),
+            "description": description,
         })
     if first_filename:
         await update_job_status(prompt_id, "completed", output_filename=first_filename)
@@ -2699,7 +2947,7 @@ async def job(prompt_id: str) -> JobStatusResponse:
     """Get status, outputs and provenance for a single job, reconciled live against its node."""
     record = await get_job(prompt_id) or {}
     provider = record.get("provider")  # _job_row flattens metadata keys to top level
-    result = await _reconcile_job(prompt_id, provider)
+    result = await _reconcile_job(prompt_id, provider, record.get("status"))
     status = result["status"]
     return JobStatusResponse(
         ok=True,
@@ -3217,8 +3465,18 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
     prompt = body.prompt
     if character_base_prompt and character_base_prompt.lower() not in prompt.lower():
         prompt = f"{character_base_prompt}, {prompt}"
-    prompt = _prompt_with_character_triggers(prompt, character_records)
+    # Resolve LoRAs first: a trigger word is the handle a LoRA was trained under,
+    # so it only means something when that character's LoRA actually loads for this
+    # workflow. Injected without one it is just a given name at the front of the
+    # prompt, where it carries the most weight — the base model reads it as an
+    # ordinary word and renders whoever it thinks that name looks like, fighting
+    # the base_prompt behind it.
     loras = _character_loras(character_records, body.workflow, bindings)
+    triggered_ids = {lora.get("character_id") for lora in loras}
+    prompt = _prompt_with_character_triggers(
+        prompt,
+        [record for record in character_records if record.get("id") in triggered_ids],
+    )
 
     checkpoint_name: str | None = None
     checkpoint_lora_name: str | None = None
@@ -3290,9 +3548,10 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
             owner_id=agent.id if agent else None,
+            extra_metadata={"description": body.description} if body.description else None,
             submit=body.submit,
         )
-    except WorkflowNotFoundError as e:
+    except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -3433,14 +3692,18 @@ async def listing(
     character_id: str = "",
     tag: str = "",
     training_dataset: str = "",
+    owner: str = "",
     agent: Agent | None = Depends(current_agent),
 ) -> dict[str, Any]:
     """List generated media from the media table.
 
     This is the source-of-truth catalog for all images and videos managed by
     FlixML Studio. Filters are applied in the database and support pagination,
-    type filtering, free-text search, character/tag scoping, and training
-    dataset selection.
+    type filtering, free-text search, character/tag scoping, training dataset
+    selection, and the account that submitted the job.
+
+    `owner` narrows the result to one account; it never widens it. A key that
+    only sees what it owns stays scoped to itself whatever it asks for.
     """
     type_filter: str | None = None
     if type in {"image", "video"}:
@@ -3449,6 +3712,9 @@ async def listing(
     char_id = character_id.strip() or None
     tag_filter = tag.strip() or None
     training_only = training_dataset.strip().lower() == "true"
+    # A scoped key's own id wins over whatever it asked for; an unscoped caller
+    # gets the account it named, or everything.
+    owner_id = owner_scope(agent) or (owner.strip() or None)
 
     total = await media_count(
         type_filter=type_filter,
@@ -3456,7 +3722,7 @@ async def listing(
         character_id=char_id,
         tag=tag_filter,
         training_dataset=training_only if training_dataset.strip() else None,
-        owner_id=owner_scope(agent),
+        owner_id=owner_id,
     )
     rows = await list_media(
         limit=limit,
@@ -3466,7 +3732,7 @@ async def listing(
         character_id=char_id,
         tag=tag_filter,
         training_dataset=training_only if training_dataset.strip() else None,
-        owner_id=owner_scope(agent),
+        owner_id=owner_id,
     )
 
     items = []
@@ -3491,6 +3757,7 @@ async def listing(
             "thumb": f"/api/thumb/{filename}",
             "prompt": row.get("prompt"),
             "negative_prompt": row.get("negative_prompt"),
+            "description": row.get("description"),
             "prompt_id": row.get("prompt_id"),
             "character_ids": row.get("character_ids") or [],
             "tags": row.get("tags") or [],
@@ -3526,13 +3793,35 @@ async def listing_counts(agent: Agent | None = Depends(current_agent)) -> dict[s
     }
 
 
+async def _resolve_media_ref(rel: str) -> Path | None:
+    """Turn any reference to a media file into a real path under the output dir.
+
+    Most references are already gallery-relative (`images/x.png`) and resolve
+    directly. A job's input image is not: it stores the bare filename ComfyUI
+    was handed, which only resolves through the catalog. Returns None for a
+    traversal attempt or a file that isn't there.
+    """
+    target = _safe_output_path(rel)
+    if target is None:
+        return None
+    if target.is_file():
+        return target
+    if "/" in rel:
+        return None
+    row = await db.find_media_by_basename(rel)
+    if not row:
+        return None
+    found = _safe_output_path(row["filename"])
+    return found if found is not None and found.is_file() else None
+
+
 @app.get("/media/{path:path}")
 async def media(path: str) -> FileResponse:
     """Serve a generated image/video from the output directory with caching headers."""
-    target = _safe_output_path(path)
-    if not target:
+    if _safe_output_path(path) is None:
         raise HTTPException(status_code=403, detail="Access denied")
-    if not target.is_file():
+    target = await _resolve_media_ref(path)
+    if target is None:
         raise HTTPException(status_code=404, detail="Not found")
     stat = target.stat()
     etag = f'W/"{stat.st_mtime_ns}-{stat.st_size}"'
@@ -3555,8 +3844,8 @@ async def media_thumb(path: str) -> FileResponse:
     135 <video> tags to paint frame 0 client-side is what left the gallery full
     of blank tiles.
     """
-    target = _safe_output_path(path)
-    if not target or not target.is_file():
+    target = await _resolve_media_ref(path)
+    if target is None:
         raise HTTPException(status_code=404, detail="Not found")
 
     if target.suffix.lower() not in _VIDEO_SUFFIXES:
@@ -3576,6 +3865,56 @@ async def media_thumb(path: str) -> FileResponse:
         # Fall back to the video itself rather than 500 — the tile can still try.
         return FileResponse(target, headers={"Cache-Control": "private, max-age=3600"})
     return FileResponse(thumb, headers={"Cache-Control": "private, max-age=604800, immutable"})
+
+
+class MediaMetadataPatch(BaseModel):
+    """Everything about an asset a human edits after it exists.
+
+    Every field is optional and omitting one leaves it alone — a PATCH carrying
+    only `tags` must not clear a caption.
+    """
+
+    description: str | None = Field(
+        default=None,
+        description="Caption shown above the filename in the lightbox. Empty string clears it.",
+        json_schema_extra={"examples": ["The ridge at dusk, second pass"]},
+    )
+    tags: list[str] | None = Field(default=None, json_schema_extra={"examples": [["keeper", "portrait"]]})
+    character_ids: list[str] | None = None
+    included_in_training_dataset: bool | None = None
+
+
+@app.patch("/api/media/{path:path}/metadata")
+async def update_media(
+    path: str,
+    body: MediaMetadataPatch,
+    agent: Agent | None = Depends(current_agent),
+) -> dict[str, Any]:
+    """Edit an asset's human-authored fields: caption, tags, subjects, training flag."""
+    if not _safe_output_path(path):
+        raise HTTPException(status_code=403, detail="Access denied")
+    # A row the caller can't see reads as absent rather than forbidden, so one
+    # account can't probe another's filenames by the status code.
+    if not await can_read_file(agent, path) or await db.get_media_by_filename(path) is None:
+        raise HTTPException(status_code=404, detail=f"No media {path}")
+
+    row = await db.update_media_metadata(
+        path,
+        description=body.description,
+        tags=body.tags,
+        character_ids=body.character_ids,
+        included_in_training_dataset=body.included_in_training_dataset,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No media {path}")
+    return {
+        "ok": True,
+        "filename": path,
+        "description": row.get("description"),
+        "tags": row.get("tags") or [],
+        "character_ids": row.get("character_ids") or [],
+        "included_in_training_dataset": row.get("included_in_training_dataset", False),
+    }
 
 
 @app.post("/api/delete")

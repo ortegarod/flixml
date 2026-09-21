@@ -6,6 +6,22 @@
       "weight_dtype": "default"
     }
   },
+  "51": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["12", 0],
+      "lora_name": "{{lora_name}}",
+      "strength_model": "{{lora_strength}}"
+    }
+  },
+  "52": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["51", 0],
+      "lora_name": "{{lora_name_2}}",
+      "strength_model": "{{lora_strength_2}}"
+    }
+  },
   "38": {
     "class_type": "CLIPLoader",
     "inputs": {
@@ -65,7 +81,7 @@
   "22": {
     "class_type": "BasicGuider",
     "inputs": {
-      "model": ["12", 0],
+      "model": ["52", 0],
       "conditioning": ["26", 0]
     }
   },

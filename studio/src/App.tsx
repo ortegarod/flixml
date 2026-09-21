@@ -1,10 +1,13 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useMatch, useNavigate, useParams } from "react-router-dom";
-import { BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, Sparkles, UserCircle } from "lucide-react";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
+import { ArrowUp, BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, Sparkles, UserCircle, Users } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
+import { AgentProfileView } from "./components/AgentProfileView";
+import { AccountsView } from "./components/AccountsView";
+import { AccountAvatar } from "./components/AccountAvatar";
 import { ProjectsView } from "./components/ProjectsView";
 import { LoraTrainingPage } from "./components/LoraTrainingPage";
 import { ProjectDetailView } from "./components/ProjectDetailView";
@@ -17,7 +20,7 @@ import { AccountSettings, SettingsPage, signOut, useSession } from "./components
 
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import type { SidebarTab } from "./components/sidebar/AppSidebar";
-import type { CharacterSummary, JobItem, LoraCheckpoint, LoraTrainingStatus, MediaItem, Project, Scene, Shot, ProjectPhase, ProjectModeData } from "./types";
+import type { CharacterSummary, JobItem, LoraCheckpoint, LoraTrainingStatus, MediaItem, MediaMetadataPatch, Project, Scene, Shot, ProjectPhase, ProjectModeData } from "./types";
 
 async function fetchJson<T>(url: string, timeoutMs = 5000): Promise<T> {
   const controller = new AbortController();
@@ -36,7 +39,12 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 2_000,
       retry: 1,
-      refetchOnWindowFocus: false,
+      // React Query pauses every refetchInterval while the tab is hidden, so a render
+      // that finishes while the user is in another window lands on disk and in /api/listing
+      // but never reaches the open Studio tab. Refetching on focus is what closes that gap:
+      // without it the tab also waits out the rest of the 5s tick after the user returns.
+      // Background polling stays off — a hidden tab has no one to show the result to.
+      refetchOnWindowFocus: true,
     },
   },
 });
@@ -71,6 +79,11 @@ interface AppContextType {
   error: string | null;
   selected: string | null;
   setSelected: (url: string | null) => void;
+  // A page whose list isn't the gallery's — an account's files, say — lends the
+  // lightbox its own items while it's open, so the rail reads the asset it was
+  // actually given instead of failing to find it in the gallery's first page.
+  lightboxItems: MediaItem[] | null;
+  setLightboxItems: (items: MediaItem[] | null) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
   sidebarCollapsed: boolean;
@@ -108,9 +121,9 @@ interface AppContextType {
   setGalleryTag: (tag: string) => void;
   galleryTrainingDatasetOnly: boolean;
   setGalleryTrainingDatasetOnly: (enabled: boolean) => void;
-  updateMediaMetadata: (item: MediaItem, patch: { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => Promise<void>;
+  updateMediaMetadata: (item: MediaItem, patch: MediaMetadataPatch) => Promise<void>;
   bulkDeleteItems: (items: MediaItem[]) => Promise<void>;
-  bulkUpdateMediaMetadata: (items: MediaItem[], patcher: (item: MediaItem) => { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => Promise<void>;
+  bulkUpdateMediaMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType>(null!);
@@ -133,9 +146,14 @@ function AccountMenu() {
         type="button"
         popoverTarget="account-menu"
         id="account-menu-button"
-        className="flex items-center gap-2 rounded-xl border border-gray-800 bg-gray-900/50 px-2.5 py-1.5 text-gray-200 hover:border-gray-600 transition"
+        title={agent ? `${agent.name} · account menu` : "Account menu"}
+        className="flex items-center gap-2 rounded-xl border border-gray-800 bg-gray-900/50 py-1 pl-1 pr-2.5 text-gray-200 hover:border-gray-600 transition"
       >
-        <UserCircle className="w-4 h-4" aria-hidden />
+        {agent ? (
+          <AccountAvatar avatar={agent.avatar} name={agent.name} className="h-7 w-7 rounded-lg ring-1 ring-black/40" />
+        ) : (
+          <UserCircle className="ml-1 h-5 w-5" aria-hidden />
+        )}
         <span className="hidden sm:inline font-medium">{agent?.name ?? "Account"}</span>
       </button>
       <div
@@ -151,13 +169,27 @@ function AccountMenu() {
         className="fixed m-0 w-60 [inset:auto] rounded-2xl border border-gray-800 bg-gray-950 p-1.5 text-white shadow-2xl shadow-black/60"
       >
         {agent && (
-          <div className="border-b border-gray-800/60 px-3 py-2 mb-1">
-            <p className="text-sm font-medium text-gray-100">{agent.name}</p>
-            <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-400">
-              {agent.is_admin && <ShieldCheck className="h-3 w-3 text-amber-300" aria-hidden />}
-              {agent.is_admin ? "Admin" : "Scoped key"} · <span className="font-mono">{agent.id}</span>
-            </p>
+          <div className="mb-1 flex items-center gap-2.5 border-b border-gray-800/60 px-3 py-2">
+            <AccountAvatar avatar={agent.avatar} name={agent.name} className="h-9 w-9 rounded-xl ring-1 ring-black/40" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-gray-100">{agent.name}</p>
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-400">
+                {agent.is_admin && <ShieldCheck className="h-3 w-3 shrink-0 text-amber-300" aria-hidden />}
+                {agent.is_admin ? "Admin" : "Scoped key"} · <span className="truncate font-mono">{agent.id}</span>
+              </p>
+            </div>
           </div>
+        )}
+        {agent && (
+          <button type="button" className={itemClass} onClick={() => { close(); navigate(`/studio/agents/${agent.id}`); }}>
+            <UserCircle className="h-4 w-4" aria-hidden /> Your profile
+          </button>
+        )}
+        {/* Only an admin key can read the directory; a scoped one would land on a 404 wall. */}
+        {(!agent || agent.is_admin) && (
+          <button type="button" className={itemClass} onClick={() => { close(); navigate("/studio/agents"); }}>
+            <Users className="h-4 w-4" aria-hidden /> Accounts
+          </button>
         )}
         <button type="button" className={itemClass} onClick={() => { close(); navigate("/studio/settings/account"); }}>
           <Settings className="h-4 w-4" aria-hidden /> Settings
@@ -183,6 +215,7 @@ function AccountMenu() {
 function Shell() {
   const ctx = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
   const projectMatch = useMatch("/studio/projects/:projectId");
   const loraMatch = useMatch("/studio/lora-training");
   const settingsMatch = useMatch("/studio/settings/*");
@@ -219,6 +252,46 @@ function Shell() {
       ctx.setSidebarCollapsed(true);
     }
   }, [!!jobsMatch]);
+
+  // <main> is the only thing that scrolls, so every "go back up" gesture goes through this ref.
+  // The infinite gallery gets thousands of tiles deep and the wheel is the only way out without it.
+  const mainRef = useRef<HTMLElement>(null);
+  const [scrolledDeep, setScrolledDeep] = useState(false);
+
+  const scrollToTop = useCallback(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const instant = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    main.scrollTo({ top: 0, behavior: instant ? "auto" : "smooth" });
+  }, []);
+
+  // One viewport of scrolling is a glance; two is deep enough that the way back matters.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const onScroll = () => setScrolledDeep(main.scrollTop > main.clientHeight * 1.5);
+    main.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => main.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // <main> outlives the route inside it, so without this a new page opens at the old page's offset
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [location.pathname]);
+
+  // Home/End move the page, not the focused control — skip while someone is typing
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Home" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
+      event.preventDefault();
+      scrollToTop();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [scrollToTop]);
 
   const projectMode: ProjectModeData | undefined =
     projectMatch && ctx.projectData
@@ -265,9 +338,11 @@ function Shell() {
             onClick={() => {
               navigate("/studio");
               ctx.setActiveSidebarTab("workflows");
+              // Already on /studio? The route effect never fires, so take it to the top by hand.
+              scrollToTop();
             }}
             className="flex items-center gap-3 min-w-0 hover:opacity-80 transition"
-            title="Studio home"
+            title="Studio home — back to the top"
           >
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-brand-soft flex items-center justify-center shadow-lg shadow-brand/25 ring-1 ring-white/10">
               <Sparkles className="w-4 h-4 text-black" />
@@ -334,6 +409,15 @@ function Shell() {
                 ctx.setSidebarOpen(false);
               }
             }}
+            onToggleCollapsed={() => {
+              const next = !ctx.sidebarCollapsed;
+              // Settings and Jobs fill the pane themselves and have no side panel, so expanding
+              // while one of them is active would open an empty 380px column. Come back on Workflows.
+              if (!next && (ctx.activeSidebarTab === "settings" || ctx.activeSidebarTab === "jobs")) {
+                ctx.setActiveSidebarTab("workflows");
+              }
+              ctx.setSidebarCollapsed(next);
+            }}
             onClose={() => ctx.setSidebarOpen(false)}
             onSelectCharacter={(id) => {
               ctx.setActiveSidebarTab("characters");
@@ -343,20 +427,38 @@ function Shell() {
           />
         )}
 
-        <main className="flex-1 min-w-0 overflow-y-auto bg-gradient-to-b from-transparent via-transparent to-gray-950/30">
+        <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto bg-gradient-to-b from-transparent via-transparent to-gray-950/30">
           <Outlet />
         </main>
+
+        {/* Sits over the scroll pane rather than inside it, so every page gets the way back */}
+        <button
+          type="button"
+          onClick={scrollToTop}
+          aria-hidden={!scrolledDeep}
+          tabIndex={scrolledDeep ? 0 : -1}
+          className={`absolute bottom-5 right-5 z-30 inline-flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-900/90 py-2.5 pl-3 pr-3.5 text-xs font-medium text-gray-200 shadow-xl shadow-black/50 backdrop-blur-xl transition-all hover:border-brand hover:text-brand focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand ${
+            scrolledDeep ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"
+          }`}
+          title="Back to top (Home)"
+        >
+          <ArrowUp className="h-3.5 w-3.5" aria-hidden />
+          Top
+        </button>
       </div>
 
       {/* Lightbox */}
       <Lightbox
-        items={ctx.items}
+        items={ctx.lightboxItems ?? ctx.items}
         selectedUrl={ctx.selected}
         onClose={() => ctx.setSelected(null)}
         onSelect={ctx.setSelected}
-        characters={ctx.characters}
         onUpdateMetadata={ctx.updateMediaMetadata}
         onDelete={ctx.deleteItem}
+        onOpenOwner={(ownerId) => {
+          ctx.setSelected(null);
+          navigate(`/studio/agents/${ownerId}`);
+        }}
       />
     </div>
   );
@@ -472,6 +574,20 @@ function CharacterRoute() {
   );
 }
 
+function AgentRoute() {
+  const { agentId } = useParams<{ agentId: string }>();
+  const { setSelected, deleteItem, setLightboxItems } = useApp();
+  if (!agentId) return null;
+  return (
+    <AgentProfileView
+      agentId={agentId}
+      onOpen={setSelected}
+      onDelete={deleteItem}
+      onItemsChange={setLightboxItems}
+    />
+  );
+}
+
 /* ── App Root ── */
 function AppRoutes() {
   const queryClient = useQueryClient();
@@ -550,6 +666,7 @@ function AppRoutes() {
   const [checkpoints, setCheckpoints] = useState<LoraCheckpoint[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<any[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [lightboxItems, setLightboxItems] = useState<MediaItem[] | null>(null);
   // Open by default on desktop, closed on mobile (the sidebar is an overlay drawer there)
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth >= 768 : true
@@ -722,7 +839,7 @@ function AppRoutes() {
   );
 
   const metadataMutation = useMutation({
-    mutationFn: async ({ item, patch }: { item: MediaItem; patch: { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean } }) => {
+    mutationFn: async ({ item, patch }: { item: MediaItem; patch: MediaMetadataPatch }) => {
       const filename = item.filename || item.url.replace(/^\/media\//, "");
       const mediaPath = filename.split("/").map(encodeURIComponent).join("/");
       const response = await fetch(`/api/media/${mediaPath}/metadata`, {
@@ -746,7 +863,7 @@ function AppRoutes() {
   });
 
   const updateMediaMetadata = useCallback(
-    async (item: MediaItem, patch: { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => {
+    async (item: MediaItem, patch: MediaMetadataPatch) => {
       await metadataMutation.mutateAsync({ item, patch });
     },
     [metadataMutation]
@@ -770,7 +887,7 @@ function AppRoutes() {
     queryClient.invalidateQueries({ queryKey: countsKey });
   }, [queryClient, selected]);
 
-  const bulkUpdateMediaMetadata = useCallback(async (itemsToUpdate: MediaItem[], patcher: (item: MediaItem) => { character_ids?: string[]; tags?: string[]; included_in_training_dataset?: boolean }) => {
+  const bulkUpdateMediaMetadata = useCallback(async (itemsToUpdate: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => {
     if (itemsToUpdate.length === 0) return;
     await Promise.all(itemsToUpdate.map(async (item) => {
       const filename = item.filename || item.url.replace(/^\/media\//, "");
@@ -797,6 +914,8 @@ function AppRoutes() {
     error,
     selected,
     setSelected,
+    lightboxItems,
+    setLightboxItems,
     sidebarOpen,
     setSidebarOpen,
     sidebarCollapsed,
@@ -856,7 +975,11 @@ function AppRoutes() {
               <Route path="account" element={<AccountSettings />} />
               <Route path="api-keys" element={<ApiKeysPage />} />
             </Route>
-            <Route path="agents" element={<Navigate to="/studio/settings/api-keys" replace />} />
+            {/* The bare page lists the accounts; a named one is that account's profile.
+                Keys are managed in Settings — who someone is and what their key may do
+                are different questions. */}
+            <Route path="agents" element={<AccountsView />} />
+            <Route path="agents/:agentId" element={<AgentRoute />} />
           </Route>
         </Routes>
       </AppContext.Provider>

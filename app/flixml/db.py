@@ -1009,8 +1009,8 @@ async def create_agent(
 
 
 async def update_agent(agent_id: str, fields: dict[str, Any]) -> bool:
-    """Set any of name, enabled, allowed_characters, allowed_workflows, max_concurrent_jobs, is_admin."""
-    columns = {"name": "", "enabled": "", "allowed_characters": "::text[]", "allowed_workflows": "::text[]", "max_concurrent_jobs": "", "is_admin": ""}
+    """Set any of name, enabled, allowed_characters, allowed_workflows, max_concurrent_jobs, is_admin, avatar, bio."""
+    columns = {"name": "", "enabled": "", "allowed_characters": "::text[]", "allowed_workflows": "::text[]", "max_concurrent_jobs": "", "is_admin": "", "avatar": "", "bio": ""}
     sets: list[str] = []
     params: list[Any] = [agent_id]
     for key, cast in columns.items():
@@ -1066,12 +1066,12 @@ async def upsert_media(row: dict[str, Any]) -> None:
                 filename, type, width, height, size, modified,
                 prompt, negative_prompt, seed, steps, guidance, sampler, scheduler,
                 model, vae, text_encoder, loras, workflow_type, workflow_json, prompt_id,
-                source_image, video_file, character_ids, tags, metadata, updated_at
+                source_image, video_file, character_ids, tags, metadata, description, updated_at
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,
                 $7,$8,$9,$10,$11,$12,$13,
                 $14,$15,$16,$17::jsonb,$18,$19::jsonb,$20,
-                $21,$22,$23::text[],$24::text[],$25::jsonb,NOW()
+                $21,$22,$23::text[],$24::text[],$25::jsonb,$26,NOW()
             )
             ON CONFLICT (filename) DO UPDATE SET
                 type=EXCLUDED.type,
@@ -1098,6 +1098,10 @@ async def upsert_media(row: dict[str, Any]) -> None:
                 character_ids=CASE WHEN cardinality(EXCLUDED.character_ids) > 0 THEN EXCLUDED.character_ids ELSE media.character_ids END,
                 tags=CASE WHEN cardinality(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE media.tags END,
                 metadata=COALESCE(EXCLUDED.metadata, media.metadata),
+                -- COALESCE, not EXCLUDED: the catalog sweep re-upserts every file on
+                -- boot with nothing but what it read off disk, and a caption typed in
+                -- the rail must not be wiped by it.
+                description=COALESCE(EXCLUDED.description, media.description),
                 updated_at=NOW()
             """,
             row.get("filename"),
@@ -1125,6 +1129,7 @@ async def upsert_media(row: dict[str, Any]) -> None:
             _text_list(row.get("character_ids")),
             _text_list(row.get("tags")),
             row.get("metadata"),
+            row.get("description"),
         )
 
 
@@ -1168,7 +1173,28 @@ def _media_where(
     if search:
         token = _next()
         params.append(f"%{search.lower()}%")
-        clauses.append(f"(LOWER(COALESCE(prompt, '')) LIKE {token} OR LOWER(filename) LIKE {token} OR EXISTS (SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE {token}))")
+        # Characters are matched by name, id and trigger word as well as by prompt text:
+        # a character's prompt rarely contains their name (it describes a face, not a
+        # person), so typing "kay" has to reach the files bound to her, not only the
+        # handful that happen to spell it out. The character dropdown still exists for
+        # picking one exactly; this is the same filter reachable by typing.
+        #
+        # The owning account is matched the same way, and for the same reason: a name
+        # typed into the box is as often an account as a character, and nothing an
+        # account generates is required to name it. Typing "tifa" returned the 8 files
+        # whose prompt spelled it out, of the 30 she made. The raw owner_id is matched
+        # directly as well as through agents, so files outlive the key that made them.
+        clauses.append(
+            f"(LOWER(COALESCE(prompt, '')) LIKE {token} "
+            f"OR LOWER(filename) LIKE {token} "
+            f"OR EXISTS (SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE {token}) "
+            f"OR LOWER(COALESCE(metadata->>'owner_id', '')) LIKE {token} "
+            f"OR EXISTS (SELECT 1 FROM agents a WHERE a.id = metadata->>'owner_id' "
+            f"AND LOWER(a.name) LIKE {token}) "
+            f"OR EXISTS (SELECT 1 FROM characters c WHERE c.id = ANY(character_ids) "
+            f"AND (LOWER(c.name) LIKE {token} OR LOWER(c.id) LIKE {token} "
+            f"OR LOWER(COALESCE(c.trigger, '')) LIKE {token})))"
+        )
 
     if dir_prefix:
         token = _next()
@@ -1243,6 +1269,30 @@ async def media_count(
     where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id)
     sql = f"SELECT COUNT(*) FROM media WHERE {where}"
     return int(await get_pool().fetchval(sql, *params) or 0)
+
+
+async def media_counts_by_owner() -> dict[str, dict[str, int]]:
+    """Image and video counts for every owning account, in one query.
+
+    The account directory needs the same two numbers a profile shows, for all accounts
+    at once — calling media_count twice per account makes the page 2N round trips.
+    Shares `_media_where`'s base filters so a directory row and that account's profile
+    never disagree.
+    """
+    where, params = _media_where(None, None, None, start_param=1)
+    sql = f"""
+        SELECT metadata->>'owner_id' AS owner_id,
+               COUNT(*) FILTER (WHERE {_VIDEO_PREDICATE}) AS videos,
+               COUNT(*) FILTER (WHERE NOT {_VIDEO_PREDICATE}) AS images
+        FROM media
+        WHERE {where} AND metadata->>'owner_id' IS NOT NULL
+        GROUP BY 1
+    """
+    rows = await get_pool().fetch(sql, *params)
+    return {
+        row["owner_id"]: {"images": int(row["images"]), "videos": int(row["videos"])}
+        for row in rows
+    }
 
 
 async def workflow_examples(owner_id: str | None = None) -> dict[str, dict[str, Any]]:
@@ -1321,9 +1371,16 @@ async def update_media_metadata(
     character_ids: list[str] | None = None,
     tags: list[str] | None = None,
     included_in_training_dataset: bool | None = None,
+    description: str | None = None,
 ) -> dict[str, Any] | None:
     sets: list[str] = []
     params: list[Any] = [filename]
+    if description is not None:
+        # An empty string is how the rail says "clear this", and a caption of
+        # whitespace is the same thing. Both store NULL so the line disappears
+        # rather than rendering as a blank caption.
+        params.append(description.strip() or None)
+        sets.append(f"description=${len(params)}")
     if character_ids is not None:
         params.append(_text_list(character_ids))
         sets.append(f"character_ids=${len(params)}::text[]")
@@ -1347,6 +1404,27 @@ async def update_media_metadata(
 
 async def get_media_by_filename(filename: str) -> dict[str, Any] | None:
     row = await get_pool().fetchrow("SELECT * FROM media WHERE filename=$1", filename)
+    return dict(row) if row else None
+
+
+async def find_media_by_basename(name: str) -> dict[str, Any] | None:
+    """Find a catalogued file by its bare name, wherever it sits in the tree.
+
+    A job records its input image as the filename ComfyUI was handed — no
+    directory — so `f4184d01_00001_.png` has to be matched back to the
+    `images/f4184d01_00001_.png` the gallery serves. Newest wins when two
+    directories hold the same name. Matched with `right()` and not LIKE,
+    because `_` is a LIKE wildcard and every generated filename carries three.
+    """
+    row = await get_pool().fetchrow(
+        """
+        SELECT * FROM media
+        WHERE filename = $1 OR right(filename, length($1) + 1) = '/' || $1
+        ORDER BY modified DESC NULLS LAST
+        LIMIT 1
+        """,
+        name,
+    )
     return dict(row) if row else None
 
 

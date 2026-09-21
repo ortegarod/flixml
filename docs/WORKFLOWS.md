@@ -4,9 +4,9 @@
 
 # FlixML Workflows
 
-The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` — that endpoint is the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
+The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**13 workflows** across 5 task types.
+**14 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -15,6 +15,7 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint |
 | `sdxl_lora` | Text → Image | Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt |
 | `text_logo` | Text → Image | Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion |
+| `flux2_klein_edit` | Image → Image | Generate a new image from a reference image and a plain-English instruction |
 | `qwen_multiangle` | Image → Image | Re-shoot an existing image of the same subject from a new camera angle |
 | `qwen_pose_edit` | Image → Image | Edit an existing image from a plain-English instruction — change a subject's pose, position, or what they're doing while holding their identity, clothing, the room, and lighting |
 | `sdxl_img2img` | Image → Image | Generate SDXL image variations from a source image using prompt guidance and denoise strength |
@@ -35,7 +36,7 @@ Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consist
 - **Notes:** Stays on the FLUX.2-dev weights, and a LoRA is bound to the exact variant it was trained on: a dev-trained LoRA will not load into Klein, whose transformer is a different width and block count, so this workflow cannot follow flux2_klein down to the small models. TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Needs a 24 GB+ GPU to run without spilling. For fast local iteration use flux2_klein (Klein 4B) or SDXL.
 - **Providers:** local, cloud_serverless
 - **Params:**
-  - `prompt` · _str_ · **required** — Text prompt
+  - `prompt` · _str_ · **required** — Natural language, written as sentences — FLUX.2 reads a description, not a tag list, and word order is weight, so lead with the subject and close with atmosphere. Subject, action, style, context; 30-80 words for most shots. There is no negative prompt in FLUX.2: describe what you want ('sharp focus throughout'), never what you don't. A camera, lens or film stock buys more photorealism than the word 'professional'. With a character LoRA loaded, put its trigger word at the front and then describe only what the LoRA doesn't carry — pose, clothing, setting, light. Re-describing a face the LoRA was trained on works against it.
   - `loras` · _list_ — List of LoRA specs
   - `lora_strength` · _float_ · default `1.0`
   - `width` · _int_ · default `1248` — Output width
@@ -51,14 +52,18 @@ Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consist
 
 ### `flux2_klein` — FLUX.2 Klein Image
 
-Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt — no LoRA, no source image.
+Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt, with two optional LoRA slots.
 
 - **Output:** image
-- **Requirements:** ~8 GB VRAM, loads ~8.3 GB of model files (VRAM + system RAM)
+- **Requirements:** supports LoRA, ~8 GB VRAM, loads ~8.3 GB of model files (VRAM + system RAM)
 - **Notes:** Defaults to FLUX.2 Klein 4B fp8 (4.07 GB) plus the fp4 Qwen3-4B encoder (3.85 GB), about 8.3 GB of weights with the VAE. Klein is the distilled line and renders in 4 steps. TESTED 2026-09-19 at 1024x1024, 4 steps, same prompt and seed on both cards: fp8 on an 8 GB RTX 2060 Super took 29 s, bf16 (7.75 GB) on a 12 GB RTX 4070 Ti took 37 s, and the two outputs are visually identical — fp8 costs nothing here. The unet and clip params reach any FLUX.2 weights present on the node; FLUX.2-dev (35 GB fp8 plus a 12 GB Mistral encoder) wants 24 GB VRAM and spills badly below that — 32 min for a single image on the 4070 Ti — so dev belongs on flux2_dev_lora, the only workflow the dev-trained LoRAs load into.
 - **Providers:** local, cloud_serverless
 - **Params:**
-  - `prompt` · _str_ · **required** — Text prompt
+  - `prompt` · _str_ · **required** — Natural language sentences, not tags — the opposite of an SDXL prompt. Subject, then action, then style, then context, in that order: word order is weight, so lead with the subject and close with atmosphere. 30-80 words suits most shots. 'A businessman in a charcoal grey suit resting his arms on a bamboo railing at a secluded beach, illustrated in a vintage woodblock print style, calm turquoise water under a hazy afternoon sky.' FLUX.2 has no negative prompt and this graph has no node for one, so describe what you want instead of what you don't — 'sharp focus throughout', not 'not blurry'. For photorealism, name a camera, lens or film stock rather than saying 'professional'.
+  - `lora_name` · _str_ · default `` — Optional LoRA file in the node's loras folder. Leave empty and the slot is removed from the graph entirely. A FLUX.2 LoRA is built for one variant: a Klein 4B LoRA does not load on Klein 9B or on FLUX.2-dev, and a dev LoRA does not load here — the residual stream is 3072 wide on 4B against 6144 on dev, so the tensors do not fit. Match the LoRA's stated base model to the weights in the unet param.
+  - `lora_strength` · _float_ · default `1.0` — Weight of the first LoRA. Ignored when lora_name is empty.
+  - `lora_name_2` · _str_ · default `` — Second LoRA, chained after the first — for stacking a concept LoRA on top of a likeness or style one. Same variant rule as lora_name.
+  - `lora_strength_2` · _float_ · default `1.0` — Weight of the second LoRA. Ignored when lora_name_2 is empty.
   - `width` · _int_ · default `832` — Output width
   - `height` · _int_ · default `832` — Output height
   - `seed` · _int_ — Random seed (auto if omitted)
@@ -77,8 +82,8 @@ Text-to-image with an SDXL checkpoint. General-purpose still generation from a p
 - **Requirements:** ~8 GB VRAM
 - **Providers:** local
 - **Params:**
-  - `prompt` · _string_ · **required** — Image prompt
-  - `negative_prompt` · _string_ · default ``
+  - `prompt` · _string_ · **required** — Comma-separated tags and short phrases, the way SDXL's training captions were written. A sentence still parses — it does not fail — but every article and preposition spends part of the same budget, so tags buy more control per token. Order is weight: subject, appearance, clothing, pose, setting, lighting, then medium and quality. 'young woman, short white hair, black leather jacket, standing in a rain-wet alley, neon signs, night, shallow depth of field, photorealistic, sharp focus'. Push or pull one term with `(term:1.2)` or `(term:0.8)`; bare `(term)` is 1.1. Keep it near 75 tokens — CLIP encodes the rest in a later chunk where it pulls less. Match the checkpoint: one trained on booru tags wants booru tags, one merged for realism wants photographic ones, and its model page is the authority on any trigger or quality tags it expects.
+  - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. SDXL uses this — unlike FLUX.2, which has no negative and needs the positive to say 'sharp focus' instead. Start with the defects you actually see rather than a stock wall of tags: 'blurry, low quality, extra fingers, watermark, text'. An oversized negative eats guidance and flattens the image.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
   - `seed` · _integer_ · default `42`
@@ -96,8 +101,8 @@ Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consiste
 - **Requirements:** supports LoRA, ~8 GB VRAM
 - **Providers:** local
 - **Params:**
-  - `prompt` · _string_ · **required** — Image prompt
-  - `negative_prompt` · _string_ · default ``
+  - `prompt` · _string_ · **required** — Comma-separated tags and short phrases, not a sentence — same tag syntax as sdxl_base: subject first, atmosphere last, `(term:1.2)` to weight a term, roughly 75 tokens of content before the tail stops pulling. What differs here is the LoRA. Most character and style LoRAs fire on a trigger word, and without it in the prompt the LoRA loads and does close to nothing: put the trigger at the front, then describe only what the LoRA does not already carry — pose, clothing, setting, light. Describing the face a character LoRA was trained on fights it. The LoRA's model page is where the trigger word is stated; there is no way to read it off the file.
+  - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, extra fingers, watermark'. An oversized negative eats guidance and flattens the image.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
   - `seed` · _integer_ · default `42`
@@ -128,6 +133,30 @@ Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel no
   - `bg_color` · _integer_ · default `0` — Background color as a packed RGB int (0 = black, 16777215 = white)
 
 ## Image → Image
+
+### `flux2_klein_edit` — FLUX.2 Klein Reference Edit
+
+Generate a new image from a reference image and a plain-English instruction. FLUX.2 Klein 4B reads the reference as conditioning and samples a fresh frame, so unlike img2img it can change pose, wardrobe and setting while holding the subject's identity. Say what changes and what stays.
+
+- **Output:** image
+- **Requirements:** needs image, supports LoRA, ~8 GB VRAM, loads ~8.3 GB of model files (VRAM + system RAM)
+- **Notes:** Same weights as flux2_klein — FLUX.2 Klein 4B fp8 plus the Qwen3-4B encoder — so any node that runs flux2_klein runs this. The reference is VAE-encoded and attached to both conditioning branches through ReferenceLatent; sampling starts from an empty latent, which is why the output is a new frame rather than a repaint of the source. Output size follows the reference's aspect after it is scaled to reference_megapixels. Graph follows the official ComfyUI template image_flux2_klein_image_edit_4b_distilled (docs.comfy.org/tutorials/flux/flux-2-klein). Klein 4B accepts up to four reference images (docs.bfl.ml/guides/prompting_editing_overview); this graph wires one. A fine detail that is small or low-contrast in a single reference — a scar, a tattoo, a logo — may not survive, and naming it in the prompt makes the model draw its own rather than copy it. More references is the lever for that, not more words.
+- **Providers:** local, cloud_serverless
+- **Params:**
+  - `image` · _str_ · **required** — Reference image filename, as returned by /api/images/upload or a prior job
+  - `prompt` · _str_ · **required** — An instruction, not a scene description. Name the change, then name what stays: 'Change her outfit to a black leather coat and place her on a castle rampart at dusk. Keep her face and hair exactly as they are.' Never re-describe the subject's face, hair or body — the reference carries them, and describing them again makes the model draw its own version instead.
+  - `seed` · _int_ — Random seed (auto if omitted)
+  - `lora_name` · _str_ · default `` — Optional LoRA file in the node's loras folder. Leave empty and the slot is removed from the graph entirely. A FLUX.2 LoRA is built for one variant: a Klein 4B LoRA does not load on Klein 9B or on FLUX.2-dev, and a dev LoRA does not load here — the residual stream is 3072 wide on 4B against 6144 on dev, so the tensors do not fit. Match the LoRA's stated base model to the weights in the unet param.
+  - `lora_strength` · _float_ · default `1.0` — Weight of the first LoRA. Ignored when lora_name is empty.
+  - `lora_name_2` · _str_ · default `` — Second LoRA, chained after the first — for stacking a concept LoRA on top of a likeness or style one. Same variant rule as lora_name.
+  - `lora_strength_2` · _float_ · default `1.0` — Weight of the second LoRA. Ignored when lora_name_2 is empty.
+  - `steps` · _int_ · default `4` — Klein is distilled to 4 steps; raise it only when running undistilled FLUX.2 weights through the unet param
+  - `cfg` · _float_ · default `1.0` — Distilled Klein runs at 1.0. Raising it fights the distillation
+  - `sampler` · _str_ · default `euler`
+  - `reference_megapixels` · _float_ · default `1.0` — The reference is scaled to this many megapixels before encoding, and the output inherits its size
+  - `unet` · _str_ · default `flux-2-klein-4b-fp8.safetensors`
+  - `clip` · _str_ · default `qwen_3_4b_fp4_flux2.safetensors`
+  - `vae` · _str_ · default `flux2-vae.safetensors`
 
 ### `qwen_multiangle` — Qwen Multi-Angle (re-angle a still)
 
@@ -163,9 +192,9 @@ Generate SDXL image variations from a source image using prompt guidance and den
 - **Requirements:** ~8 GB VRAM
 - **Providers:** local
 - **Params:**
-  - `prompt` · _string_ · **required** — Image prompt / transformation guidance
+  - `prompt` · _string_ · **required** — Comma-separated tags describing the image you want out, not the change you want made — this is a re-render of the source at `denoise` strength, not an instruction-following edit. 'restyled as an oil painting' works because it is a description of the result; 'make the sky darker' does not, because nothing here reads commands. For an edit you can phrase as an instruction, use flux2_klein_edit or qwen_pose_edit instead. Same tag syntax as sdxl_base: subject first, `(term:1.2)` to weight a term. Keep the prompt consistent with what is already in the frame — at the 0.25-0.45 denoise this workflow is built for, a prompt that contradicts the source fights it and smears.
   - `image` · _string_ · **required** — Source image filename or Studio output path
-  - `negative_prompt` · _string_ · default ``
+  - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, watermark'.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
   - `seed` · _integer_ · default `42`
@@ -259,13 +288,13 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
   - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
   - `width` · _int_ · default `480`
   - `height` · _int_ · default `832`
-  - `length` · _int_ · default `49` — Frame count (must be 4k+1, e.g. 33/49/65/81)
+  - `length` · _int_ · default `81` — Frame count, must be 4n+1 (33/49/65/81). Default 81 is the length Wan itself ships and generates at: wan_shared_cfg.frame_num = 81 with sample_fps = 16 in wan/configs/shared_config.py, i.e. 5.06 s. The 4n+1 rule is the authors' too - generate.py --frame_num help: "How many frames of video are generated. The number should be 4n+1". Source: github.com/Wan-Video/Wan2.2, both files read 2026-09-21. Going past 81 in this single-window workflow is untested here; use wan22_i2v_context for longer clips.
   - `fps` · _int_ · default `16`
   - `seed` · _int_
-  - `steps_high` · _int_ · default `3` — 3+3=6 total. Motion comes from LoRA strength and CFG, not step count: the Lightning LoRA is CFG-distilled and flattens motion at full strength, so extra steps buy a slower near-still clip, not a livelier one. Measured here at 176 s median against 328 s for the old 30-step CFG-1 config, with more motion.
-  - `steps_low` · _int_ · default `3` — See steps_high. 3+3=6 total.
-  - `total_steps` · _int_ · default `6` — steps_high + steps_low; passed to KSamplerAdvanced.steps
-  - `cfg_high` · _float_ · default `3.5` — Real CFG on the high-noise stage is what buys motion fluidity and shape definition. It also switches the negative prompt on: at 1.0 there is no unconditional branch, so negative_prompt is never evaluated.
+  - `steps_high` · _int_ · default `2` — 2+2=4 total. The model authors' published value, not one we tuned. The Lightning LoRA is step-distilled: it was trained on the noise schedule a 4-step run produces, and ComfyUI derives its sigma spacing from the step count you pass, so any other count denoises at noise levels the LoRA never saw. That shows up as rising contrast and a light that blooms across the clip. Source: lightx2v/Wan2.2-Lightning, official native-ComfyUI workflow Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1-NativeComfy.json — steps 4, split 0-2 / 2-4.
+  - `steps_low` · _int_ · default `2` — See steps_high. 2+2=4 total, per the authors' workflow.
+  - `total_steps` · _int_ · default `4` — steps_high + steps_low; passed to KSamplerAdvanced.steps. Fixed by what the distillation was trained on, not by quality preference — changing it means changing the LoRA.
+  - `cfg_high` · _float_ · default `1.0` — 1.0 on both stages. The Lightning LoRA is CFG-distilled — there is no unconditional branch to guide, and raising CFG pushes it off its trained trajectory. Source: lightx2v/Wan2.2-Lightning official native-ComfyUI workflow, cfg 1 on both KSamplerAdvanced nodes. Consequence: negative_prompt is inert here, because at CFG 1.0 nothing evaluates it.
   - `cfg_low` · _float_ · default `1.0` — Leave at 1.0; the low-noise stage runs the distilled LoRA.
   - `shift` · _float_ · default `5.0`
   - `sampler` · _str_ · default `euler`
@@ -276,7 +305,7 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
   - `low_model` · _str_ · default `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors` — fp8_scaled low-noise model in diffusion_models (UNETLoader)
   - `high_lora` · _str_ · default `Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors` — Lightning speed LoRA for high-noise model
   - `low_lora` · _str_ · default `Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors` — Lightning speed LoRA for low-noise model
-  - `high_lora_strength` · _float_ · default `0.5` — Hold at ~0.5. At 1.0 the Lightning LoRA produces the well-known slow-motion artifact and flattens the action.
+  - `high_lora_strength` · _float_ · default `1.0` — 1.0, same as low_lora_strength. Source: lightx2v/Wan2.2-Lightning official native-ComfyUI workflow — both LoraLoaderModelOnly nodes at 1.0. Lowering it to fight the Lightning slow-motion artifact is a community recipe, not the authors': it weakens the distillation that the 4-step schedule assumes, and we measured the cost on 2026-09-21 as a light blooming across the clip. If motion is flat, change the start frame or the action, not this.
   - `high_lora_2` · _str_ · default `` — Optional second LoRA stacked after the speed LoRA - this is where a motion or concept LoRA goes, e.g. a dance or action LoRA trained for Wan 2.2 i2v. Leave empty and the slot is removed from the graph entirely. Wan 2.2 LoRAs ship as a high/low pair: set both.
   - `high_lora_2_strength` · _float_ · default `1.0` — Weight of the second high-noise LoRA. Ignored when high_lora_2 is empty.
   - `low_lora_strength` · _float_ · default `1.0` — Leave at 1.0.

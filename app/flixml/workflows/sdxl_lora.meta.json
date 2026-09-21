@@ -13,11 +13,12 @@
     "prompt": {
       "type": "string",
       "required": true,
-      "description": "Image prompt"
+      "description": "Comma-separated tags and short phrases, not a sentence — same tag syntax as sdxl_base: subject first, atmosphere last, `(term:1.2)` to weight a term, roughly 75 tokens of content before the tail stops pulling. What differs here is the LoRA. Most character and style LoRAs fire on a trigger word, and without it in the prompt the LoRA loads and does close to nothing: put the trigger at the front, then describe only what the LoRA does not already carry — pose, clothing, setting, light. Describing the face a character LoRA was trained on fights it. The LoRA's model page is where the trigger word is stated; there is no way to read it off the file."
     },
     "negative_prompt": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, extra fingers, watermark'. An oversized negative eats guidance and flattens the image."
     },
     "width": {
       "type": "integer",
@@ -65,5 +66,14 @@
   },
   "compatible_providers": [
     "local"
+  ],
+  "examples": [
+    {
+      "prompt": "<lora trigger word>, seated at a café table, morning light through the window, denim jacket, medium shot, photorealistic",
+      "negative_prompt": "blurry, low quality, extra fingers, watermark",
+      "checkpoint": "your-sdxl-checkpoint.safetensors",
+      "lora_name": "your-character-lora.safetensors",
+      "lora_strength": 0.8
+    }
   ]
 }

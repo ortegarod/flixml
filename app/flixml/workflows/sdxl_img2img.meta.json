@@ -13,7 +13,7 @@
     "prompt": {
       "type": "string",
       "required": true,
-      "description": "Image prompt / transformation guidance"
+      "description": "Comma-separated tags describing the image you want out, not the change you want made — this is a re-render of the source at `denoise` strength, not an instruction-following edit. 'restyled as an oil painting' works because it is a description of the result; 'make the sky darker' does not, because nothing here reads commands. For an edit you can phrase as an instruction, use flux2_klein_edit or qwen_pose_edit instead. Same tag syntax as sdxl_base: subject first, `(term:1.2)` to weight a term. Keep the prompt consistent with what is already in the frame — at the 0.25-0.45 denoise this workflow is built for, a prompt that contradicts the source fights it and smears."
     },
     "image": {
       "type": "string",
@@ -22,7 +22,8 @@
     },
     "negative_prompt": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, watermark'."
     },
     "width": {
       "type": "integer",

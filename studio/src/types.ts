@@ -15,6 +15,9 @@ export interface MediaItem {
   thumb?: string;
   prompt?: string | null;
   negative_prompt?: string | null;
+  // A human caption — what this asset is, as opposed to what was asked of the node.
+  // Null on everything until someone writes one.
+  description?: string | null;
   prompt_id?: string | null;
   character_ids?: string[];
   tags?: string[];
@@ -31,6 +34,16 @@ export interface MediaItem {
   // What the node actually ran with, read back from the submitted graph. Params the
   // caller left at a default are missing from `metadata` but present here.
   settings?: GraphSettings | null;
+}
+
+// The human-authored fields of an asset, as PATCH /api/media/{path}/metadata takes
+// them. Every key is optional and an omitted key is left alone, so saving a tag can
+// never clear a caption. A `description` of "" clears it.
+export interface MediaMetadataPatch {
+  description?: string;
+  tags?: string[];
+  character_ids?: string[];
+  included_in_training_dataset?: boolean;
 }
 
 // One sampling pass. Wan runs two over the same latent — high noise, then low — so a

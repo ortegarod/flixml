@@ -112,8 +112,9 @@ def main() -> None:
     out.append(
         "The complete catalog of shipped generation workflows, grouped by task. "
         "This is generated from each workflow's `.meta.json`, which is also served "
-        "live at `GET /api/workflows` — that endpoint is the source of truth and "
-        "may include extra per-install workflows kept in "
+        "live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` "
+        "for one workflow's params in full — those endpoints are the source of truth "
+        "and may include extra per-install workflows kept in "
         "`app/flixml/workflows/local/` (not listed here)."
     )
     out.append("")

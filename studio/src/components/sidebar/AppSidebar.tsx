@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Settings, Terminal, X, Cpu, Users, Search, Box, Film, Activity, Code2, Workflow } from "lucide-react";
+import { Settings, Terminal, X, Cpu, Users, Search, Box, Film, Activity, ChevronLeft, ChevronRight, Code2, Workflow } from "lucide-react";
 import type { ProjectModeData } from "../../types";
 import { WorkflowsTab } from "./WorkflowsTab";
 import { NodesTab } from "./NodesTab";
@@ -23,12 +23,13 @@ interface AppSidebarProps {
   activeTab: SidebarTab;
   collapsed?: boolean;
   onTabChange: (tab: SidebarTab) => void;
+  onToggleCollapsed: () => void;
   onClose: () => void;
   onSelectCharacter?: (characterId: string) => void;
   projectMode?: ProjectModeData;
 }
 
-export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose, onSelectCharacter, projectMode }: AppSidebarProps) {
+export function AppSidebar({ activeTab, collapsed = false, onTabChange, onToggleCollapsed, onClose, onSelectCharacter, projectMode }: AppSidebarProps) {
   const topTabs: { id: SidebarTab; icon: React.ReactNode; label: string }[] = [
     { id: "workflows", icon: <Workflow className="w-4 h-4" />, label: "Workflows" },
     { id: "jobs", icon: <Activity className="w-4 h-4" />, label: "Jobs" },
@@ -44,7 +45,9 @@ export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose,
   const tabs = [...topTabs, ...bottomTabs];
 
   return (
-    <div className="h-full flex flex-shrink-0 border-r border-gray-800/60 transition-[width] duration-200 absolute inset-y-0 left-0 z-50 max-w-[85vw] shadow-2xl shadow-black/50 md:static md:z-auto md:max-w-none md:shadow-none" style={{ width: `${collapsed ? 48 : SIDEBAR_WIDTH}px` }}>
+    // md:relative, not md:static: the panel is back in the flex flow on desktop but still the
+    // containing block for the collapse handle that straddles its right border.
+    <div className="h-full flex flex-shrink-0 border-r border-gray-800/60 transition-[width] duration-200 absolute inset-y-0 left-0 z-50 max-w-[85vw] shadow-2xl shadow-black/50 md:relative md:z-auto md:max-w-none md:shadow-none" style={{ width: `${collapsed ? 48 : SIDEBAR_WIDTH}px` }}>
       {/* Icon rail */}
       <div className="w-12 flex-shrink-0 bg-gray-950/60 border-r border-gray-800/40 flex flex-col items-center py-3 gap-1">
         {topTabs.map((tab) => (
@@ -120,6 +123,20 @@ export function AppSidebar({ activeTab, collapsed = false, onTabChange, onClose,
         </div>
       </div>
       )}
+
+      {/* Collapse handle on the panel's own edge. Clicking the active rail icon does the same
+          thing, but nothing on screen says so — this is the part you can actually see.
+          Desktop only: on mobile the sidebar is an overlay, where X is the way out, not a rail. */}
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-label={collapsed ? "Expand panel" : "Collapse panel"}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Expand panel" : "Collapse panel"}
+        className="absolute top-1/2 -right-3 z-10 hidden h-14 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-gray-800 bg-gray-950 text-gray-500 shadow-lg shadow-black/60 transition hover:border-brand hover:text-brand focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand md:flex"
+      >
+        {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+      </button>
     </div>
   );
 }

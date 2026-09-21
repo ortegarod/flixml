@@ -13,11 +13,12 @@
     "prompt": {
       "type": "string",
       "required": true,
-      "description": "Image prompt"
+      "description": "Comma-separated tags and short phrases, the way SDXL's training captions were written. A sentence still parses — it does not fail — but every article and preposition spends part of the same budget, so tags buy more control per token. Order is weight: subject, appearance, clothing, pose, setting, lighting, then medium and quality. 'young woman, short white hair, black leather jacket, standing in a rain-wet alley, neon signs, night, shallow depth of field, photorealistic, sharp focus'. Push or pull one term with `(term:1.2)` or `(term:0.8)`; bare `(term)` is 1.1. Keep it near 75 tokens — CLIP encodes the rest in a later chunk where it pulls less. Match the checkpoint: one trained on booru tags wants booru tags, one merged for realism wants photographic ones, and its model page is the authority on any trigger or quality tags it expects."
     },
     "negative_prompt": {
       "type": "string",
-      "default": ""
+      "default": "",
+      "description": "What to steer away from, same tag syntax. SDXL uses this — unlike FLUX.2, which has no negative and needs the positive to say 'sharp focus' instead. Start with the defects you actually see rather than a stock wall of tags: 'blurry, low quality, extra fingers, watermark, text'. An oversized negative eats guidance and flattens the image."
     },
     "width": {
       "type": "integer",
@@ -55,5 +56,14 @@
   },
   "compatible_providers": [
     "local"
+  ],
+  "examples": [
+    {
+      "prompt": "lighthouse on a basalt headland, storm surf below, low grey cloud, cold blue light, wide shot, photorealistic, sharp focus",
+      "negative_prompt": "blurry, low quality, watermark, text",
+      "checkpoint": "your-sdxl-checkpoint.safetensors",
+      "width": 1216,
+      "height": 832
+    }
   ]
 }
