@@ -41,6 +41,11 @@ export const workflowExamples: Record<string, WorkflowExample> = {
     src: "/workflow-examples/qwen_multiangle.webp",
     alt: "The blue and white porcelain teapot seen from a front-right quarter angle, spout left and handle right.",
   },
+  qwen_image_21: {
+    type: "image",
+    src: "/workflow-examples/qwen_image_21.webp",
+    alt: "A chalk sign on a market stall reading FRESH FIGS 3 FOR $2, crates of figs below it.",
+  },
   text_logo: {
     type: "image",
     src: "/workflow-examples/text_logo.webp",

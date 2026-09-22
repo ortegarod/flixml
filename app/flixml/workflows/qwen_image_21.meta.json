@@ -1,0 +1,84 @@
+{
+  "id": "qwen_image_21",
+  "name": "Qwen-Image 2.1",
+  "description": "Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use qwen_image_21_edit.",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "model_files_gb": 17.3,
+    "workflow_type": "qwen_image_21",
+    "supports_lora": false,
+    "requires_image": false,
+    "notes": "Graph follows ComfyUI's own template image_qwen_image_2_1_t2i, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files: 1024x1024 at 25 steps took 72 s, of which sampling was 17 s (about 0.7 s/step). The rest of the run is loading the weights and running the 8B encoder. The prompt's quoted sign text came out spelled exactly. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1)."
+  },
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "description": "Describe the picture. Put any text that should appear in the image in quotes."
+    },
+    "negative_prompt": {
+      "type": "str",
+      "default": "",
+      "description": "Only read when cfg is above 1."
+    },
+    "width": {
+      "type": "int",
+      "default": 1024,
+      "description": "Multiples of 32. Qwen's listed sizes run from 2048x2048 at 1:1 to 2752x1536 at 16:9."
+    },
+    "height": {
+      "type": "int",
+      "default": 1024,
+      "description": "Multiples of 32."
+    },
+    "seed": {
+      "type": "int",
+      "required": false,
+      "description": "Random seed (auto if omitted)"
+    },
+    "steps": {
+      "type": "int",
+      "default": 25,
+      "min": 1,
+      "max": 60,
+      "description": "ComfyUI's template runs 25; Qwen's own examples run 40."
+    },
+    "cfg": {
+      "type": "float",
+      "default": 1.0,
+      "description": "Keep at 1 for the official path. Raise it only to use a negative prompt."
+    },
+    "sampler": {
+      "type": "str",
+      "default": "euler"
+    },
+    "scheduler": {
+      "type": "str",
+      "default": "simple"
+    },
+    "unet": {
+      "type": "str",
+      "default": "qwen_image_2.1_int8_convrot.safetensors"
+    },
+    "clip": {
+      "type": "str",
+      "default": "qwen3vl_8b_int8_convrot.safetensors"
+    },
+    "vae": {
+      "type": "str",
+      "default": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "examples": [
+    {
+      "prompt": "A hand-painted wooden sign on a market stall that reads \"FRESH FIGS 3 FOR $2\" in chalky white letters, crates of figs below it, early morning side light, shallow depth of field.",
+      "width": 1024,
+      "height": 1024
+    }
+  ]
+}
