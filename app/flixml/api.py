@@ -583,6 +583,9 @@ class ShotRecord(BaseModel):
 
 
 class VideoGenerateRequest(BaseModel):
+    # See ImageGenerateRequest: unknown fields are rejected, not dropped.
+    model_config = ConfigDict(extra="forbid")
+
     mode: Literal["t2v", "i2v", "v2v"] | None = Field(
         default=None,
         description="t2v/i2v/v2v. Optional: derived from the workflow's task when omitted. v2v (e.g. InfiniteTalk motion+lip-sync) takes a driving video instead of a still image.",
@@ -698,11 +701,22 @@ class TTSGenerateResponse(BaseModel):
 
 
 class ShotGenerateRequest(BaseModel):
+    # Same rule as ImageGenerateRequest, and this body is the smallest one in the
+    # API: everything else comes off the shot record, so a caller sending a prompt
+    # or a character here is describing a shot it isn't allowed to change. Say so.
+    model_config = ConfigDict(extra="forbid")
+
     workflow: str = Field(description="Workflow id to run (see GET /api/workflows)")
     provider: str = Field(description="Provider id (see GET /api/providers)")
 
 
 class ImageGenerateRequest(BaseModel):
+    # Reject unknown fields instead of dropping them. `character_id` in place of
+    # `character` used to pass validation, lose the binding, and render a
+    # stranger's face with no error anywhere — the caller found out by looking
+    # at the picture. A 422 naming the real field costs one retry instead.
+    model_config = ConfigDict(extra="forbid")
+
     workflow: str = Field(
         min_length=1,
         description="Workflow id to run (e.g. from GET /api/workflows)",

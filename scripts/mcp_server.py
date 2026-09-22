@@ -214,11 +214,17 @@ def _generate_body(args):
     body = {
         key: args[key]
         for key in (
-            "workflow", "provider", "prompt", "negative_prompt", "image", "video",
+            "workflow", "provider", "prompt", "image", "video",
             "audio", "width", "height", "seed", "checkpoint", "character",
         )
         if args.get(key) is not None
     }
+    # The tool schema says negative_prompt because that is what the concept is
+    # called everywhere else; the API field is `negative`. Sent under the tool's
+    # own name it was dropped as an unknown field and the workflow's default
+    # negative ran instead, silently.
+    if args.get("negative_prompt") is not None:
+        body["negative"] = args["negative_prompt"]
     if args.get("workflow_params"):
         body["workflow_params"] = args["workflow_params"]
     return body
