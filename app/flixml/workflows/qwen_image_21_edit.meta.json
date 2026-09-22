@@ -1,0 +1,90 @@
+{
+  "id": "qwen_image_21_edit",
+  "name": "Qwen-Image 2.1 Reference Edit",
+  "description": "Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1>. Say what changes and what stays.",
+  "task": "image-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "model_files_gb": 17.3,
+    "workflow_type": "qwen_image_21",
+    "supports_lora": false,
+    "requires_image": true,
+    "notes": "Same weights as qwen_image_21, so any node that runs one runs the other. Graph follows ComfyUI's own template image_qwen_image_2_1_image_edit, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. The output takes the first reference's aspect ratio at about reference_resolution squared. The model accepts up to ten references; this graph wires three. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files, 25 steps: a one-reference edit at 832x1248 took 79 s, of which sampling was 23 s (about 0.95 s/step); ComfyUI's own two-reference example (a portrait and a shirt, reference_resolution 0, 896x1152) took 78 s, of which sampling was 40 s, and put the shirt on the person as asked. The rest of each run is loading the weights and running the 8B encoder. One instruction did not take: asked to rewrite the text on a chalk sign and swap the produce below it, it returned the reference nearly unchanged and oversharpened, twice, with two phrasings. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1)."
+  },
+  "params": {
+    "image": {
+      "type": "str",
+      "required": true,
+      "description": "First reference (image 1), as returned by /api/images/upload or a prior job."
+    },
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "description": "An instruction, not a scene description. Name what changes, then what stays, and refer to references as <image1>, <image2> in the order they were sent: image is <image1>, then images in order ('Keep the person and pose in <image1> unchanged, put the jacket from <image2> on them')."
+    },
+    "image_2": {
+      "type": "str",
+      "default": "",
+      "description": "Optional second reference. Send it through the request's images list rather than setting it directly, so Studio stages it on the node."
+    },
+    "image_3": {
+      "type": "str",
+      "default": "",
+      "description": "Optional third reference, sent the same way as image_2."
+    },
+    "negative_prompt": {
+      "type": "str",
+      "default": "",
+      "description": "Only read when cfg is above 1."
+    },
+    "reference_resolution": {
+      "type": "int",
+      "default": 1024,
+      "min": 0,
+      "max": 2048,
+      "description": "Each reference is resized to about this many pixels squared, keeping its aspect ratio; the output comes out at the first reference's size. 0 keeps each reference at its own size."
+    },
+    "seed": {
+      "type": "int",
+      "required": false,
+      "description": "Random seed (auto if omitted)"
+    },
+    "steps": {
+      "type": "int",
+      "default": 25,
+      "min": 1,
+      "max": 60,
+      "description": "ComfyUI's template runs 25; Qwen's own examples run 40."
+    },
+    "cfg": {
+      "type": "float",
+      "default": 1.0,
+      "description": "Keep at 1 for the official path. Raise it only to use a negative prompt."
+    },
+    "sampler": {
+      "type": "str",
+      "default": "euler"
+    },
+    "scheduler": {
+      "type": "str",
+      "default": "simple"
+    },
+    "unet": {
+      "type": "str",
+      "default": "qwen_image_2.1_int8_convrot.safetensors"
+    },
+    "clip": {
+      "type": "str",
+      "default": "qwen3vl_8b_int8_convrot.safetensors"
+    },
+    "vae": {
+      "type": "str",
+      "default": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "examples": []
+}

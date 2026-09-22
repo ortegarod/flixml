@@ -758,6 +758,11 @@ class ImageGenerateRequest(BaseModel):
         description="Source image filename or Studio output path for img2img / face-reference workflows.",
         json_schema_extra={"examples": ["images/source.png"]},
     )
+    images: list[str] | None = Field(
+        default=None,
+        description="More reference images after `image`, for workflows that take several. They fill the workflow's `image_2`, `image_3`, … params in order; sending more than the workflow has slots for is a 400. Requires `image`.",
+        json_schema_extra={"examples": [["images/outfit.png", "images/room.png"]]},
+    )
     denoise: float | None = Field(
         default=None,
         description="Denoise strength for img2img workflows (0.0 preserves source, 1.0 ignores it).",
@@ -3465,6 +3470,27 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         await agent.require_capacity()
     await _require_readable(agent, body.image)
 
+    # An edit workflow without its image would reach ComfyUI and fail there;
+    # say so here, where the caller can still fix the request.
+    meta = get_registry().get(body.workflow)
+    if meta and meta.requirements.get("requires_image") and body.image is None and not (body.workflow_params or {}).get("image"):
+        raise HTTPException(status_code=400, detail=f"{body.workflow} edits from a reference: send it in image.")
+
+    # Extra references map onto image_2, image_3, … — reject what has no slot
+    # rather than drop it, or the caller never learns the model didn't see it.
+    extra_image_keys: list[str] = []
+    if body.images:
+        if body.image is None:
+            raise HTTPException(status_code=400, detail="images needs image: the first reference goes in image, the rest in images.")
+        slots = meta.params if meta and meta.params else {}
+        extra_image_keys = [f"image_{i}" for i in range(2, len(body.images) + 2)]
+        missing = [key for key in extra_image_keys if key not in slots]
+        if missing:
+            available = sum(1 for key in slots if key == "image" or (key.startswith("image_") and key[6:].isdigit()))
+            raise HTTPException(status_code=400, detail=f"{body.workflow} takes {available} reference image(s) in total; got {len(body.images) + 1}.")
+        for reference in body.images:
+            await _require_readable(agent, reference)
+
     # Character presets (checkpoint, cfg/steps/sampler/scheduler, negative prompt,
     # resolution, look description) apply whenever the request doesn't explicitly
     # override them. Only the first resolved character's defaults are used —
@@ -3548,6 +3574,8 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         workflow_params["checkpoint"] = resolved_model
     if body.image is not None:
         workflow_params["image"] = await _ensure_comfy_input_image(body.image, body.provider)
+    for key, reference in zip(extra_image_keys, body.images or []):
+        workflow_params[key] = await _ensure_comfy_input_image(reference, body.provider)
     if body.workflow_params is not None:
         workflow_params.update(body.workflow_params)
 

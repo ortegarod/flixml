@@ -24,6 +24,7 @@ Template Variables:
     - {{filename_prefix}} — output path
     - {{lora_name}}, {{lora_strength}} — LoRA params
     - {{checkpoint}}, {{unet}}, {{clip}}, {{vae}} — model paths
+    - {{image}}, {{image_2}}, … — reference images; a LoadImage left empty is removed
     - Any additional params passed to build_workflow()
 """
 
@@ -215,8 +216,35 @@ class WorkflowRegistry:
         workflow = json.loads(json.dumps(template))
         self._substitute(workflow, merged)
         self._drop_empty_loras(workflow)
+        self._drop_empty_images(workflow)
 
         return workflow
+
+    @staticmethod
+    def _drop_empty_images(workflow: dict[str, Any]) -> None:
+        """Remove LoadImage nodes whose image came out empty, and the inputs they fed.
+
+        A workflow can take optional references — a node that accepts one to
+        several images. An unused slot is an empty string here; ComfyUI would
+        fail looking for a file by that name, so the loader goes and every input
+        wired to it is unset. A required input left unset is still an error, from
+        ComfyUI, which is right: that workflow needed the image.
+        """
+        for node_id, node in list(workflow.items()):
+            if not isinstance(node, dict) or node.get("class_type") != "LoadImage":
+                continue
+            name = node.get("inputs", {}).get("image")
+            unfilled = isinstance(name, str) and name.startswith("{{") and name.endswith("}}")
+            if not unfilled and name not in (None, ""):
+                continue
+
+            del workflow[node_id]
+            for other in workflow.values():
+                if not isinstance(other, dict):
+                    continue
+                inputs = other.get("inputs", {})
+                for key in [k for k, v in inputs.items() if isinstance(v, list) and v and v[0] == node_id]:
+                    del inputs[key]
 
     @staticmethod
     def _drop_empty_loras(workflow: dict[str, Any]) -> None:

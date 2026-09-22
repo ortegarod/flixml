@@ -6,16 +6,18 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**14 workflows** across 5 task types.
+**16 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
 | `flux2_dev_lora` | Text → Image | Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt |
 | `flux2_klein` | Text → Image | Text-to-image with FLUX.2 Klein 4B |
+| `qwen_image_21` | Text → Image | Qwen-Image 2.1 makes an image from a prompt |
 | `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint |
 | `sdxl_lora` | Text → Image | Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt |
 | `text_logo` | Text → Image | Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion |
 | `flux2_klein_edit` | Image → Image | Generate a new image from a reference image and a plain-English instruction |
+| `qwen_image_21_edit` | Image → Image | Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1> |
 | `qwen_multiangle` | Image → Image | Re-shoot an existing image of the same subject from a new camera angle |
 | `qwen_pose_edit` | Image → Image | Edit an existing image from a plain-English instruction — change a subject's pose, position, or what they're doing while holding their identity, clothing, the room, and lighting |
 | `sdxl_img2img` | Image → Image | Generate SDXL image variations from a source image using prompt guidance and denoise strength |
@@ -73,6 +75,28 @@ Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt, with two
   - `unet` · _str_ · default `flux-2-klein-4b-fp8.safetensors`
   - `clip` · _str_ · default `qwen_3_4b_fp4_flux2.safetensors`
   - `vae` · _str_ · default `flux2-vae.safetensors`
+
+### `qwen_image_21` — Qwen-Image 2.1
+
+Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use qwen_image_21_edit.
+
+- **Output:** image
+- **Requirements:** ~12 GB VRAM, loads ~17.3 GB of model files (VRAM + system RAM)
+- **Notes:** Graph follows ComfyUI's own template image_qwen_image_2_1_t2i, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files: 1024x1024 at 25 steps took 72 s, of which sampling was 17 s (about 0.7 s/step). The rest of the run is loading the weights and running the 8B encoder. The prompt's quoted sign text came out spelled exactly. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1).
+- **Providers:** local
+- **Params:**
+  - `prompt` · _str_ · **required** — Describe the picture. Put any text that should appear in the image in quotes.
+  - `negative_prompt` · _str_ · default `` — Only read when cfg is above 1.
+  - `width` · _int_ · default `1024` — Multiples of 32. Qwen's listed sizes run from 2048x2048 at 1:1 to 2752x1536 at 16:9.
+  - `height` · _int_ · default `1024` — Multiples of 32.
+  - `seed` · _int_ — Random seed (auto if omitted)
+  - `steps` · _int_ · default `25` — ComfyUI's template runs 25; Qwen's own examples run 40.
+  - `cfg` · _float_ · default `1.0` — Keep at 1 for the official path. Raise it only to use a negative prompt.
+  - `sampler` · _str_ · default `euler`
+  - `scheduler` · _str_ · default `simple`
+  - `unet` · _str_ · default `qwen_image_2.1_int8_convrot.safetensors`
+  - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors`
+  - `vae` · _str_ · default `qwen_image_2.1_vae_bf16.safetensors`
 
 ### `sdxl_base` — SDXL Base Image
 
@@ -157,6 +181,30 @@ Generate a new image from a reference image and a plain-English instruction. FLU
   - `unet` · _str_ · default `flux-2-klein-4b-fp8.safetensors`
   - `clip` · _str_ · default `qwen_3_4b_fp4_flux2.safetensors`
   - `vae` · _str_ · default `flux2-vae.safetensors`
+
+### `qwen_image_21_edit` — Qwen-Image 2.1 Reference Edit
+
+Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1>. Say what changes and what stays.
+
+- **Output:** image
+- **Requirements:** needs image, ~12 GB VRAM, loads ~17.3 GB of model files (VRAM + system RAM)
+- **Notes:** Same weights as qwen_image_21, so any node that runs one runs the other. Graph follows ComfyUI's own template image_qwen_image_2_1_image_edit, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. The output takes the first reference's aspect ratio at about reference_resolution squared. The model accepts up to ten references; this graph wires three. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files, 25 steps: a one-reference edit at 832x1248 took 79 s, of which sampling was 23 s (about 0.95 s/step); ComfyUI's own two-reference example (a portrait and a shirt, reference_resolution 0, 896x1152) took 78 s, of which sampling was 40 s, and put the shirt on the person as asked. The rest of each run is loading the weights and running the 8B encoder. One instruction did not take: asked to rewrite the text on a chalk sign and swap the produce below it, it returned the reference nearly unchanged and oversharpened, twice, with two phrasings. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1).
+- **Providers:** local
+- **Params:**
+  - `image` · _str_ · **required** — First reference (image 1), as returned by /api/images/upload or a prior job.
+  - `prompt` · _str_ · **required** — An instruction, not a scene description. Name what changes, then what stays, and refer to references as <image1>, <image2> in the order they were sent: image is <image1>, then images in order ('Keep the person and pose in <image1> unchanged, put the jacket from <image2> on them').
+  - `image_2` · _str_ · default `` — Optional second reference. Send it through the request's images list rather than setting it directly, so Studio stages it on the node.
+  - `image_3` · _str_ · default `` — Optional third reference, sent the same way as image_2.
+  - `negative_prompt` · _str_ · default `` — Only read when cfg is above 1.
+  - `reference_resolution` · _int_ · default `1024` — Each reference is resized to about this many pixels squared, keeping its aspect ratio; the output comes out at the first reference's size. 0 keeps each reference at its own size.
+  - `seed` · _int_ — Random seed (auto if omitted)
+  - `steps` · _int_ · default `25` — ComfyUI's template runs 25; Qwen's own examples run 40.
+  - `cfg` · _float_ · default `1.0` — Keep at 1 for the official path. Raise it only to use a negative prompt.
+  - `sampler` · _str_ · default `euler`
+  - `scheduler` · _str_ · default `simple`
+  - `unet` · _str_ · default `qwen_image_2.1_int8_convrot.safetensors`
+  - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors`
+  - `vae` · _str_ · default `qwen_image_2.1_vae_bf16.safetensors`
 
 ### `qwen_multiangle` — Qwen Multi-Angle (re-angle a still)
 
