@@ -8,8 +8,7 @@
     "vram_gb": 12,
     "model_files_gb": 36.8,
     "workflow_type": "wan22",
-    "supports_lora": true,
-    "notes": "Sampling VRAM is set by context_length, not by length, so a 161-frame clip costs the same per step as an 81-frame one and just runs more windows; 161 frames measured at 368 s on a 12 GB RTX 4070 Ti against 184 s for 81 frames. The VAE decode at the end scales with the full length; ComfyUI falls back to tiled decoding automatically if it runs out of memory there (comfy/sd.py, VAE.decode). Uses the generic ContextWindowsManual node with dim=2 rather than WanContextWindowsManual: on ComfyUI 0.18.1 the Wan-specific node has no retain-first-frame control, and without it the later windows lose the subject entirely."
+    "supports_lora": true
   },
   "params": {
     "prompt": {

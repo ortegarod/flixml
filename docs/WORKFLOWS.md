@@ -35,7 +35,6 @@ Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consist
 
 - **Output:** image
 - **Requirements:** supports LoRA, ~24 GB VRAM, loads ~48.1 GB of model files (VRAM + system RAM)
-- **Notes:** Stays on the FLUX.2-dev weights, and a LoRA is bound to the exact variant it was trained on: a dev-trained LoRA will not load into Klein, whose transformer is a different width and block count, so this workflow cannot follow flux2_klein down to the small models. TESTED 2026-09-07 on RTX 4070 Ti (12 GB) + 16 GB system RAM. FLUX.2-dev is ~32B: the fp8 weights are 35 GB plus a 12 GB text encoder, far more than that machine's GPU memory and RAM combined, so weights spill to disk. Real timing: 32 min @24 steps, 15 min @8-step turbo, 18 min with Q3_K_S GGUF + turbo. Needs a 24 GB+ GPU to run without spilling. For fast local iteration use flux2_klein (Klein 4B) or SDXL.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Natural language, written as sentences — FLUX.2 reads a description, not a tag list, and word order is weight, so lead with the subject and close with atmosphere. Subject, action, style, context; 30-80 words for most shots. There is no negative prompt in FLUX.2: describe what you want ('sharp focus throughout'), never what you don't. A camera, lens or film stock buys more photorealism than the word 'professional'. With a character LoRA loaded, put its trigger word at the front and then describe only what the LoRA doesn't carry — pose, clothing, setting, light. Re-describing a face the LoRA was trained on works against it.
@@ -58,7 +57,6 @@ Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt, with two
 
 - **Output:** image
 - **Requirements:** supports LoRA, ~8 GB VRAM, loads ~8.3 GB of model files (VRAM + system RAM)
-- **Notes:** Defaults to FLUX.2 Klein 4B fp8 (4.07 GB) plus the fp4 Qwen3-4B encoder (3.85 GB), about 8.3 GB of weights with the VAE. Klein is the distilled line and renders in 4 steps. TESTED 2026-09-19 at 1024x1024, 4 steps, same prompt and seed on both cards: fp8 on an 8 GB RTX 2060 Super took 29 s, bf16 (7.75 GB) on a 12 GB RTX 4070 Ti took 37 s, and the two outputs are visually identical — fp8 costs nothing here. The unet and clip params reach any FLUX.2 weights present on the node; FLUX.2-dev (35 GB fp8 plus a 12 GB Mistral encoder) wants 24 GB VRAM and spills badly below that — 32 min for a single image on the 4070 Ti — so dev belongs on flux2_dev_lora, the only workflow the dev-trained LoRAs load into.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Natural language sentences, not tags — the opposite of an SDXL prompt. Subject, then action, then style, then context, in that order: word order is weight, so lead with the subject and close with atmosphere. 30-80 words suits most shots. 'A businessman in a charcoal grey suit resting his arms on a bamboo railing at a secluded beach, illustrated in a vintage woodblock print style, calm turquoise water under a hazy afternoon sky.' FLUX.2 has no negative prompt and this graph has no node for one, so describe what you want instead of what you don't — 'sharp focus throughout', not 'not blurry'. For photorealism, name a camera, lens or film stock rather than saying 'professional'.
@@ -78,11 +76,10 @@ Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt, with two
 
 ### `qwen_image_21` — Qwen-Image 2.1
 
-Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use qwen_image_21_edit.
+Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use qwen_image_21_edit. Qwen Research License: non-commercial use only.
 
 - **Output:** image
 - **Requirements:** ~12 GB VRAM, loads ~17.3 GB of model files (VRAM + system RAM)
-- **Notes:** Graph follows ComfyUI's own template image_qwen_image_2_1_t2i, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files: 1024x1024 at 25 steps took 72 s, of which sampling was 17 s (about 0.7 s/step). The rest of the run is loading the weights and running the 8B encoder. The prompt's quoted sign text came out spelled exactly. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1).
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** — Describe the picture. Put any text that should appear in the image in quotes.
@@ -95,7 +92,7 @@ Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use 
   - `sampler` · _str_ · default `euler`
   - `scheduler` · _str_ · default `simple`
   - `unet` · _str_ · default `qwen_image_2.1_int8_convrot.safetensors`
-  - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors`
+  - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors` — Text encoder file on the node. The default is the int8 build; qwen3vl_8b_w4a8.safetensors (6.31 GB) is a smaller one from the same repo for nodes short on system RAM.
   - `vae` · _str_ · default `qwen_image_2.1_vae_bf16.safetensors`
 
 ### `sdxl_base` — SDXL Base Image
@@ -164,10 +161,9 @@ Generate a new image from a reference image and a plain-English instruction. FLU
 
 - **Output:** image
 - **Requirements:** needs image, supports LoRA, ~8 GB VRAM, loads ~8.3 GB of model files (VRAM + system RAM)
-- **Notes:** Same weights as flux2_klein — FLUX.2 Klein 4B fp8 plus the Qwen3-4B encoder — so any node that runs flux2_klein runs this. The reference is VAE-encoded and attached to both conditioning branches through ReferenceLatent; sampling starts from an empty latent, which is why the output is a new frame rather than a repaint of the source. Output size follows the reference's aspect after it is scaled to reference_megapixels. Graph follows the official ComfyUI template image_flux2_klein_image_edit_4b_distilled (docs.comfy.org/tutorials/flux/flux-2-klein). Klein 4B accepts up to four reference images (docs.bfl.ml/guides/prompting_editing_overview); this graph wires one. A fine detail that is small or low-contrast in a single reference — a scar, a tattoo, a logo — may not survive, and naming it in the prompt makes the model draw its own rather than copy it. More references is the lever for that, not more words.
 - **Providers:** local, cloud_serverless
 - **Params:**
-  - `image` · _str_ · **required** — Reference image filename, as returned by /api/images/upload or a prior job
+  - `image` · _str_ · **required** — Reference image filename
   - `prompt` · _str_ · **required** — An instruction, not a scene description. Name the change, then name what stays: 'Change her outfit to a black leather coat and place her on a castle rampart at dusk. Keep her face and hair exactly as they are.' Never re-describe the subject's face, hair or body — the reference carries them, and describing them again makes the model draw its own version instead.
   - `seed` · _int_ — Random seed (auto if omitted)
   - `lora_name` · _str_ · default `` — Optional LoRA file in the node's loras folder. Leave empty and the slot is removed from the graph entirely. A FLUX.2 LoRA is built for one variant: a Klein 4B LoRA does not load on Klein 9B or on FLUX.2-dev, and a dev LoRA does not load here — the residual stream is 3072 wide on 4B against 6144 on dev, so the tensors do not fit. Match the LoRA's stated base model to the weights in the unet param.
@@ -184,14 +180,13 @@ Generate a new image from a reference image and a plain-English instruction. FLU
 
 ### `qwen_image_21_edit` — Qwen-Image 2.1 Reference Edit
 
-Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1>. Say what changes and what stays.
+Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1>. Say what changes and what stays. Qwen Research License: non-commercial use only.
 
 - **Output:** image
 - **Requirements:** needs image, ~12 GB VRAM, loads ~17.3 GB of model files (VRAM + system RAM)
-- **Notes:** Same weights as qwen_image_21, so any node that runs one runs the other. Graph follows ComfyUI's own template image_qwen_image_2_1_image_edit, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. The output takes the first reference's aspect ratio at about reference_resolution squared. The model accepts up to ten references; this graph wires three. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files, 25 steps: a one-reference edit at 832x1248 took 79 s, of which sampling was 23 s (about 0.95 s/step); ComfyUI's own two-reference example (a portrait and a shirt, reference_resolution 0, 896x1152) took 78 s, of which sampling was 40 s, and put the shirt on the person as asked. The rest of each run is loading the weights and running the 8B encoder. One instruction did not take: asked to rewrite the text on a chalk sign and swap the produce below it, it returned the reference nearly unchanged and oversharpened, twice, with two phrasings. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1).
 - **Providers:** local
 - **Params:**
-  - `image` · _str_ · **required** — First reference (image 1), as returned by /api/images/upload or a prior job.
+  - `image` · _str_ · **required** — First reference (image 1).
   - `prompt` · _str_ · **required** — An instruction, not a scene description. Name what changes, then what stays, and refer to references as <image1>, <image2> in the order they were sent: image is <image1>, then images in order ('Keep the person and pose in <image1> unchanged, put the jacket from <image2> on them').
   - `image_2` · _str_ · default `` — Optional second reference. Send it through the request's images list rather than setting it directly, so Studio stages it on the node.
   - `image_3` · _str_ · default `` — Optional third reference, sent the same way as image_2.
@@ -203,7 +198,7 @@ Qwen-Image 2.1 makes a new image from one to three reference images and a plain-
   - `sampler` · _str_ · default `euler`
   - `scheduler` · _str_ · default `simple`
   - `unet` · _str_ · default `qwen_image_2.1_int8_convrot.safetensors`
-  - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors`
+  - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors` — Text encoder file on the node. The default is the int8 build; qwen3vl_8b_w4a8.safetensors (6.31 GB) is a smaller one from the same repo for nodes short on system RAM.
   - `vae` · _str_ · default `qwen_image_2.1_vae_bf16.safetensors`
 
 ### `qwen_multiangle` — Qwen Multi-Angle (re-angle a still)
@@ -212,7 +207,6 @@ Re-shoot an existing image of the same subject from a new camera angle. Qwen-Ima
 
 - **Output:** image
 - **Requirements:** needs image, ~12 GB VRAM, loads ~31.3 GB of model files (VRAM + system RAM)
-- **Notes:** Uses the fp8 model file, same as qwen_pose_edit, where fp8 tested about 40% faster than the Q4_K_M .gguf on an RTX 4070 Ti (2026-09-14). Also runs with this workflow's multi-angle LoRA on the fp8 file (tested 2026-09-14).
 - **Providers:** local
 - **Params:**
   - `image` · _string_ · **required** — Source image filename or Studio output path to re-angle
@@ -225,7 +219,6 @@ Edit an existing image from a plain-English instruction — change a subject's p
 
 - **Output:** image
 - **Requirements:** needs image, ~12 GB VRAM, loads ~30.2 GB of model files (VRAM + system RAM)
-- **Notes:** TESTED 2026-09-14 on RTX 4070 Ti (12 GB) + 16 GB system RAM, 20 steps at 832x1248, same prompt and seed: the fp8 file (20.5 GB) sampled at 5.8 s per step, the Q4_K_M .gguf (13.2 GB) at 9.7 s per step, with near-identical output. The fp8 file is larger but the card does fp8 math natively and ComfyUI's Dynamic VRAM streams it from disk. A Q3_K_L .gguf (10.6 GB) was no faster than Q4_K_M and drew worse anatomy.
 - **Providers:** local
 - **Params:**
   - `image` · _string_ · **required** — Source image filename or Studio output path to edit
@@ -261,7 +254,6 @@ Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no 
 
 - **Output:** video
 - **Requirements:** ~12 GB VRAM, loads ~38.0 GB of model files (VRAM + system RAM)
-- **Notes:** UNTESTED: not yet run end-to-end with the default fp8_scaled UNets and T2V lightx2v LoRAs. The fp8 .safetensors defaults load through ComfyUI's Dynamic VRAM path, which streams weights from disk instead of holding them in RAM. GGUF files skip that path in ComfyUI-GGUF (PR #427 unmerged) and keep both experts in system RAM, so a GGUF swap needs its own RAM check.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Text prompt: subject, setting, and action. Describe big physical action with strong verbs (walks, jumps, turns). Words like subtle, slowly, or gently produce a near-still clip.
@@ -328,7 +320,6 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
 
 - **Output:** video
 - **Requirements:** supports LoRA, ~12 GB VRAM, loads ~36.8 GB of model files (VRAM + system RAM)
-- **Notes:** TESTED 2026-09-14 on RTX 4070 Ti (12 GB) + 16 GB system RAM, 768x528, 49 frames, 30 steps, same image, prompt and seed: the fp8_scaled pair (2x14.3 GB) finished in 594 s, the Q3_K_S .gguf pair (2x6.5 GB) in 723 s, with the same composition and slightly more motion on fp8. Steady sampling was about 10.9 s per step on fp8; the Q3 run sampled at 13 to 14 s per step. The fp8 files load through ComfyUI's Dynamic VRAM path; .gguf files do not.
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Motion prompt. Name an action a viewer could describe afterwards - she stands up and walks toward the camera, he throws the bag over his shoulder. Add a camera instruction on top of it, never instead of it. Words like subtle, slowly or gently are instructions to do nothing.
@@ -366,7 +357,6 @@ Image-to-video past the model's 81-frame limit, generated as ONE clip instead of
 
 - **Output:** video
 - **Requirements:** supports LoRA, ~12 GB VRAM, loads ~36.8 GB of model files (VRAM + system RAM)
-- **Notes:** Sampling VRAM is set by context_length, not by length, so a 161-frame clip costs the same per step as an 81-frame one and just runs more windows; 161 frames measured at 368 s on a 12 GB RTX 4070 Ti against 184 s for 81 frames. The VAE decode at the end scales with the full length; ComfyUI falls back to tiled decoding automatically if it runs out of memory there (comfy/sd.py, VAE.decode). Uses the generic ContextWindowsManual node with dim=2 rather than WanContextWindowsManual: on ComfyUI 0.18.1 the Wan-specific node has no retain-first-frame control, and without it the later windows lose the subject entirely.
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** — Motion prompt. Name an action a viewer could describe afterwards - she stands up and walks toward the camera, he throws the bag over his shoulder. Add a camera instruction on top of it, never instead of it. Words like subtle, slowly or gently are instructions to do nothing. One sustained action works better here than a sequence: every window reads the same prompt, so asking for a beginning and an end gives you neither.

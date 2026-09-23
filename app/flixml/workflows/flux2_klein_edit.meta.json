@@ -9,14 +9,13 @@
     "model_files_gb": 8.3,
     "workflow_type": "flux2",
     "supports_lora": true,
-    "requires_image": true,
-    "notes": "Same weights as flux2_klein — FLUX.2 Klein 4B fp8 plus the Qwen3-4B encoder — so any node that runs flux2_klein runs this. The reference is VAE-encoded and attached to both conditioning branches through ReferenceLatent; sampling starts from an empty latent, which is why the output is a new frame rather than a repaint of the source. Output size follows the reference's aspect after it is scaled to reference_megapixels. Graph follows the official ComfyUI template image_flux2_klein_image_edit_4b_distilled (docs.comfy.org/tutorials/flux/flux-2-klein). Klein 4B accepts up to four reference images (docs.bfl.ml/guides/prompting_editing_overview); this graph wires one. A fine detail that is small or low-contrast in a single reference — a scar, a tattoo, a logo — may not survive, and naming it in the prompt makes the model draw its own rather than copy it. More references is the lever for that, not more words."
+    "requires_image": true
   },
   "params": {
     "image": {
       "type": "str",
       "required": true,
-      "description": "Reference image filename, as returned by /api/images/upload or a prior job"
+      "description": "Reference image filename"
     },
     "prompt": {
       "type": "str",

@@ -142,9 +142,6 @@ def main() -> None:
                 out.append("")
             out.append(f"- **Output:** {m.get('output_type', 'image')}")
             out.append(f"- **Requirements:** {requirement_flags(m.get('requirements', {}))}")
-            notes = (m.get("requirements") or {}).get("notes")
-            if notes:
-                out.append(f"- **Notes:** {notes}")
             providers = m.get("compatible_providers") or []
             if providers:
                 out.append(f"- **Providers:** {', '.join(providers)}")

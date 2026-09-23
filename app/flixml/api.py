@@ -13,7 +13,7 @@ import wave
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -430,7 +430,7 @@ async def _require_readable(agent: Agent | None, filename: str | None) -> None:
         return
     source = _resolve_output_file(filename)
     if source is None:
-        return  # not an output file; a ComfyUI input name or URL, resolved by the node
+        return  # not an output file; staging rejects an image, passes audio/video on to the node
     rel = source.resolve().relative_to(_OUTPUT_DIR.resolve()).as_posix()
     if not await can_read_file(agent, rel):
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
@@ -463,7 +463,6 @@ app.openapi = custom_openapi
 class CharacterBinding(BaseModel):
     id: str = Field(min_length=1)
     role: str | None = None
-    reference_image: str | None = None
     lora_strength: float | None = None
 
 
@@ -503,7 +502,6 @@ class CharacterDefaults(BaseModel):
     image_width: int | None = None
     image_height: int | None = None
     negative_prompt: str | None = None
-    reference_image: str | None = None
 
 
 class CharacterRecord(BaseModel):
@@ -1090,20 +1088,6 @@ async def _reconcile_loop() -> None:
         await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
 
 
-# The rest of the route, once a caller is looking at one workflow's params and has to
-# turn them into a finished job. It rides on the single-workflow response only: the
-# catalog is a list and stays a list, and nothing here is worth repeating sixteen
-# times. Nothing in Studio's own UI reads this route, so it can say as much as an
-# agent arriving without the guide needs.
-_AFTER_PARAMS = {
-    "nodes": "GET /api/nodes — which GPU nodes are up and how much VRAM each has. Check it against this workflow's requirements.vram_gb.",
-    "models": "GET /api/comfy/models/checkpoints?provider=<provider> — the checkpoint filenames installed on that node, if this workflow's params include `checkpoint`.",
-    "upload": "POST /api/images/upload — put a source image on the server first, if this workflow's params include `image`.",
-    "status": "GET /api/jobs/{prompt_id} — the submitted job's progress, and its output files once it finishes.",
-    "guide": "GET /api/guide — this install's agent guide as Markdown: how the pieces fit together, and where the docs are.",
-}
-
-
 def _workflow_entry(
     w: WorkflowMetadata,
     run_times: dict[str, Any],
@@ -1129,16 +1113,10 @@ def _workflow_entry(
 def _summarize(entry: dict) -> dict:
     """Strip a workflow entry down to what picking between workflows needs.
 
-    Two fields go: `params`, and the `notes` inside `requirements`. Both are prose
-    about driving one workflow — how a param behaves, what a run measured — and both
-    are long on purpose. Neither helps a caller choose, so they live on the detail
-    route and the list says where that is.
+    `params` goes: it says how to drive one workflow, not which one to pick, so it
+    lives on the detail route and the list says where that is.
     """
-    summary = {k: v for k, v in entry.items() if k != "params"}
-    requirements = summary.get("requirements")
-    if isinstance(requirements, dict) and "notes" in requirements:
-        summary["requirements"] = {k: v for k, v in requirements.items() if k != "notes"}
-    return summary
+    return {k: v for k, v in entry.items() if k != "params"}
 
 
 @app.get("/api/workflows")
@@ -1182,16 +1160,11 @@ async def list_workflows(
 async def get_workflow(
     workflow_id: str, agent: Agent | None = Depends(current_agent)
 ) -> dict:
-    """One workflow's complete record — every param, and the rest of the route.
+    """One workflow's complete record, with every param.
 
     This is what to read once `GET /api/workflows` has told you which workflow you
     want. `params` gives each input's type, whether it is required, its default, and
-    what the value does; `requirements.notes` carries what this workflow measured on
-    real hardware. Both are long because driving a workflow well needs them.
-
-    `next` names every call left between here and a finished job — where to check the
-    nodes, list checkpoints, upload a source image, submit, and poll. Nothing in the
-    Studio UI reads this route, so it can say as much as an agent needs.
+    what the value does.
     """
     registry = get_registry()
     w = registry.get(workflow_id)
@@ -1204,10 +1177,6 @@ async def get_workflow(
     examples = await workflow_examples(owner_id=owner_scope(agent))
     entry = _workflow_entry(w, run_times, examples)
     entry.pop("details", None)  # you are already here
-    entry["next"] = {
-        "generate": "POST /api/video/generate" if w.output_type == "video" else "POST /api/image/generate",
-        **_AFTER_PARAMS,
-    }
     return entry
 
 
@@ -1367,20 +1336,10 @@ def _character_loras(records: list[dict[str, Any]], workflow: str, bindings: lis
     return loras
 
 
-def _character_reference_image(binding: CharacterBinding, record: dict[str, Any]) -> str | None:
-    if binding.reference_image and binding.reference_image != "latest_best":
-        return binding.reference_image
-    defaults = record.get("defaults") or {}
-    if defaults.get("reference_image"):
-        return defaults["reference_image"]
-    images = record.get("source_images") or []
-    return images[0] if images else None
-
-
 async def _ensure_comfy_input_image(image: str, provider: str | None = None) -> str:
     source = _resolve_output_file(image)
     if source is None:
-        return image
+        raise HTTPException(status_code=404, detail=f"Image not found in Studio: {image}")
     # Upload to the node that will run the job, not the default node. Otherwise
     # the image lands on the wrong machine when image and video run on separate nodes.
     node = comfy_node_for_provider(provider)
@@ -1415,17 +1374,20 @@ async def _ensure_comfy_input_audio(audio: str, provider: str | None = None) -> 
 def _resolve_output_file(name: str) -> Path | None:
     """Resolve a caller-supplied output reference to a real file under _OUTPUT_DIR.
 
-    Callers pass paths like 'videos/clip.mp4' or 'clip.wav'. Try the relative
-    subpath first (the common case for anything in outputs/videos, outputs/images,
-    etc.), then fall back to the bare filename at the output root. Returns None on
-    miss. Path components are stripped to their parts to keep resolution inside
-    _OUTPUT_DIR (no traversal).
+    Callers pass any of the three names a gallery item carries: `filename`
+    ('images/x.png'), `name` ('x.png') or `url` ('/media/images/x.png', with or
+    without a host). Try the relative subpath first, then the bare filename at the
+    output root and in each media folder. Returns None on miss. Path components are
+    stripped to their parts to keep resolution inside _OUTPUT_DIR (no traversal).
     """
-    rel = Path(name)
+    rel = Path(urlparse(name).path)
+    parts = [p for p in rel.parts if p not in ("..", "/")]
+    if parts[:1] == ["media"]:
+        parts = parts[1:]
     candidates = []
-    if rel.parts:
-        candidates.append(_OUTPUT_DIR.joinpath(*[p for p in rel.parts if p not in ("..", "/")]))
-    candidates.append(_OUTPUT_DIR / rel.name)
+    if parts:
+        candidates.append(_OUTPUT_DIR.joinpath(*parts))
+    candidates += [_OUTPUT_DIR / folder / rel.name for folder in ("", "images", "videos", "audio")]
     for c in candidates:
         if c.is_file():
             return c
@@ -1886,9 +1848,6 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
         raise HTTPException(status_code=400, detail="Shot motion_prompt is required")
 
     character_ids = await _project_character_ids(project_id, scene_id, shot)
-    resolved = await _resolve_characters(None, _character_bindings_from_ids(character_ids))
-    bindings = [binding for binding, _ in resolved]
-    records = [record for _, record in resolved]
 
     if agent is not None:
         agent.require_workflow(body.workflow)
@@ -1897,10 +1856,8 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
 
     image = shot.get("image_file")
     await _require_readable(agent, image)
-    if not image and resolved:
-        image = _character_reference_image(bindings[0], records[0])
     if not image:
-        raise HTTPException(status_code=400, detail="Shot image_file or character reference image is required")
+        raise HTTPException(status_code=400, detail="Shot image_file is required")
     comfy_image = await _ensure_comfy_input_image(image, body.provider)
 
     project = await get_project(project_id)
@@ -2521,11 +2478,10 @@ async def upload_image(file: UploadFile = File(...), agent: Agent | None = Depen
 @app.post("/api/video/generate", response_model=VideoGenerateResponse)
 async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depends(current_agent)) -> VideoGenerateResponse:
     """Submit a single video generation job (t2v, i2v, or v2v)."""
-    # Character resolution only supplies a fallback reference image for i2v.
-    # Wan video takes identity from the image, so character triggers and character LoRAs
-    # are not injected here. Model/LoRA names come from the workflow meta (override via a local/ meta).
+    # Characters are only recorded on the job. Wan video takes identity from the image,
+    # so character triggers and character LoRAs are not injected here. Model/LoRA names
+    # come from the workflow meta (override via a local/ meta).
     resolved = await _resolve_characters(body.character, body.characters)
-    bindings = [binding for binding, _ in resolved]
     character_records = [record for _, record in resolved]
     prompt = body.prompt
 
@@ -2542,15 +2498,13 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
         await _require_readable(agent, reference)
 
     image = body.image
-    if body.mode == "i2v" and not image and resolved:
-        image = _character_reference_image(bindings[0], character_records[0])
     if image:
         image = await _ensure_comfy_input_image(image, body.provider)
 
     filename_prefix = _resolve_filename_prefix(body.filename_prefix, "videos")
 
     if body.mode == "i2v" and not image:
-        raise HTTPException(status_code=400, detail="image is required for i2v mode. Upload first with /api/images/upload or supply a character with a reference image.")
+        raise HTTPException(status_code=400, detail="image is required for i2v mode.")
 
     service = GenerationService()
 
@@ -2572,7 +2526,7 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
     # to the run node the same way the image is staged, then hand VHS_LoadVideo the filename.
     if body.mode == "v2v":
         if not body.video:
-            raise HTTPException(status_code=400, detail="video is required for v2v mode. Upload the driving motion clip first, then pass its filename.")
+            raise HTTPException(status_code=400, detail="video is required for v2v mode.")
         workflow_params["video"] = await _ensure_comfy_input_video(body.video, body.provider)
         # Length is handled the author's way: the `length` meta default is a
         # generous frame cap, and MultiTalkWav2VecEmbeds internally clamps it to

@@ -51,7 +51,7 @@ Each node becomes a provider named `local-<id>`, here `local-gpu-1` and `local-g
 
 ### Characters
 
-Register persistent characters with LoRA associations, trigger words, and reference images. Reference them by name in any generation — the Studio resolves the right LoRA for that workflow and injects the character's trigger word with it. A workflow the character has no LoRA for loads none and injects no trigger: the likeness is its base prompt alone.
+Register persistent characters with LoRA associations and trigger words. Reference them by name in any generation — the Studio resolves the right LoRA for that workflow and injects the character's trigger word with it. A workflow the character has no LoRA for loads none and injects no trigger: the likeness is its base prompt alone.
 
 ### Agent Identity & API Keys
 

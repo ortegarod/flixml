@@ -8,8 +8,7 @@
     "vram_gb": 12,
     "model_files_gb": 38.0,
     "workflow_type": "wan22",
-    "supports_lora": false,
-    "notes": "UNTESTED: not yet run end-to-end with the default fp8_scaled UNets and T2V lightx2v LoRAs. The fp8 .safetensors defaults load through ComfyUI's Dynamic VRAM path, which streams weights from disk instead of holding them in RAM. GGUF files skip that path in ComfyUI-GGUF (PR #427 unmerged) and keep both experts in system RAM, so a GGUF swap needs its own RAM check."
+    "supports_lora": false
   },
   "params": {
     "prompt": {
