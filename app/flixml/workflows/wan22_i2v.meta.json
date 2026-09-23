@@ -8,8 +8,7 @@
     "vram_gb": 12,
     "model_files_gb": 36.8,
     "workflow_type": "wan22",
-    "supports_lora": true,
-    "notes": "TESTED 2026-09-14 on RTX 4070 Ti (12 GB) + 16 GB system RAM, 768x528, 49 frames, 30 steps, same image, prompt and seed: the fp8_scaled pair (2x14.3 GB) finished in 594 s, the Q3_K_S .gguf pair (2x6.5 GB) in 723 s, with the same composition and slightly more motion on fp8. Steady sampling was about 10.9 s per step on fp8; the Q3 run sampled at 13 to 14 s per step. The fp8 files load through ComfyUI's Dynamic VRAM path; .gguf files do not."
+    "supports_lora": true
   },
   "params": {
     "prompt": {

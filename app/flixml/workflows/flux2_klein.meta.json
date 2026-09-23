@@ -8,8 +8,7 @@
     "vram_gb": 8,
     "model_files_gb": 8.3,
     "workflow_type": "flux2",
-    "supports_lora": true,
-    "notes": "Defaults to FLUX.2 Klein 4B fp8 (4.07 GB) plus the fp4 Qwen3-4B encoder (3.85 GB), about 8.3 GB of weights with the VAE. Klein is the distilled line and renders in 4 steps. TESTED 2026-09-19 at 1024x1024, 4 steps, same prompt and seed on both cards: fp8 on an 8 GB RTX 2060 Super took 29 s, bf16 (7.75 GB) on a 12 GB RTX 4070 Ti took 37 s, and the two outputs are visually identical — fp8 costs nothing here. The unet and clip params reach any FLUX.2 weights present on the node; FLUX.2-dev (35 GB fp8 plus a 12 GB Mistral encoder) wants 24 GB VRAM and spills badly below that — 32 min for a single image on the 4070 Ti — so dev belongs on flux2_dev_lora, the only workflow the dev-trained LoRAs load into."
+    "supports_lora": true
   },
   "params": {
     "prompt": {

@@ -1,7 +1,7 @@
 {
   "id": "qwen_image_21_edit",
   "name": "Qwen-Image 2.1 Reference Edit",
-  "description": "Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1>. Say what changes and what stays.",
+  "description": "Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1>. Say what changes and what stays. Qwen Research License: non-commercial use only.",
   "task": "image-to-image",
   "output_type": "image",
   "requirements": {
@@ -9,14 +9,13 @@
     "model_files_gb": 17.3,
     "workflow_type": "qwen_image_21",
     "supports_lora": false,
-    "requires_image": true,
-    "notes": "Same weights as qwen_image_21, so any node that runs one runs the other. Graph follows ComfyUI's own template image_qwen_image_2_1_image_edit, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. The output takes the first reference's aspect ratio at about reference_resolution squared. The model accepts up to ten references; this graph wires three. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files, 25 steps: a one-reference edit at 832x1248 took 79 s, of which sampling was 23 s (about 0.95 s/step); ComfyUI's own two-reference example (a portrait and a shirt, reference_resolution 0, 896x1152) took 78 s, of which sampling was 40 s, and put the shirt on the person as asked. The rest of each run is loading the weights and running the 8B encoder. One instruction did not take: asked to rewrite the text on a chalk sign and swap the produce below it, it returned the reference nearly unchanged and oversharpened, twice, with two phrasings. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1)."
+    "requires_image": true
   },
   "params": {
     "image": {
       "type": "str",
       "required": true,
-      "description": "First reference (image 1), as returned by /api/images/upload or a prior job."
+      "description": "First reference (image 1)."
     },
     "prompt": {
       "type": "str",
@@ -76,7 +75,8 @@
     },
     "clip": {
       "type": "str",
-      "default": "qwen3vl_8b_int8_convrot.safetensors"
+      "default": "qwen3vl_8b_int8_convrot.safetensors",
+      "description": "Text encoder file on the node. The default is the int8 build; qwen3vl_8b_w4a8.safetensors (6.31 GB) is a smaller one from the same repo for nodes short on system RAM."
     },
     "vae": {
       "type": "str",

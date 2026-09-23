@@ -1,7 +1,7 @@
 {
   "id": "qwen_image_21",
   "name": "Qwen-Image 2.1",
-  "description": "Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use qwen_image_21_edit.",
+  "description": "Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use qwen_image_21_edit. Qwen Research License: non-commercial use only.",
   "task": "text-to-image",
   "output_type": "image",
   "requirements": {
@@ -9,8 +9,7 @@
     "model_files_gb": 17.3,
     "workflow_type": "qwen_image_21",
     "supports_lora": false,
-    "requires_image": false,
-    "notes": "Graph follows ComfyUI's own template image_qwen_image_2_1_t2i, and needs ComfyUI v0.37.0 or later (TextEncodeQwenImage21, QwenImage21Cache). Default files are Comfy-Org/Qwen-Image-2.1's int8 builds: the 7B transformer qwen_image_2.1_int8_convrot (7.26 GB), the Qwen3-VL 8B encoder qwen3vl_8b_int8_convrot (9.35 GB) and the VAE (0.68 GB). The same repo ships a smaller encoder, qwen3vl_8b_w4a8 (6.31 GB), for machines short on system RAM; pass it as clip. The weights and encoder together exceed an 8 GB card. TESTED 2026-09-22 on a 12 GB RTX 4070 Ti with the default int8 files: 1024x1024 at 25 steps took 72 s, of which sampling was 17 s (about 0.7 s/step). The rest of the run is loading the weights and running the 8B encoder. The prompt's quoted sign text came out spelled exactly. License: Qwen Research License, non-commercial use only (huggingface.co/Qwen/Qwen-Image-2.1)."
+    "requires_image": false
   },
   "params": {
     "prompt": {
@@ -64,7 +63,8 @@
     },
     "clip": {
       "type": "str",
-      "default": "qwen3vl_8b_int8_convrot.safetensors"
+      "default": "qwen3vl_8b_int8_convrot.safetensors",
+      "description": "Text encoder file on the node. The default is the int8 build; qwen3vl_8b_w4a8.safetensors (6.31 GB) is a smaller one from the same repo for nodes short on system RAM."
     },
     "vae": {
       "type": "str",
