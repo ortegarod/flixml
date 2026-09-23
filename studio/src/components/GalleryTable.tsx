@@ -67,7 +67,7 @@ function toRow(entry: GalleryEntry): Row {
     prompt: item.prompt,
     negative: item.negative_prompt || meta.negative || params.negative_prompt || params.negative,
     label: item.filename || item.name,
-    workflow: meta.workflow,
+    workflow: item.workflow,
     node: meta.provider,
     width: meta.width ?? item.width,
     height: meta.height ?? item.height,

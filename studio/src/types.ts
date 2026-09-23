@@ -23,6 +23,8 @@ export interface MediaItem {
   tags?: string[];
   included_in_training_dataset?: boolean;
   metadata?: Record<string, any> | null;
+  // Workflow id that produced the file; null for imports.
+  workflow?: string | null;
   // When the producing job was submitted; for imports, when the file was added.
   submitted_at?: string | null;
   // When the producing job ran on its node; null for imports and jobs from before run times were recorded.

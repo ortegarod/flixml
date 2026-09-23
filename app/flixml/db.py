@@ -1247,7 +1247,8 @@ async def list_media(
                (SELECT created_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_created_at,
                (SELECT started_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_started_at,
                (SELECT finished_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_finished_at,
-               (SELECT workflow_json FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow_json
+               (SELECT workflow_json FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow_json,
+               (SELECT metadata->>'workflow' FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow
         FROM media
         WHERE {where}
         ORDER BY COALESCE(modified, created_at) DESC, filename DESC
