@@ -3,7 +3,6 @@ import { ArrowRight, Check, Film, Image, LayoutGrid, Search, SlidersHorizontal, 
 import { PendingMediaTile } from "./PendingMediaTile";
 import { MediaTile } from "./MediaTile";
 import { GalleryTable, type GalleryEntry } from "./GalleryTable";
-import { generateVideo } from "../api";
 import type { CharacterSummary, JobItem, MediaItem, MediaMetadataPatch } from "../types";
 
 type Filter = "all" | "images" | "videos";
@@ -73,7 +72,6 @@ export function StudioView({
   onBulkUpdateMetadata,
   onImported,
 }: StudioViewProps) {
-  const [generatingVideo, setGeneratingVideo] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -92,24 +90,6 @@ export function StudioView({
   const [importing, setImporting] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  const handleGenerateVideo = useCallback(async (item: MediaItem, motionPrompt: string) => {
-    const key = item.filename || item.url;
-    setGeneratingVideo((prev) => new Set(prev).add(key));
-    try {
-      await generateVideo({
-        image: item.filename || item.url.split("/").pop() || "",
-        prompt: motionPrompt || undefined,
-      });
-    } catch (err) {
-      console.error("I2V failed:", err);
-    } finally {
-      setGeneratingVideo((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  }, []);
 
 
   const itemKey = useCallback((item: MediaItem) => item.filename || item.url, []);
@@ -586,7 +566,6 @@ export function StudioView({
                 item={item}
                 onOpen={() => onOpen(item.url)}
                 onDelete={onDelete}
-                onGenerateVideo={handleGenerateVideo}
                 onRemoveFromDataset={async (target) => {
                   await onBulkUpdateMetadata([target], () => ({ included_in_training_dataset: false }));
                 }}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { Trash2, X, Play, Wand2, ArrowRight, Expand, Check, Bot } from "lucide-react";
+import { Trash2, X, Expand, Check, Bot } from "lucide-react";
 import type { MediaItem } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
 import { MediaPreview } from "./MediaPreview";
@@ -9,21 +9,24 @@ interface MediaTileProps {
   item: MediaItem;
   onOpen: () => void;
   onDelete: (item: MediaItem) => Promise<void> | void;
-  onGenerateVideo?: (item: MediaItem, motionPrompt: string) => void;
   onRemoveFromDataset?: (item: MediaItem) => Promise<void> | void;
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelected?: (item: MediaItem) => void;
 }
 
-export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFromDataset, selectionMode = false, selected = false, onToggleSelected }: MediaTileProps) {
+export function MediaTile({ item, onOpen, onDelete, onRemoveFromDataset, selectionMode = false, selected = false, onToggleSelected }: MediaTileProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [datasetOpen, setDatasetOpen] = useState(false);
   const [removingDataset, setRemovingDataset] = useState(false);
-  const [showI2VInput, setShowI2VInput] = useState(false);
-  const [motionPrompt, setMotionPrompt] = useState("");
   const [copied, setCopied] = useState(false);
+  const workflow = item.workflow;
+  // No workflow ran: say where the file came from instead, so every card carries a badge.
+  const origin = item.metadata?.stitched_from ? "stitched"
+    : item.metadata?.last_frame_of ? "last frame"
+    : item.filename?.startsWith("projects/") ? "project render"
+    : "upload";
 
   async function confirmRemoveDataset(event: React.MouseEvent) {
     event.stopPropagation();
@@ -200,71 +203,6 @@ export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFro
         </AlertDialog.Root>
       </div>
 
-      {/* I2V button / prompt — only for images */}
-      {!selectionMode && !deleteOpen && item.type === "image" && onGenerateVideo && (
-        <>
-          {!showI2VInput ? (
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                setShowI2VInput(true);
-              }}
-              className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-lg bg-black/65 border border-white/15 text-gray-100 text-[10px] font-medium px-2 py-1.5 backdrop-blur-sm opacity-0 group-hover:opacity-100 hover:bg-brand hover:border-brand hover:text-brand-foreground transition-all"
-              title="Generate Video"
-            >
-              <Wand2 className="w-3 h-3" />
-              I2V
-            </button>
-          ) : (
-            <div
-              className="absolute inset-0 z-20 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center gap-2 px-4"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <p className="text-[10px] uppercase tracking-wider text-white/60">Motion Prompt</p>
-              <input
-                autoFocus
-                value={motionPrompt}
-                onChange={(e) => setMotionPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    onGenerateVideo(item, motionPrompt);
-                    setShowI2VInput(false);
-                    setMotionPrompt("");
-                  }
-                  if (e.key === "Escape") {
-                    setShowI2VInput(false);
-                    setMotionPrompt("");
-                  }
-                }}
-                placeholder="camera push in, rain falling..."
-                className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-brand placeholder:text-gray-600"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setShowI2VInput(false);
-                    setMotionPrompt("");
-                  }}
-                  className="text-[10px] text-gray-500 hover:text-white transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    onGenerateVideo(item, motionPrompt);
-                    setShowI2VInput(false);
-                    setMotionPrompt("");
-                  }}
-                  className="flex items-center gap-1 text-[10px] text-brand hover:brightness-110 transition font-medium"
-                >
-                  Generate <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
       {/* Bottom info bar */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-6 opacity-0 group-hover:opacity-100 transition pointer-events-none">
         <p className="text-xs font-medium truncate text-white/90">{item.name || item.filename || "Untitled"}</p>
@@ -273,11 +211,13 @@ export function MediaTile({ item, onOpen, onDelete, onGenerateVideo, onRemoveFro
         )}
       </div>
 
-      {/* Video badge */}
-      {item.type === "video" && !selectionMode && (
-        <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-medium px-2 py-1 rounded-md flex items-center gap-1">
-          <Play className="w-2.5 h-2.5 fill-white" />
-          VIDEO
+      {/* Workflow badge — which workflow made this, or where the file came from when none did. */}
+      {!selectionMode && (
+        <div
+          title={workflow || origin}
+          className="absolute top-2 left-2 max-w-[calc(100%-7rem)] opacity-0 group-hover:opacity-100 transition-all bg-black/60 backdrop-blur-sm text-white text-[10px] font-medium px-2 py-1 rounded-md flex items-center"
+        >
+          <span className={workflow ? "truncate font-mono" : "truncate uppercase tracking-wide"}>{workflow || origin}</span>
         </div>
       )}
 

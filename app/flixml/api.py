@@ -3738,6 +3738,7 @@ async def listing(
             continue
         modified = row.get("modified") or row.get("updated_at") or row.get("created_at")
         mtime = modified.timestamp() if hasattr(modified, "timestamp") else (modified or 0)
+        meta = _parse_jsonb(row.get("metadata"))
         graph = db.graph_models(row.get("job_workflow_json"))
         if not graph["models"] and row.get("model"):
             # Older rows recorded the model on the media row and have no job graph.
@@ -3758,7 +3759,10 @@ async def listing(
             "character_ids": row.get("character_ids") or [],
             "tags": row.get("tags") or [],
             "included_in_training_dataset": row.get("included_in_training_dataset", False),
-            "metadata": _parse_jsonb(row.get("metadata")),
+            "metadata": meta,
+            # Older media rows never copied the workflow off their job; the job still has it.
+            # Imports have no job and no workflow.
+            "workflow": (meta or {}).get("workflow") or row.get("job_workflow"),
             # Imports have no job; when the file was added stands in for when it was submitted.
             "submitted_at": row.get("job_created_at") or row.get("created_at"),
             "started_at": row.get("job_started_at"),
