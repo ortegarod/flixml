@@ -492,7 +492,7 @@ async def update_training_job_status(
 
 def _character_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
-    for key in ("source_images", "loras", "voice", "defaults"):
+    for key in ("source_images", "loras", "voice"):
         value = data.get(key)
         if isinstance(value, str):
             with contextlib.suppress(json.JSONDecodeError):
@@ -514,8 +514,8 @@ async def upsert_character(character: dict[str, Any]) -> dict[str, Any]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO characters (id, name, kind, trigger, description, base_prompt, source_images, loras, voice, defaults, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,NOW())
+            INSERT INTO characters (id, name, kind, trigger, description, base_prompt, source_images, loras, voice, owner_id, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,NOW())
             ON CONFLICT (id) DO UPDATE SET
                 name=EXCLUDED.name,
                 kind=EXCLUDED.kind,
@@ -525,7 +525,7 @@ async def upsert_character(character: dict[str, Any]) -> dict[str, Any]:
                 source_images=EXCLUDED.source_images,
                 loras=EXCLUDED.loras,
                 voice=EXCLUDED.voice,
-                defaults=EXCLUDED.defaults,
+                owner_id=EXCLUDED.owner_id,
                 updated_at=NOW()
             RETURNING *
             """,
@@ -538,7 +538,7 @@ async def upsert_character(character: dict[str, Any]) -> dict[str, Any]:
             _json(character.get("source_images", [])),
             _json(character.get("loras", [])),
             _json(character.get("voice")),
-            _json(character.get("defaults", {})),
+            character.get("owner_id"),
         )
     return _character_row(row)
 
@@ -975,8 +975,8 @@ async def count_active_jobs_for_agent(agent_id: str) -> int:
 
 def _agent_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
-    for key in ("allowed_characters", "allowed_workflows"):
-        if data.get(key) is None:
+    for key in ("characters", "allowed_workflows"):
+        if key in data and data[key] is None:
             data[key] = []
     return data
 
@@ -986,21 +986,19 @@ async def create_agent(
     id: str,
     name: str,
     key_hash: str,
-    allowed_characters: list[str] | None = None,
     allowed_workflows: list[str] | None = None,
     max_concurrent_jobs: int | None = None,
     is_admin: bool = False,
 ) -> dict[str, Any]:
     row = await get_pool().fetchrow(
         """
-        INSERT INTO agents (id, name, key_hash, allowed_characters, allowed_workflows, max_concurrent_jobs, is_admin)
-        VALUES ($1, $2, $3, $4::text[], $5::text[], $6, $7)
+        INSERT INTO agents (id, name, key_hash, allowed_workflows, max_concurrent_jobs, is_admin)
+        VALUES ($1, $2, $3, $4::text[], $5, $6)
         RETURNING *
         """,
         id,
         name,
         key_hash,
-        allowed_characters or None,
         allowed_workflows or None,
         max_concurrent_jobs,
         is_admin,
@@ -1009,8 +1007,8 @@ async def create_agent(
 
 
 async def update_agent(agent_id: str, fields: dict[str, Any]) -> bool:
-    """Set any of name, enabled, allowed_characters, allowed_workflows, max_concurrent_jobs, is_admin, avatar, bio."""
-    columns = {"name": "", "enabled": "", "allowed_characters": "::text[]", "allowed_workflows": "::text[]", "max_concurrent_jobs": "", "is_admin": "", "avatar": "", "bio": ""}
+    """Set any of name, enabled, allowed_workflows, max_concurrent_jobs, is_admin, avatar, bio."""
+    columns = {"name": "", "enabled": "", "allowed_workflows": "::text[]", "max_concurrent_jobs": "", "is_admin": "", "avatar": "", "bio": ""}
     sets: list[str] = []
     params: list[Any] = [agent_id]
     for key, cast in columns.items():
@@ -1034,7 +1032,11 @@ async def get_agent(agent_id: str) -> dict[str, Any] | None:
 
 
 async def get_agent_by_key_hash(key_hash: str) -> dict[str, Any] | None:
-    row = await get_pool().fetchrow("SELECT * FROM agents WHERE key_hash=$1", key_hash)
+    row = await get_pool().fetchrow(
+        "SELECT a.*, ARRAY(SELECT c.id FROM characters c WHERE c.owner_id = a.id ORDER BY c.id) AS characters "
+        "FROM agents a WHERE a.key_hash=$1",
+        key_hash,
+    )
     return _agent_row(row) if row else None
 
 
@@ -1150,11 +1152,16 @@ def _media_where(
     training_dataset: bool | None = None,
     start_param: int = 1,
     owner_id: str | None = None,
+    viewer: tuple[str, list[str]] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a shared WHERE clause + params for media listing/count queries.
 
     Keeps list_media and media_count in lockstep so `total` always matches the
     rows that would be returned by a paged listing with the same filters.
+
+    `owner_id` narrows to one account's files. `viewer` is what a scoped key may see
+    at all — `(its id, the characters it owns)`: the files it made plus any
+    bound to one of those characters.
     """
     clauses = [
         "workflow_type IS DISTINCT FROM 'project_render'",
@@ -1223,6 +1230,14 @@ def _media_where(
         params.append(owner_id)
         clauses.append(f"metadata->>'owner_id' = {token}")
 
+    if viewer is not None:
+        viewer_id, viewer_characters = viewer
+        id_token = _next()
+        params.append(viewer_id)
+        chars_token = _next()
+        params.append(list(viewer_characters))
+        clauses.append(f"(metadata->>'owner_id' = {id_token} OR character_ids && {chars_token}::text[])")
+
     return " AND ".join(clauses), params
 
 
@@ -1236,8 +1251,9 @@ async def list_media(
     tag: str | None = None,
     training_dataset: bool | None = None,
     owner_id: str | None = None,
+    viewer: tuple[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id)
+    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id, viewer=viewer)
     limit_param = f"${len(params) + 1}"
     offset_param = f"${len(params) + 2}"
     # Submit and run times live on the job that produced the file. Scalar subqueries keep
@@ -1266,8 +1282,9 @@ async def media_count(
     tag: str | None = None,
     training_dataset: bool | None = None,
     owner_id: str | None = None,
+    viewer: tuple[str, list[str]] | None = None,
 ) -> int:
-    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id)
+    where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id, viewer=viewer)
     sql = f"SELECT COUNT(*) FROM media WHERE {where}"
     return int(await get_pool().fetchval(sql, *params) or 0)
 
@@ -1292,50 +1309,6 @@ async def media_counts_by_owner() -> dict[str, dict[str, int]]:
     rows = await get_pool().fetch(sql, *params)
     return {
         row["owner_id"]: {"images": int(row["images"]), "videos": int(row["videos"])}
-        for row in rows
-    }
-
-
-async def workflow_examples(owner_id: str | None = None) -> dict[str, dict[str, Any]]:
-    """One example output per workflow, from what this install has actually made.
-
-    A catalog of image and video tools has to show images. The media row records the
-    file; the workflow that made it lives on the job, so the two are joined on
-    prompt_id. Tag a file `showcase` to pin it as that workflow's example — otherwise
-    the newest output wins, so the catalog stays current with nobody curating it.
-    """
-    media_where, params = _media_where(None, None, None, owner_id=owner_id)
-    rows = await get_pool().fetch(
-        f"""
-        WITH picks AS (
-            SELECT j.metadata->>'workflow' AS workflow,
-                   m.filename, m.type, m.width, m.height, m.prompt_id,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY j.metadata->>'workflow'
-                       ORDER BY EXISTS (
-                                  SELECT 1 FROM unnest(m.tags) t WHERE LOWER(t) = 'showcase'
-                                ) DESC,
-                                m.created_at DESC
-                   ) AS n
-            FROM (SELECT * FROM media WHERE {media_where}) m
-            JOIN jobs j ON j.prompt_id = m.prompt_id
-            -- Status is deliberately not checked: the reconciler marks a job failed when
-            -- the node forgets it, which happens to old jobs whose output files are fine
-            -- and still in the gallery. The media row existing is the proof it ran.
-            WHERE j.metadata->>'workflow' IS NOT NULL
-        )
-        SELECT workflow, filename, type, width, height, prompt_id FROM picks WHERE n = 1
-        """,
-        *params,
-    )
-    return {
-        row["workflow"]: {
-            "filename": row["filename"],
-            "type": row["type"],
-            "width": row["width"],
-            "height": row["height"],
-            "prompt_id": row["prompt_id"],
-        }
         for row in rows
     }
 

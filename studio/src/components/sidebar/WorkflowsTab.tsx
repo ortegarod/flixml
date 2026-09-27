@@ -33,17 +33,6 @@ export interface WorkflowMeta {
   run_time?: {
     by_provider: Record<string, { median_seconds: number; min_seconds: number; max_seconds: number; samples: number }>;
   } | null;
-  // One output this install made with the workflow — tagged `showcase`, else the
-  // newest. Null until the workflow has produced something here.
-  example?: {
-    filename: string;
-    type: string;
-    url: string;
-    thumb: string;
-    width?: number;
-    height?: number;
-    prompt_id?: string;
-  } | null;
 }
 
 // ── Presentation maps ───────────────────────────────────────────────────────

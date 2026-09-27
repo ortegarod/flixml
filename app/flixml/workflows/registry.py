@@ -48,7 +48,7 @@ class WorkflowMetadata:
         self.requirements = data.get("requirements", {})
         self.params = data.get("params", {})
         self.compatible_providers = data.get("compatible_providers", [])
-        self.examples = data.get("examples", [])
+        self.example = data.get("example")
         # "shipped" for the workflows this project ships and documents; "local" for
         # anything found in local/, which is the operator's own file. Nothing here
         # describes a local workflow, so no caller may present one as documented.
@@ -66,7 +66,7 @@ class WorkflowMetadata:
             "requirements": self.requirements,
             "params": self.params,
             "compatible_providers": self.compatible_providers,
-            "examples": self.examples,
+            "example": self.example,
         }
 
 

@@ -23,7 +23,7 @@ https://flixml.com/docs/workflows/
 `/api/workflows` Pick a workflow and run it on an appropriate node. It lists what each one makes and needs. 
 
 `/api/workflows/{id}` then gives you the one you picked
-in full — every param, its default, and what the value does.
+in full — every param, its default, and what the value does. The `prompt` param's description is how to write the prompt for that workflow: its order, tags and wording. Follow it. When it's silent, the model author's page is the authority.
 
 Regardless of the workflow chosen, DO NOT wait for generation to complete, unless explicitly asked to. It lands in Studio UI.
 
@@ -49,7 +49,19 @@ One clip holds one action. `POST /api/video/last-frame` returns a finished clip'
 curl -s $API/api/characters
 ```
 
-When using a character, its `base_prompt` is prepended to yours, so write only the shot — pose, action, wardrobe, setting, light, framing. Describing the face again competes with the base prompt. Its `trigger` is injected only when that character's LoRA loads for the workflow you chose — check its `loras` for an entry naming that exact workflow. Without one, the likeness is the `base_prompt` alone.
+The characters your account owns: only those can be bound to your jobs, and one you create with `POST /api/characters` is yours. An admin key sees them all.
+
+A character's `base_prompt` is their look. Studio never adds it for you: copy it into your prompt where the workflow's prompt guide puts the subject. Binding a character doesn't change the workflow's settings. Its `trigger` is injected only when that character's LoRA loads for the workflow you chose — check its `loras` for an entry naming that exact workflow. Without one, the likeness is the look your prompt describes.
+
+### Your gallery
+
+```bash
+curl -s "$API/api/listing?view=summary"
+```
+
+What your key made, plus anything of the characters you own, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files. Without `view=summary` each item carries every setting it was made with.
+
+`PATCH /api/media/{filename}/metadata` with `{"tags": [...], "description": "..."}` replaces an item's tag list and sets its caption. Only the key that made a file can change it.
 
 
 ## More Info

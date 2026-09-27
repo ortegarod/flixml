@@ -30,11 +30,9 @@
   "compatible_providers": [
     "local"
   ],
-  "examples": [
-    {
-      "image": "images/portrait_still_00001_.png",
-      "prompt": "left side view eye-level shot medium shot",
-      "provider": "local-gpu-1"
-    }
-  ]
+  "example": {
+    "image": "images/portrait_still_00001_.png",
+    "prompt": "left side view eye-level shot medium shot",
+    "provider": "local-gpu-1"
+  }
 }

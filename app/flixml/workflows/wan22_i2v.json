@@ -79,14 +79,14 @@
   "54": {
     "class_type": "ModelSamplingSD3",
     "inputs": {
-      "model": ["84", 0],
+      "model": ["86", 0],
       "shift": "{{shift}}"
     }
   },
   "55": {
     "class_type": "ModelSamplingSD3",
     "inputs": {
-      "model": ["85", 0],
+      "model": ["87", 0],
       "shift": "{{shift}}"
     }
   },
@@ -171,6 +171,28 @@
     },
     "_meta": {
       "title": "Load LoRA 2 (low noise)"
+    }
+  },
+  "86": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["84", 0],
+      "lora_name": "{{high_lora_3}}",
+      "strength_model": "{{high_lora_3_strength}}"
+    },
+    "_meta": {
+      "title": "Load LoRA 3 (high noise)"
+    }
+  },
+  "87": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["85", 0],
+      "lora_name": "{{low_lora_3}}",
+      "strength_model": "{{low_lora_3_strength}}"
+    },
+    "_meta": {
+      "title": "Load LoRA 3 (low noise)"
     }
   }
 }

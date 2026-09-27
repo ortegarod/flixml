@@ -85,6 +85,5 @@
   },
   "compatible_providers": [
     "local"
-  ],
-  "examples": []
+  ]
 }

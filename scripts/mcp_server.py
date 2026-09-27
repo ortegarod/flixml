@@ -294,8 +294,9 @@ def tool_list_jobs(args):
 def tool_search_media(args):
     return api("GET", "/api/listing", params={
         "q": args.get("q"),
-        "limit": args.get("limit", 20),
-        "media_type": args.get("media_type"),
+        "limit": args.get("limit"),
+        "type": args.get("media_type"),
+        "view": "summary",
     })
 
 
@@ -517,9 +518,10 @@ TOOLS = {
     },
     "list_characters": {
         "description": (
-            "Characters defined in this Studio. A character carries its own prompt, "
-            "so passing `character` keeps a subject consistent across shots. Your key "
-            "may only be allowed some of them."
+            "The characters your account owns (an admin key sees all). Copy a "
+            "character's `base_prompt` into your prompt for its look; passing "
+            "`character` binds the result to it and loads its LoRA where one is set "
+            "for the workflow."
         ),
         "schema": _obj({}),
         "handler": tool_list_characters,

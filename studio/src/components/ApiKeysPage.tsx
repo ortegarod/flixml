@@ -11,7 +11,6 @@ interface AgentKey {
   name: string;
   enabled: boolean;
   is_admin: boolean;
-  allowed_characters: string[];
   allowed_workflows: string[];
   max_concurrent_jobs: number | null;
   created_at: string;
@@ -21,7 +20,6 @@ interface AgentKey {
 interface Scope {
   name: string;
   is_admin: boolean;
-  allowed_characters: string[];
   allowed_workflows: string[];
   max_concurrent_jobs: number | null;
 }
@@ -31,7 +29,11 @@ interface Option {
   label: string;
 }
 
-const emptyScope: Scope = { name: "", is_admin: false, allowed_characters: [], allowed_workflows: [], max_concurrent_jobs: null };
+interface OwnedCharacter extends Option {
+  owner_id: string | null;
+}
+
+const emptyScope: Scope = { name: "", is_admin: false, allowed_workflows: [], max_concurrent_jobs: null };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -59,10 +61,11 @@ function lastUsed(iso: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function scopeSummary(agent: AgentKey): string {
+// Characters belong to accounts, not keys: this only reports which ones the account owns.
+function scopeSummary(agent: AgentKey, characters: OwnedCharacter[]): string {
   if (agent.is_admin) return "everything";
-  const characters = agent.allowed_characters.length ? agent.allowed_characters.join(", ") : "any character";
-  return `its own work · ${characters}`;
+  const owned = characters.filter((c) => c.owner_id === agent.id).map((c) => c.label);
+  return owned.length ? `its own work · owns ${owned.join(", ")}` : "its own work";
 }
 
 // The key is only ever in the create/rotate response, so this panel is the one chance to copy it.
@@ -135,10 +138,9 @@ function Chips({ legend, hint, options, selected, onChange }: {
   );
 }
 
-function ScopeForm({ initial, isNew, characters, workflows, lockAdmin, onSubmit, onCancel }: {
+function ScopeForm({ initial, isNew, workflows, lockAdmin, onSubmit, onCancel }: {
   initial: Scope & { id?: string };
   isNew: boolean;
-  characters: Option[];
   workflows: Option[];
   lockAdmin: boolean;
   onSubmit: (scope: Scope & { id?: string }) => Promise<void>;
@@ -211,18 +213,11 @@ function ScopeForm({ initial, isNew, characters, workflows, lockAdmin, onSubmit,
           <span className="block text-xs text-gray-400">
             {lockAdmin
               ? "This is the key you're signed in with, so it stays admin."
-              : "Sees everything and can manage keys. Without it, the key sees only what it creates."}
+              : "Sees everything and can manage keys. Without it, the key sees what it creates and any image or video of a character its account owns."}
           </span>
         </span>
       </label>
 
-      <Chips
-        legend="Characters"
-        hint="None selected allows every character."
-        options={characters}
-        selected={scope.allowed_characters}
-        onChange={(allowed_characters) => setScope({ ...scope, allowed_characters })}
-      />
       <Chips
         legend="Workflows"
         hint="None selected allows every workflow."
@@ -256,7 +251,7 @@ export function ApiKeysPage() {
   const [agents, setAgents] = useState<AgentKey[] | null>(null);
   const [me, setMe] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const [characters, setCharacters] = useState<Option[]>([]);
+  const [characters, setCharacters] = useState<OwnedCharacter[]>([]);
   const [workflows, setWorkflows] = useState<Option[]>([]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -275,8 +270,8 @@ export function ApiKeysPage() {
   useEffect(() => {
     load();
     request<{ agent: { id: string } | null }>("/api/session").then((s) => setMe(s.agent?.id ?? null)).catch(() => {});
-    request<{ characters: { id: string; name: string }[] }>("/api/characters")
-      .then((d) => setCharacters(d.characters.map((c) => ({ id: c.id, label: c.name }))))
+    request<{ characters: { id: string; name: string; owner_id: string | null }[] }>("/api/characters")
+      .then((d) => setCharacters(d.characters.map((c) => ({ id: c.id, label: c.name, owner_id: c.owner_id }))))
       .catch(() => {});
     request<{ id: string; name?: string }[]>("/api/workflows")
       .then((d) => setWorkflows(d.map((w) => ({ id: w.id, label: w.id }))))
@@ -308,8 +303,10 @@ export function ApiKeysPage() {
         <div className="max-w-2xl space-y-1">
           <h2 className="text-lg font-semibold text-white">API keys</h2>
           <p className="text-sm text-gray-400">
-            Give each agent its own key. It sends the key as <code className="font-mono text-gray-300">Authorization: Bearer &lt;key&gt;</code>. An admin key sees everything. Any other key sees only the images, videos, jobs
-            and projects it creates, and only the characters and workflows you allow.
+            Give each agent its own key. It sends the key as <code className="font-mono text-gray-300">Authorization: Bearer &lt;key&gt;</code>. An admin key sees everything. Any other key sees the images, videos, jobs
+            and projects it creates, plus any image or video of a character its account owns, whoever made it. It can
+            only edit or delete what it created, only use its own characters, and only the workflows you allow. A
+            character's owner is set on the character's page.
           </p>
           <p className="text-sm text-gray-500">
             This page is the key half of an account.{" "}
@@ -335,7 +332,6 @@ export function ApiKeysPage() {
           <ScopeForm
             initial={emptyScope}
             isNew
-            characters={characters}
             workflows={workflows}
             lockAdmin={false}
             onCancel={() => setCreating(false)}
@@ -380,7 +376,7 @@ export function ApiKeysPage() {
                       {isMe && <span className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-300">You</span>}
                     </p>
                     <p className="mt-1 text-xs text-gray-400">
-                      Sees {scopeSummary(agent)}
+                      Sees {scopeSummary(agent, characters)}
                       {!agent.is_admin && agent.allowed_workflows.length > 0 && ` · workflows: ${agent.allowed_workflows.join(", ")}`}
                       {agent.max_concurrent_jobs !== null && ` · ${agent.max_concurrent_jobs} jobs at once`}
                       {` · last used ${lastUsed(agent.last_used_at).toLowerCase()}`}
@@ -451,9 +447,8 @@ export function ApiKeysPage() {
                 {editing === agent.id && (
                   <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
                     <ScopeForm
-                      initial={{ id: agent.id, name: agent.name, is_admin: agent.is_admin, allowed_characters: agent.allowed_characters, allowed_workflows: agent.allowed_workflows, max_concurrent_jobs: agent.max_concurrent_jobs }}
+                      initial={{ id: agent.id, name: agent.name, is_admin: agent.is_admin, allowed_workflows: agent.allowed_workflows, max_concurrent_jobs: agent.max_concurrent_jobs }}
                       isNew={false}
-                      characters={characters}
                       workflows={workflows}
                       lockAdmin={isMe}
                       onCancel={() => setEditing(null)}

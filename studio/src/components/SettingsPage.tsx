@@ -107,7 +107,7 @@ export function AccountSettings() {
                     <ShieldCheck className="h-3 w-3" aria-hidden /> Admin
                   </span>
                 ) : (
-                  "Scoped: sees only what it creates"
+                  "Scoped: sees what it creates and its characters' media"
                 )}
               </dd>
             </div>

@@ -2,9 +2,9 @@
 """Create, list, and revoke agent API keys.
 
 Each caller (AI agent, script, human) gets its own key. An admin key sees
-everything; any other key sees only the jobs, media and projects it created and
-the characters in its allowlist, and can be limited to certain workflows or
-capped on concurrent jobs. Admin keys can also manage keys in Studio under
+everything; any other key sees the jobs, media and projects it created, the
+characters it owns and any media of them, and can be limited to certain workflows or
+capped on concurrent jobs. A character's owner is set on the character, not the key. Admin keys can also manage keys in Studio under
 Settings → API keys, which is open to anyone while keys aren't required; this
 script does the same from a terminal.
 
@@ -16,9 +16,9 @@ by you instead, so it never lands in a terminal log.
 
 Usage (run from the repo root, with .env's DATABASE_URL available):
     python scripts/manage_agent_keys.py create <id> <name> [--admin] \\
-        [--characters my_character] [--workflows sdxl_lora] [--max-concurrent 1] [--key-file PATH]
+        [--workflows sdxl_lora] [--max-concurrent 1] [--key-file PATH]
     python scripts/manage_agent_keys.py update <id> [--admin | --no-admin] \\
-        [--characters a,b] [--workflows a,b] [--max-concurrent N]   (pass "" to clear a list)
+        [--workflows a,b] [--max-concurrent N]   (pass "" to clear a list)
     python scripts/manage_agent_keys.py list
     python scripts/manage_agent_keys.py rotate <id> [--key-file PATH]
     python scripts/manage_agent_keys.py revoke <id>
@@ -59,8 +59,6 @@ def _emit_key(raw_key: str, key_file: str | None, label: str) -> None:
 def _describe(agent: dict) -> None:
     if agent["is_admin"]:
         print("  admin: sees everything")
-    if agent["allowed_characters"]:
-        print(f"  characters: {', '.join(agent['allowed_characters'])}")
     if agent["allowed_workflows"]:
         print(f"  workflows:  {', '.join(agent['allowed_workflows'])}")
     if agent["max_concurrent_jobs"] is not None:
@@ -79,7 +77,6 @@ async def cmd_create(args: argparse.Namespace) -> None:
         id=args.id,
         name=args.name,
         key_hash=hash_key(raw_key),
-        allowed_characters=_split(args.characters),
         allowed_workflows=_split(args.workflows),
         max_concurrent_jobs=args.max_concurrent,
         is_admin=args.admin,
@@ -94,8 +91,6 @@ async def cmd_update(args: argparse.Namespace) -> None:
     fields: dict = {}
     if args.admin is not None:
         fields["is_admin"] = args.admin
-    if args.characters is not None:
-        fields["allowed_characters"] = _split(args.characters)
     if args.workflows is not None:
         fields["allowed_workflows"] = _split(args.workflows)
     if args.max_concurrent is not None:
@@ -150,7 +145,6 @@ async def main() -> None:
     p_create = sub.add_parser("create", help="Provision a new agent + API key")
     p_create.add_argument("id", help="Slug, e.g. 'my-agent'")
     p_create.add_argument("name", help="Display name")
-    p_create.add_argument("--characters", help="Comma-separated character id allowlist (default: unrestricted)")
     p_create.add_argument("--workflows", help="Comma-separated workflow id allowlist (default: unrestricted)")
     p_create.add_argument("--max-concurrent", type=int, default=None, help="Max in-flight jobs for this agent")
     p_create.add_argument("--admin", action="store_true", help="See and manage everything, not just what this agent owns")
@@ -161,7 +155,6 @@ async def main() -> None:
     p_update.add_argument("id")
     p_update.add_argument("--admin", dest="admin", action="store_true", default=None)
     p_update.add_argument("--no-admin", dest="admin", action="store_false")
-    p_update.add_argument("--characters", help='Comma-separated character allowlist; "" allows all')
     p_update.add_argument("--workflows", help='Comma-separated workflow allowlist; "" allows all')
     p_update.add_argument("--max-concurrent", type=int, help="Max in-flight jobs; 0 removes the cap")
     p_update.set_defaults(func=cmd_update)

@@ -88,12 +88,10 @@
     "local",
     "cloud_serverless"
   ],
-  "examples": [
-    {
-      "prompt": "A weathered fishing boat moored at a stone quay before dawn, ropes coiled on the deck, shot on Kodak Portra 400 at 35mm f/2, soft blue pre-sunrise light and still water holding the reflection.",
-      "width": 1024,
-      "height": 1024,
-      "steps": 4
-    }
-  ]
+  "example": {
+    "prompt": "A weathered fishing boat moored at a stone quay before dawn, ropes coiled on the deck, shot on Kodak Portra 400 at 35mm f/2, soft blue pre-sunrise light and still water holding the reflection.",
+    "width": 1024,
+    "height": 1024,
+    "steps": 4
+  }
 }

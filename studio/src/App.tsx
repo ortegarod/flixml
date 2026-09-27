@@ -58,7 +58,7 @@ const LISTING_PAGE_SIZE = 60;
 export type GalleryFilter = "all" | "images" | "videos";
 
 interface ListingPage {
-  images: MediaItem[];
+  items: MediaItem[];
   total: number;
   offset: number;
   limit: number;
@@ -621,8 +621,8 @@ function AppRoutes() {
       return fetchJson<ListingPage>(`/api/listing?${params.toString()}`, 8000);
     },
     getNextPageParam: (lastPage) => {
-      const next = lastPage.offset + lastPage.images.length;
-      return next < lastPage.total && lastPage.images.length > 0 ? next : undefined;
+      const next = lastPage.offset + lastPage.items.length;
+      return next < lastPage.total && lastPage.items.length > 0 ? next : undefined;
     },
     refetchInterval: 5000,
   });
@@ -651,7 +651,7 @@ function AppRoutes() {
   });
 
   const items = useMemo(
-    () => (listingQuery.data?.pages ?? []).flatMap((page) => page.images),
+    () => (listingQuery.data?.pages ?? []).flatMap((page) => page.items),
     [listingQuery.data]
   );
   const filteredTotal = listingQuery.data?.pages?.[0]?.total ?? 0;
@@ -786,9 +786,13 @@ function AppRoutes() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ files: [filename] }),
       });
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
         throw new Error(data?.detail || `Failed to delete ${filename}`);
+      }
+      // The route answers 200 with per-file failures, e.g. another account's picture of your character.
+      if (data?.failed?.length) {
+        throw new Error(`Couldn't delete ${filename}: ${data.failed[0].error}`);
       }
       return { item, filename };
     },
@@ -805,7 +809,7 @@ function AppRoutes() {
           ...data,
           pages: data.pages.map((page) => ({
             ...page,
-            images: page.images.filter((candidate) => key(candidate) !== targetKey),
+            items: page.items.filter((candidate) => key(candidate) !== targetKey),
             total: Math.max(0, page.total - 1),
           })),
         });
@@ -877,12 +881,15 @@ function AppRoutes() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files }),
     });
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
       throw new Error(data?.detail || `Failed to delete ${files.length} files`);
     }
-    if (itemsToDelete.some((item) => item.url === selected)) setSelected(null);
-    toast.success(`Deleted ${files.length} item${files.length === 1 ? "" : "s"}`);
+    const deleted: string[] = data?.deleted ?? files;
+    if (itemsToDelete.some((item) => item.url === selected && deleted.includes(item.filename || item.url.replace(/^\/media\//, "")))) setSelected(null);
+    if (deleted.length) toast.success(`Deleted ${deleted.length} item${deleted.length === 1 ? "" : "s"}`);
+    const failed: { file: string; error: string }[] = data?.failed ?? [];
+    if (failed.length) toast.error(`Couldn't delete ${failed.length} item${failed.length === 1 ? "" : "s"}: ${failed[0].error}`);
     queryClient.invalidateQueries({ queryKey: listingKeyBase });
     queryClient.invalidateQueries({ queryKey: countsKey });
   }, [queryClient, selected]);

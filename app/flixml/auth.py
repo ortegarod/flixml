@@ -1,9 +1,10 @@
 """Agent identity and scope: API keys that decide what each caller can see and do.
 
-A key resolves to an `Agent`. An admin key sees everything. Any other key sees only
-what it owns — the jobs and media it generated, the files it uploaded, the projects it
-created — plus the characters in its allowlist (all of them if the list is empty). A
-key can also be limited to certain workflows and capped on concurrent jobs.
+A key resolves to an `Agent`. An admin key sees everything. Any other key sees what
+it owns — the jobs and media it generated, the files it uploaded, the projects it
+created, the characters it owns — plus any media bound to one of its characters,
+whoever made it. It changes only what it made. A key can also be limited to certain
+workflows and capped on concurrent jobs.
 
 Callers send the key as `Authorization: Bearer <key>`. The Studio frontend can't put a
 header on an <img> request, so it signs in once through `POST /api/session`, which
@@ -39,7 +40,7 @@ bearer_scheme = HTTPBearer(
     scheme_name="bearerAuth",
     description=(
         "Agent API key (see scripts/manage_agent_keys.py). Required when config.json "
-        "security.require_api_key is true. A non-admin key only sees what it owns."
+        "security.require_api_key is true. A non-admin key sees what it owns, including the media of the characters it owns."
     ),
 )
 
@@ -78,7 +79,8 @@ class Agent:
         self.is_admin: bool = bool(row.get("is_admin"))
         # The public half of the row — the header shows it, so the session carries it.
         self.avatar: str | None = row.get("avatar")
-        self.allowed_characters: list[str] | None = row.get("allowed_characters") or None
+        # The characters this account owns, loaded with the key (`db.get_agent_by_key_hash`).
+        self.characters: list[str] = list(row.get("characters") or [])
         self.allowed_workflows: list[str] | None = row.get("allowed_workflows") or None
         self.max_concurrent_jobs: int | None = row.get("max_concurrent_jobs")
 
@@ -93,7 +95,7 @@ class Agent:
             )
 
     def can_use_character(self, character_id: str) -> bool:
-        return not self.allowed_characters or character_id in self.allowed_characters
+        return self.is_admin or character_id in self.characters
 
     def require_characters(self, character_ids: list[str]) -> None:
         for character_id in character_ids:
@@ -142,8 +144,37 @@ async def agent_for_key(raw_key: str) -> Agent | None:
     return Agent(row)
 
 
+def shared_characters(agent: Agent | None) -> list[str]:
+    """Characters whose files a scoped caller reads besides its own: those it owns.
+
+    A picture of a character is that character's, whoever made it.
+    """
+    if owner_scope(agent) is None:
+        return []
+    return list(agent.characters)
+
+
+def media_viewer(agent: Agent | None) -> tuple[str, list[str]] | None:
+    """The media a caller may list, as `db._media_where` takes it; None sees everything."""
+    scope = owner_scope(agent)
+    return None if scope is None else (scope, shared_characters(agent))
+
+
 async def can_read_file(agent: Agent | None, filename: str) -> bool:
-    """Whether the caller may read or reference an output file by its relative path."""
+    """Whether the caller may read or reference an output file by its relative path:
+    one it made, or one bound to a character it owns."""
+    if owner_scope(agent) is None:
+        return True
+    row = await db.get_media_by_filename(filename.lstrip("/"))
+    if row is None:
+        return False
+    if owns(agent, row.get("metadata")):
+        return True
+    return bool(set(row.get("character_ids") or []) & set(shared_characters(agent)))
+
+
+async def can_change_file(agent: Agent | None, filename: str) -> bool:
+    """Whether the caller may edit or delete an output file: only one it made."""
     if owner_scope(agent) is None:
         return True
     row = await db.get_media_by_filename(filename.lstrip("/"))

@@ -112,6 +112,5 @@
   "compatible_providers": [
     "local",
     "cloud_serverless"
-  ],
-  "examples": []
+  ]
 }

@@ -21,11 +21,11 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Requ
 from fastapi import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_read_file, current_agent, generate_key, hash_key, owner_scope, owns, set_session_cookie
+from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_change_file, can_read_file, current_agent, generate_key, hash_key, media_viewer, owner_scope, owns, set_session_cookie
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
-from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_examples, workflow_run_times
+from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
 from .workflows.registry import WorkflowMetadata, init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, ProviderNotFoundError, WorkflowNotFoundError
@@ -149,9 +149,9 @@ Core surfaces:
 Workflows and providers are discovered live (`GET /api/workflows`, `GET /api/providers`).
 
 **Agent identity:** send `Authorization: Bearer <key>` (keys come from
-`scripts/manage_agent_keys.py`). An admin key sees everything. Any other key sees only the
-jobs, media and projects it created, and only the characters in its allowlist; it can also
-be limited to certain workflows and capped on concurrent jobs. `config.json`
+`scripts/manage_agent_keys.py`). An admin key sees everything. Any other key sees the jobs,
+media and projects it created and the characters it owns, plus any media of those characters,
+whoever made it; it can also be limited to certain workflows and capped on concurrent jobs. `config.json`
 `security.require_api_key` (default false) decides whether a request with no key is rejected
 or served unrestricted. A key that is sent but unknown or revoked is always rejected.
 """
@@ -205,7 +205,6 @@ class AgentRecord(BaseModel):
     name: str
     enabled: bool
     is_admin: bool
-    allowed_characters: list[str]
     allowed_workflows: list[str]
     max_concurrent_jobs: int | None
     created_at: datetime
@@ -218,7 +217,6 @@ class AgentCreateRequest(BaseModel):
     id: str = Field(pattern=_AGENT_ID_PATTERN, description="Slug: lowercase letters, digits, - and _")
     name: str = Field(min_length=1, max_length=100)
     is_admin: bool = False
-    allowed_characters: list[str] = Field(default_factory=list, description="Empty allows every character")
     allowed_workflows: list[str] = Field(default_factory=list, description="Empty allows every workflow")
     max_concurrent_jobs: int | None = Field(default=None, ge=1)
 
@@ -229,7 +227,6 @@ class AgentUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     enabled: bool | None = None
     is_admin: bool | None = None
-    allowed_characters: list[str] | None = None
     allowed_workflows: list[str] | None = None
     max_concurrent_jobs: int | None = Field(default=None, ge=1)
 
@@ -298,7 +295,6 @@ async def create_agent_key(body: AgentCreateRequest) -> AgentKeyResponse:
         id=body.id,
         name=body.name,
         key_hash=hash_key(raw_key),
-        allowed_characters=body.allowed_characters,
         allowed_workflows=body.allowed_workflows,
         max_concurrent_jobs=body.max_concurrent_jobs,
         is_admin=body.is_admin,
@@ -315,9 +311,8 @@ async def update_agent_key(agent_id: str, body: AgentUpdateRequest, request: Req
         _refuse_self_lockout(current_agent(request), agent_id, "revoke")
     if fields.get("is_admin") is False:
         _refuse_self_lockout(current_agent(request), agent_id, "remove admin from")
-    for list_field in ("allowed_characters", "allowed_workflows"):
-        if list_field in fields:
-            fields[list_field] = fields[list_field] or None
+    if "allowed_workflows" in fields:
+        fields["allowed_workflows"] = fields["allowed_workflows"] or None
     await db.update_agent(agent_id, fields)
     return _agent_record(await _existing_agent(agent_id))
 
@@ -481,29 +476,6 @@ class VoiceConfig(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
-class CharacterDefaults(BaseModel):
-    """Known preset fields a character's `defaults` blob can carry.
-
-    Stored as a freeform dict in the DB (characters.defaults JSONB) so new keys
-    don't require a migration, but this model gives the fields we actually
-    consume in /api/image/generate real names, types, and API-doc visibility
-    instead of them being silent dead weight. Unknown extra keys are preserved
-    but not read by the API.
-    """
-    model_config = ConfigDict(extra="allow")
-
-    preferred_checkpoint: str | None = None
-    image_workflow: str | None = None
-    provider: str | None = None
-    cfg: float | None = None
-    steps: int | None = None
-    sampler: str | None = None
-    scheduler: str | None = None
-    image_width: int | None = None
-    image_height: int | None = None
-    negative_prompt: str | None = None
-
-
 class CharacterRecord(BaseModel):
     id: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$")
     name: str = Field(min_length=1)
@@ -514,8 +486,8 @@ class CharacterRecord(BaseModel):
     source_images: list[str] = Field(default_factory=list)
     loras: list[CharacterLoraBinding] = Field(default_factory=list)
     voice: VoiceConfig | None = None
-    defaults: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    owner_id: str | None = Field(default=None, description="The account that owns the character. Set by admin keys only; a new character belongs to whoever creates it.")
 
 
 class ProjectRecord(BaseModel):
@@ -738,14 +710,14 @@ class ImageGenerateRequest(BaseModel):
         description="Optional caption for the finished image — what it is, for a human reading the gallery. Not sent to the model.",
         json_schema_extra={"examples": ["The ridge at dusk, second pass"]},
     )
-    width: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
-    height: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
+    width: int | None = Field(default=None, description="Falls back to the workflow default if unset.")
+    height: int | None = Field(default=None, description="Falls back to the workflow default if unset.")
     seed: int | None = None
     filename_prefix: str | None = Field(default=None, json_schema_extra={"examples": ["images/character_portrait"]})
-    steps: int | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
-    cfg: float | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
-    sampler: str | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
-    scheduler: str | None = Field(default=None, description="Falls back to character defaults, then workflow defaults, if unset.")
+    steps: int | None = Field(default=None, description="Falls back to the workflow default if unset.")
+    cfg: float | None = Field(default=None, description="Falls back to the workflow default if unset.")
+    sampler: str | None = Field(default=None, description="Falls back to the workflow default if unset.")
+    scheduler: str | None = Field(default=None, description="Falls back to the workflow default if unset.")
     guidance: float = 4.0
     unet: str | None = None  # Workflow-specific, set by service
     clip: str | None = None  # Workflow-specific, set by service
@@ -1091,18 +1063,11 @@ async def _reconcile_loop() -> None:
 def _workflow_entry(
     w: WorkflowMetadata,
     run_times: dict[str, Any],
-    examples: dict[str, Any],
 ) -> dict:
     """One workflow's full record: its metadata, plus what this install measured."""
     entry = w.to_dict()
     by_provider = run_times.get(w.id)
     entry["run_time"] = {"by_provider": by_provider} if by_provider else None
-    example = examples.get(w.id)
-    entry["example"] = (
-        {**example, "url": f"/media/{example['filename']}", "thumb": f"/api/thumb/{example['filename']}"}
-        if example
-        else None
-    )
     # One plain link, so a caller that lands on the catalog cold can see there is more
     # and where it is. Everything else a caller might want here is derivable from what
     # the entry already says, and a derived value repeated on every row is noise.
@@ -1138,10 +1103,6 @@ async def list_workflows(
     jobs, or null if the workflow has never finished here. Times reflect the params
     those jobs used; longer videos and bigger sizes take longer.
 
-    `example` is one output this install made with that workflow — the file tagged
-    `showcase`, or else the newest one — so a catalog can show what a workflow makes
-    rather than describe it. Null until the workflow has produced something here.
-
     `source` is `shipped` for the workflows FlixML ships and documents, or `local` for
     one the operator dropped into `workflows/local/` on their own install. Nothing in
     the docs or on flixml.com describes a `local` workflow: read its params rather
@@ -1149,8 +1110,7 @@ async def list_workflows(
     """
     registry = get_registry()
     run_times = await workflow_run_times()
-    examples = await workflow_examples(owner_id=owner_scope(agent))
-    entries = [_workflow_entry(w, run_times, examples) for w in registry.list_workflows()]
+    entries = [_workflow_entry(w, run_times) for w in registry.list_workflows()]
     if view == "full":
         return entries
     return [_summarize(e) for e in entries]
@@ -1174,8 +1134,7 @@ async def get_workflow(
             detail=f"Unknown workflow '{workflow_id}'. Available: {', '.join(sorted(x.id for x in registry.list_workflows()))}",
         )
     run_times = await workflow_run_times()
-    examples = await workflow_examples(owner_id=owner_scope(agent))
-    entry = _workflow_entry(w, run_times, examples)
+    entry = _workflow_entry(w, run_times)
     entry.pop("details", None)  # you are already here
     return entry
 
@@ -1472,20 +1431,38 @@ async def character_detail(character_id: str) -> dict[str, Any]:
 
 @app.post("/api/characters", response_model=CharacterRecord)
 async def create_character(character: CharacterRecord, agent: Agent | None = Depends(current_agent)) -> CharacterRecord:
-    """Create or replace a character (idempotent by character id)."""
-    if agent is not None:
-        agent.require_characters([character.id])
-    record = await upsert_character(character.model_dump())
+    """Create or replace a character (idempotent by character id). A new character belongs to the caller."""
+    existing = await get_character(character.id)
+    data = character.model_dump()
+    if agent is not None and owner_scope(agent) is not None:
+        if existing and existing.get("owner_id") != agent.id:
+            raise HTTPException(status_code=403, detail=f"Character '{character.id}' belongs to another account")
+        data["owner_id"] = agent.id
+    elif "owner_id" in character.model_fields_set:
+        await _require_owner_account(data["owner_id"])
+    else:
+        data["owner_id"] = existing.get("owner_id") if existing else (agent.id if agent else None)
+    record = await upsert_character(data)
     return CharacterRecord(**record)
 
 
+async def _require_owner_account(owner_id: str | None) -> None:
+    if owner_id is not None and await db.get_agent(owner_id) is None:
+        raise HTTPException(status_code=400, detail=f"No account '{owner_id}'")
+
+
 @app.patch("/api/characters/{character_id}", response_model=CharacterRecord)
-async def patch_character(character_id: str, patch: dict[str, Any]) -> CharacterRecord:
-    """Update selected fields of an existing character."""
+async def patch_character(character_id: str, patch: dict[str, Any], agent: Agent | None = Depends(current_agent)) -> CharacterRecord:
+    """Update selected fields of an existing character. Only admin keys change `owner_id`."""
     current = await get_character(character_id)
     if not current:
         raise HTTPException(status_code=404, detail="Character not found")
-    allowed = {"name", "kind", "trigger", "description", "source_images", "loras", "voice", "defaults", "metadata"}
+    allowed = {"name", "kind", "trigger", "description", "base_prompt", "source_images", "loras", "voice", "metadata"}
+    if "owner_id" in patch:
+        if owner_scope(agent) is not None:
+            raise HTTPException(status_code=403, detail="Only an admin key can change a character's owner")
+        await _require_owner_account(patch["owner_id"])
+        allowed.add("owner_id")
     unknown = sorted(set(patch) - allowed)
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unsupported character fields: {', '.join(unknown)}")
@@ -1507,9 +1484,9 @@ async def remove_character(character_id: str) -> dict[str, Any]:
 @app.get("/api/characters/{character_id}/media")
 async def character_media(character_id: str, offset: int = 0, limit: int = 60, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """List media associated with a specific character."""
-    scope = owner_scope(agent)
-    total = await media_count(character_id=character_id, owner_id=scope)
-    rows = await list_media(character_id=character_id, limit=limit, offset=offset, owner_id=scope)
+    viewer = media_viewer(agent)
+    total = await media_count(character_id=character_id, viewer=viewer)
+    rows = await list_media(character_id=character_id, limit=limit, offset=offset, viewer=viewer)
 
     items = []
     for row in rows:
@@ -2663,6 +2640,9 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
     # way whether a human typed it afterwards or the caller sent it up front.
     request_meta = _parse_jsonb(job_meta.get("metadata")) or {}
     description = request_meta.get("description") if isinstance(request_meta, dict) else None
+    # The characters the job was bound to become the file's subjects, so each
+    # character's gallery holds it whoever made it.
+    character_ids = request_meta.get("character_ids") if isinstance(request_meta, dict) else None
     for output in outputs:
         rel = _relative_output_path(output)
         target = await _download_output_if_missing(output)
@@ -2691,6 +2671,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
             "source_image": job_meta.get("source_image"),
             "metadata": job_meta.get("metadata"),
             "description": description,
+            "character_ids": character_ids if isinstance(character_ids, list) else [],
         })
     if first_filename:
         await update_job_status(prompt_id, "completed", output_filename=first_filename)
@@ -3445,26 +3426,15 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         for reference in body.images:
             await _require_readable(agent, reference)
 
-    # Character presets (checkpoint, cfg/steps/sampler/scheduler, negative prompt,
-    # resolution, look description) apply whenever the request doesn't explicitly
-    # override them. Only the first resolved character's defaults are used —
-    # multi-character requests must set params explicitly.
-    character_defaults = CharacterDefaults(**(character_records[0].get("defaults") or {})) if character_records else CharacterDefaults()
-    character_base_prompt = character_records[0].get("base_prompt") if character_records else None
-
-    # Prepend base_prompt (the character's look description) first, then run
-    # trigger-word injection on the combined text — base_prompt already names
-    # the character, so this stops the trigger word from being duplicated as
-    # an orphaned trigger-word fragment between base_prompt and the scene prompt.
+    # A character never rewrites the prompt or the workflow's settings: the caller
+    # writes the character's look where the workflow's prompt guide puts it.
     prompt = body.prompt
-    if character_base_prompt and character_base_prompt.lower() not in prompt.lower():
-        prompt = f"{character_base_prompt}, {prompt}"
     # Resolve LoRAs first: a trigger word is the handle a LoRA was trained under,
     # so it only means something when that character's LoRA actually loads for this
     # workflow. Injected without one it is just a given name at the front of the
     # prompt, where it carries the most weight — the base model reads it as an
     # ordinary word and renders whoever it thinks that name looks like, fighting
-    # the base_prompt behind it.
+    # the look the prompt describes.
     loras = _character_loras(character_records, body.workflow, bindings)
     triggered_ids = {lora.get("character_id") for lora in loras}
     prompt = _prompt_with_character_triggers(
@@ -3484,38 +3454,28 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
 
     resolved_lora_name = checkpoint_lora_name or (loras[0].get("name") if loras else None)
 
-    # Resolve each tunable field: explicit request value > character preset > workflow's own default (unset here).
-    resolved_model = body.checkpoint if body.checkpoint is not None else character_defaults.preferred_checkpoint
-    resolved_width = body.width if body.width is not None else character_defaults.image_width
-    resolved_height = body.height if body.height is not None else character_defaults.image_height
-    resolved_steps = body.steps if body.steps is not None else character_defaults.steps
-    resolved_cfg = body.cfg if body.cfg is not None else character_defaults.cfg
-    resolved_sampler = body.sampler if body.sampler is not None else character_defaults.sampler
-    resolved_scheduler = body.scheduler if body.scheduler is not None else character_defaults.scheduler
-    resolved_negative = body.negative if body.negative is not None else character_defaults.negative_prompt
-
     # Use GenerationService for workflow build + submit + DB save
     service = GenerationService()
 
     # Build workflow-specific params (only pass what the workflow builder accepts).
     # Omitting a key (rather than passing None) lets the workflow's own meta.json
-    # default apply when neither the request nor the character preset set it.
+    # default apply when the request doesn't set it.
     workflow_params: dict[str, Any] = {
         "loras": loras,
         "lora_strength": body.lora_strength,
     }
-    if resolved_steps is not None:
-        workflow_params["steps"] = resolved_steps
-    if resolved_cfg is not None:
-        workflow_params["cfg"] = resolved_cfg
-    if resolved_sampler is not None:
-        workflow_params["sampler"] = resolved_sampler
-    if resolved_scheduler is not None:
-        workflow_params["scheduler"] = resolved_scheduler
+    if body.steps is not None:
+        workflow_params["steps"] = body.steps
+    if body.cfg is not None:
+        workflow_params["cfg"] = body.cfg
+    if body.sampler is not None:
+        workflow_params["sampler"] = body.sampler
+    if body.scheduler is not None:
+        workflow_params["scheduler"] = body.scheduler
 
     workflow_params["guidance"] = body.guidance
-    if resolved_negative is not None:
-        workflow_params["negative_prompt"] = resolved_negative
+    if body.negative is not None:
+        workflow_params["negative_prompt"] = body.negative
     if body.unet is not None:
         workflow_params["unet"] = body.unet
     if body.clip is not None:
@@ -3524,8 +3484,8 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         workflow_params["vae"] = body.vae
     if body.denoise is not None:
         workflow_params["denoise"] = body.denoise
-    if resolved_model is not None:
-        workflow_params["checkpoint"] = resolved_model
+    if body.checkpoint is not None:
+        workflow_params["checkpoint"] = body.checkpoint
     if body.image is not None:
         workflow_params["image"] = await _ensure_comfy_input_image(body.image, body.provider)
     for key, reference in zip(extra_image_keys, body.images or []):
@@ -3538,13 +3498,16 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
             workflow=body.workflow,
             prompt=prompt,
             provider=body.provider,
-            width=resolved_width,
-            height=resolved_height,
+            width=body.width,
+            height=body.height,
             seed=body.seed,
             filename_prefix=filename_prefix,
             workflow_params=workflow_params,
             owner_id=agent.id if agent else None,
-            extra_metadata={"description": body.description} if body.description else None,
+            extra_metadata={
+                **({"description": body.description} if body.description else {}),
+                "character_ids": [record.get("id") for record in character_records if record.get("id")],
+            },
             submit=body.submit,
         )
     except (WorkflowNotFoundError, ProviderNotFoundError) as e:
@@ -3679,6 +3642,9 @@ async def lora_training_sample_image(path: str):
     return FileResponse(target)
 
 
+_LISTING_SUMMARY_FIELDS = ("filename", "type", "workflow", "description", "tags", "prompt", "submitted_at")
+
+
 @app.get("/api/listing")
 async def listing(
     offset: int = 0,
@@ -3689,6 +3655,7 @@ async def listing(
     tag: str = "",
     training_dataset: str = "",
     owner: str = "",
+    view: str | None = None,
     agent: Agent | None = Depends(current_agent),
 ) -> dict[str, Any]:
     """List generated media from the media table.
@@ -3698,8 +3665,16 @@ async def listing(
     type filtering, free-text search, character/tag scoping, training dataset
     selection, and the account that submitted the job.
 
-    `owner` narrows the result to one account; it never widens it. A key that
-    only sees what it owns stays scoped to itself whatever it asks for.
+    A scoped key sees what it made, plus anything bound to a character its account
+    owns: a picture of a character is that character's, whoever made it. `owner`
+    narrows the result to one account's files; it never widens what a key sees.
+
+    Returns 60 items from `offset` unless `limit` says otherwise; `total` is how many
+    match in all.
+
+    Pass `?view=summary` to get only what telling items apart needs — `filename`,
+    `type`, `workflow`, `description`, `tags`, `prompt`, `submitted_at` — at about a quarter
+    of the size. Without it each item carries everything the gallery shows.
     """
     type_filter: str | None = None
     if type in {"image", "video"}:
@@ -3708,9 +3683,8 @@ async def listing(
     char_id = character_id.strip() or None
     tag_filter = tag.strip() or None
     training_only = training_dataset.strip().lower() == "true"
-    # A scoped key's own id wins over whatever it asked for; an unscoped caller
-    # gets the account it named, or everything.
-    owner_id = owner_scope(agent) or (owner.strip() or None)
+    owner_id = owner.strip() or None
+    viewer = media_viewer(agent)
 
     total = await media_count(
         type_filter=type_filter,
@@ -3719,6 +3693,7 @@ async def listing(
         tag=tag_filter,
         training_dataset=training_only if training_dataset.strip() else None,
         owner_id=owner_id,
+        viewer=viewer,
     )
     rows = await list_media(
         limit=limit,
@@ -3729,6 +3704,7 @@ async def listing(
         tag=tag_filter,
         training_dataset=training_only if training_dataset.strip() else None,
         owner_id=owner_id,
+        viewer=viewer,
     )
 
     items = []
@@ -3774,22 +3750,20 @@ async def listing(
             "settings": db.graph_settings(row.get("job_workflow_json")),
         })
 
-    return {
-        "images": items,
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-    }
+    if view == "summary":
+        items = [{k: item[k] for k in _LISTING_SUMMARY_FIELDS} for item in items]
+
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @app.get("/api/listing/counts")
 async def listing_counts(agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
-    """Return aggregate counts for the caller's media, images, and videos."""
-    scope = owner_scope(agent)
+    """Return aggregate counts for the media the caller can see, images, and videos."""
+    viewer = media_viewer(agent)
     return {
-        "total": await media_count(owner_id=scope),
-        "images": await media_count(type_filter="image", owner_id=scope),
-        "videos": await media_count(type_filter="video", owner_id=scope),
+        "total": await media_count(viewer=viewer),
+        "images": await media_count(type_filter="image", viewer=viewer),
+        "videos": await media_count(type_filter="video", viewer=viewer),
     }
 
 
@@ -3894,9 +3868,16 @@ async def update_media(
     if not _safe_output_path(path):
         raise HTTPException(status_code=403, detail="Access denied")
     # A row the caller can't see reads as absent rather than forbidden, so one
-    # account can't probe another's filenames by the status code.
+    # account can't probe another's filenames by the status code. One it can see —
+    # another account's picture of its character — belongs to whoever made it.
     if not await can_read_file(agent, path) or await db.get_media_by_filename(path) is None:
         raise HTTPException(status_code=404, detail=f"No media {path}")
+    if not await can_change_file(agent, path):
+        raise HTTPException(status_code=403, detail=f"Only the account that made {path} can edit it")
+    # Binding a file to a character shows it to that character's keys, so it takes
+    # the same permission as generating with the character.
+    if agent is not None and owner_scope(agent) is not None and body.character_ids:
+        agent.require_characters(body.character_ids)
 
     row = await db.update_media_metadata(
         path,
@@ -3934,8 +3915,9 @@ async def delete_media(body: dict[str, Any], agent: Agent | None = Depends(curre
         if not target:
             failed.append({"file": item, "error": "invalid path"})
             continue
-        if not await can_read_file(agent, item):
-            failed.append({"file": item, "error": "not found"})
+        if not await can_change_file(agent, item):
+            error = "made by another account" if await can_read_file(agent, item) else "not found"
+            failed.append({"file": item, "error": error})
             continue
         try:
             if target.is_file():

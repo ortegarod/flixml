@@ -23,7 +23,7 @@ interface ProfileResponse {
 }
 
 interface ListingResponse {
-  images: MediaItem[];
+  items: MediaItem[];
   total: number;
 }
 
@@ -110,7 +110,7 @@ export function AgentProfileView({ agentId, onOpen, onDelete, onItemsChange }: A
       const data = await fetchJson<ListingResponse>(
         `/api/listing?owner=${encodeURIComponent(agentId)}&limit=${PAGE}&offset=${offset}`,
       );
-      setItems((prev) => (offset === 0 ? data.images : [...prev, ...data.images]));
+      setItems((prev) => (offset === 0 ? data.items : [...prev, ...data.items]));
       setTotal(data.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load media");

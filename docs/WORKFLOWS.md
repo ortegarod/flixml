@@ -350,6 +350,10 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
   - `low_lora_strength` · _float_ · default `1.0` — Leave at 1.0.
   - `low_lora_2` · _str_ · default `` — Low-noise half of the pair in high_lora_2. Leave empty to disable.
   - `low_lora_2_strength` · _float_ · default `1.0` — Weight of the second low-noise LoRA. Ignored when low_lora_2 is empty.
+  - `high_lora_3` · _str_ · default `` — Optional third LoRA, stacked after high_lora_2 - for a second concept on the same clip, e.g. a facial-expression LoRA on top of a motion LoRA. Leave empty and the slot is removed from the graph entirely. Set both halves of the pair.
+  - `high_lora_3_strength` · _float_ · default `1.0` — Weight of the third high-noise LoRA. Ignored when high_lora_3 is empty.
+  - `low_lora_3` · _str_ · default `` — Low-noise half of the pair in high_lora_3. Leave empty to disable.
+  - `low_lora_3_strength` · _float_ · default `1.0` — Weight of the third low-noise LoRA. Ignored when low_lora_3 is empty.
 
 ### `wan22_i2v_context` — Wan 2.2 Image-to-Video (context windows)
 

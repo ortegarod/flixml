@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Cpu, Film, Image, Mic, RotateCcw, Save, Settings2, Sparkles, Trash2, UserRound, X, Check } from "lucide-react";
+import { Cpu, Film, Image, Mic, RotateCcw, Save, Sparkles, Trash2, UserRound, X, Check } from "lucide-react";
 import { MediaTile } from "./MediaTile";
 import type { MediaItem } from "../types";
 
@@ -33,11 +33,12 @@ interface CharacterRecord {
   base_prompt: string | null;
   source_images: string[];
   loras: LoraEntry[];
-  defaults: Record<string, unknown>;
   voice?: { provider: string; voice_id: string; name?: string | null; settings?: Record<string, unknown> } | null;
+  owner_id?: string | null;
 }
 
 interface FormState {
+  owner_id: string;
   name: string;
   kind: string;
   trigger: string;
@@ -47,7 +48,6 @@ interface FormState {
   voice_provider: string;
   voice_id: string;
   voice_name: string;
-  defaults_json: string;
 }
 
 interface CharacterProfileViewProps {
@@ -72,27 +72,9 @@ async function fetchJson<T>(url: string): Promise<T> {
   return await response.json();
 }
 
-function defaultsToJson(def: Record<string, unknown>): string {
-  if (!def || Object.keys(def).length === 0) return "";
-  try {
-    return JSON.stringify(def, null, 2);
-  } catch {
-    return "";
-  }
-}
-
-function parseDefaultsJson(json: string): Record<string, unknown> | null {
-  const trimmed = json.trim();
-  if (!trimmed) return {};
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
 function recordToForm(record: CharacterRecord): FormState {
   return {
+    owner_id: record.owner_id ?? "",
     name: record.name ?? "",
     kind: record.kind ?? "",
     trigger: record.trigger ?? "",
@@ -102,7 +84,6 @@ function recordToForm(record: CharacterRecord): FormState {
     voice_provider: record.voice?.provider ?? "elevenlabs",
     voice_id: record.voice?.voice_id ?? "",
     voice_name: record.voice?.name ?? "",
-    defaults_json: defaultsToJson(record.defaults || {}),
   };
 }
 
@@ -113,9 +94,17 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"images" | "videos">("images");
   const [checkpoints, setCheckpoints] = useState<CheckpointsResponse | null>(null);
+  // Accounts a character can belong to. Only admin keys may list them, and only admins
+  // change an owner, so a 403 here just hides the select.
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[] | null>(null);
+
+  useEffect(() => {
+    fetchJson<{ id: string; name: string }[]>("/api/agents").then(setAccounts).catch(() => setAccounts(null));
+  }, []);
 
   // Form state
   const [form, setForm] = useState<FormState>({
+    owner_id: "",
     name: "",
     kind: "",
     trigger: "",
@@ -125,7 +114,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
     voice_provider: "elevenlabs",
     voice_id: "",
     voice_name: "",
-    defaults_json: "",
   });
   const [original, setOriginal] = useState<FormState>(form);
   const [isDirty, setIsDirty] = useState(false);
@@ -192,13 +180,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
     setSaveError(null);
     setSavedOk(false);
 
-    const defaults = parseDefaultsJson(form.defaults_json);
-    if (defaults === null) {
-      setSaveError("Defaults JSON is invalid");
-      setSaving(false);
-      return;
-    }
-
     try {
       const payload: Record<string, unknown> = {
         name: form.name.trim(),
@@ -215,8 +196,8 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
               settings: {},
             }
           : null,
-        defaults,
       };
+      if (accounts && form.owner_id !== original.owner_id) payload.owner_id = form.owner_id || null;
       const res = await fetch(`/api/characters/${characterId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -236,7 +217,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
     } finally {
       setSaving(false);
     }
-  }, [character, characterId, form, load, onSaved]);
+  }, [accounts, character, characterId, form, original, load, onSaved]);
 
   const reset = useCallback(() => {
     setForm(original);
@@ -359,6 +340,20 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
                   className={inputBase + " w-48 text-xs"}
                   placeholder="Trigger word"
                 />
+                {accounts && (
+                  <select
+                    value={form.owner_id}
+                    onChange={(e) => updateField("owner_id", e.target.value)}
+                    className={inputBase + " w-auto appearance-none text-xs"}
+                    aria-label="Owner"
+                    title="The account that uses this character and sees all of its media"
+                  >
+                    <option value="">No owner (admins only)</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>Owner: {a.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <input
@@ -461,24 +456,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
             />
           </div>
         </div>
-      </section>
-
-      {/* ── Defaults ── */}
-      <section className="rounded-3xl border border-gray-800/60 bg-gray-950/40 p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <Settings2 className="w-4 h-4 text-brand" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-300">Defaults</h2>
-        </div>
-        <textarea
-          value={form.defaults_json}
-          onChange={(e) => updateField("defaults_json", e.target.value)}
-          rows={6}
-          className={textareaBase}
-          placeholder='{"strength": 0.8, "steps": 28}'
-        />
-        <p className="text-[11px] text-gray-500">
-          JSON object of default generation parameters. Invalid JSON will block save.
-        </p>
       </section>
 
       {/* ── Save / Reset Bar (bottom) ── */}
