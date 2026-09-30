@@ -28,7 +28,7 @@ from . import db
 from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
 from .workflows.registry import WorkflowMetadata, init_registry, get_registry
 from .providers import init_default_providers, list_providers
-from .services import GenerationService, GenerationError, ProviderNotFoundError, WorkflowNotFoundError
+from .services import GenerationService, GenerationError, MissingParamsError, ProviderNotFoundError, WorkflowNotFoundError
 
 
 async def _generate_tts(
@@ -1783,6 +1783,8 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
             submit=True,
         )
         prompt_id = job_handle.job_id  # type: ignore
+    except MissingParamsError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
@@ -1873,6 +1875,8 @@ async def animate_project_shot(project_id: str, scene_id: str, shot_id: str, bod
             submit=True,
         )
         prompt_id = job_handle.job_id
+    except MissingParamsError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
@@ -2535,6 +2539,8 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
             },
             submit=body.submit,
         )
+    except MissingParamsError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
@@ -3506,6 +3512,8 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
             },
             submit=body.submit,
         )
+    except MissingParamsError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except (WorkflowNotFoundError, ProviderNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GenerationError as e:
