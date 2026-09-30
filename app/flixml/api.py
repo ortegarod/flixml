@@ -2403,23 +2403,19 @@ async def nodes() -> dict[str, Any]:
 
 
 @app.get("/api/comfy/{path:path}")
-async def comfy_get(path: str, provider: str | None = None) -> Any:
+async def comfy_get(path: str, provider: str) -> Any:
     """Read-only passthrough for Comfy discovery endpoints: models, queue, object_info, history, etc.
 
-    `provider` picks the node to ask (see GET /api/providers); without it the answer comes
-    from the default node. On a multi-node install that distinction is the whole point: each
-    node has its own model files, so a checkpoint list read from the wrong node says a file
-    is there when the node you are about to submit to has never seen it.
+    `provider` names the node to ask (see GET /api/providers). Each node has its own model
+    files, queue and history, so there is no answer without one.
     """
     allowed_roots = ("system_stats", "object_info", "models", "queue", "history", "prompt", "features", "view")
     if not path.startswith(allowed_roots):
         raise HTTPException(status_code=403, detail="Only read-only Comfy discovery/status paths are exposed here")
-    node = None
-    if provider:
-        node = comfy_node_for_provider(provider)
-        if node is None:
-            available = ", ".join(f"local-{n.id}" for n in get_settings().comfy_nodes())
-            raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}. Available: {available}")
+    node = comfy_node_for_provider(provider)
+    if node is None:
+        available = ", ".join(f"local-{n.id}" for n in get_settings().comfy_nodes())
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}. Available: {available}")
     return await comfy(node).get(f"/{path}")
 
 
