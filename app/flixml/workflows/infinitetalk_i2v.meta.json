@@ -21,7 +21,7 @@
     "image": {
       "type": "str",
       "required": true,
-      "description": "Input image filename (staged to ComfyUI input)"
+      "description": "Input image filename (staged to ComfyUI input). The clip keeps this image's aspect ratio and is rendered at the area of 640x640, Kijai's reference area, in steps of 16 — a portrait image stays portrait, nothing is cropped away."
     },
     "audio": {
       "type": "str",
@@ -31,16 +31,6 @@
     "negative_prompt": {
       "type": "str",
       "default": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
-    },
-    "width": {
-      "type": "int",
-      "default": 640,
-      "description": "Resize target width (divisible by 16)"
-    },
-    "height": {
-      "type": "int",
-      "default": 640,
-      "description": "Resize target height (divisible by 16)"
     },
     "length": {
       "type": "int",
@@ -76,8 +66,8 @@
     },
     "blocks_to_swap": {
       "type": "int",
-      "default": 12,
-      "description": "Block-swap count for low-VRAM. 12 is the proven sweet spot on a 12GB card with the Q3_K_S GGUF: ~10GB VRAM used, GPU at 95%, no OOM. Higher = less VRAM but GPU-starved/slow; lower risks OOM."
+      "default": 20,
+      "description": "Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's reference (example_03 / V2V example_02). Measured on a 12 GB card, same 528x768 clip: 12 blocks took 30.5 min, 20 blocks took 16 min."
     },
     "model": {
       "type": "str",

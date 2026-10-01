@@ -22,7 +22,7 @@
     "video": {
       "type": "str",
       "required": true,
-      "description": "Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement."
+      "description": "Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement. The clip keeps this video's aspect ratio and is rendered at the area of 640x640, Kijai's V2V reference area, in steps of 16 — a portrait video stays portrait, nothing is cropped away."
     },
     "audio": {
       "type": "str",
@@ -37,16 +37,6 @@
       "type": "float",
       "default": 0.4,
       "description": "V2V motion-adherence knob — THE key dial. At 1.0 the driving video is noised to pure noise and InfiniteTalk regenerates a talking head from the first frame, DISCARDING the body motion (the subject won't bend/dance). Lower preserves the driving motion: the sampler starts the denoise partway and keeps the driving latents. Default 0.4 is the verified sweet spot for body-motion clips (ride/dance) — holds hip/body motion better than Kijai's 0.5 reference while lip-sync stays clean. Raise to 0.5-0.7 for stronger lip-sync when the driving motion is subtle; drop to 0.35 for even more motion at the cost of slightly softer sync."
-    },
-    "width": {
-      "type": "int",
-      "default": 480,
-      "description": "Resize target width (divisible by 16). Default 480x832 = portrait, matching POV/vertical driving clips. For a landscape driving clip pass 832x480 explicitly. BETTER FUTURE FIX: auto-derive w/h from the driving clip's aspect so orientation never has to be set (see length auto-clamp for the pattern)."
-    },
-    "height": {
-      "type": "int",
-      "default": 832,
-      "description": "Resize target height (divisible by 16). See width."
     },
     "length": {
       "type": "int",
@@ -82,8 +72,8 @@
     },
     "blocks_to_swap": {
       "type": "int",
-      "default": 12,
-      "description": "Block-swap count for low-VRAM. 12 is the proven sweet spot on a 12GB card with the Q3_K_S GGUF: ~10GB VRAM used, GPU at 95%, no OOM. Higher = less VRAM but GPU-starved/slow; lower risks OOM."
+      "default": 20,
+      "description": "Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's reference (example_03 / V2V example_02). Measured on a 12 GB card, same 528x768 clip: 12 blocks took 30.5 min, 20 blocks took 16 min."
     },
     "model": {
       "type": "str",
