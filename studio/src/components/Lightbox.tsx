@@ -164,10 +164,12 @@ function sizeLabel(settings: GraphSettings | null | undefined, item: MediaItem):
   return `${width}×${height}`;
 }
 
-// Frames and frame rate are arithmetic homework, so they become a duration.
-function durationLabel(settings: GraphSettings | null | undefined): string | null {
-  if (!settings?.frames || !settings?.fps) return null;
-  const seconds = settings.frames / settings.fps;
+// The file's own length when the player has read it. The graph's frames ÷ fps is only
+// a fallback: an audio-driven clip (InfiniteTalk) gets its length from the voice line
+// inside ComfyUI, so its graph carries no frame count at all.
+function durationLabel(settings: GraphSettings | null | undefined, fileSeconds: number | null): string | null {
+  const seconds = fileSeconds ?? (settings?.frames && settings?.fps ? settings.frames / settings.fps : null);
+  if (!seconds) return null;
   return `${seconds >= 10 ? Math.round(seconds) : Math.round(seconds * 10) / 10} seconds`;
 }
 
@@ -378,6 +380,14 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  // Read off the playing <video> once its metadata loads; cleared when the asset changes.
+  const [videoSeconds, setVideoSeconds] = useState<number | null>(null);
+  useEffect(() => setVideoSeconds(null), [selectedUrl]);
+  const onVideoMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const d = e.currentTarget.duration;
+    setVideoSeconds(Number.isFinite(d) && d > 0 ? d : null);
+  };
 
   const flashCopied = useCallback((key: string) => {
     setCopiedKey(key);
@@ -717,7 +727,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
           <Fact label="Workflow" value={(detail?.meta?.workflow as string) || null} />
           <Fact label="Type" value={isVideo ? "Video" : "Image"} />
           <Fact label="Size" value={sizeLabel(current.settings, current)} />
-          <Fact label="Duration" value={durationLabel(current.settings)} />
+          <Fact label="Duration" value={durationLabel(current.settings, videoSeconds)} />
           <Fact label="Submitted" value={formatStamp(current.submitted_at)} />
           <Fact label="Completed" value={formatStamp(current.finished_at)} />
           <Fact label="Time taken" value={elapsedLabel(current)} />
@@ -895,7 +905,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         {/* Image — natural size. Swipe left/right to navigate. */}
         <div className="w-full bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {isVideo ? (
-            !isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline className="w-full max-h-[68vh]" />
+            !isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline onLoadedMetadata={onVideoMetadata} className="w-full max-h-[68vh]" />
           ) : (
             <img src={selectedUrl} alt="" className="w-full max-h-[68vh] object-contain" />
           )}
@@ -920,7 +930,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         {/* Image */}
         <div className="flex-1 flex items-center justify-center py-6 min-w-0">
           {isVideo ? (
-            isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" />
+            isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline onLoadedMetadata={onVideoMetadata} className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" />
           ) : (
             <img src={selectedUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
           )}
