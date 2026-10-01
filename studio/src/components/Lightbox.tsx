@@ -367,6 +367,18 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
   const [deleting, setDeleting] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // The phone and desktop layouts are both in the DOM, one hidden by CSS. A hidden
+  // <video autoPlay> still plays its sound, so a clip with audio played twice, a beat
+  // apart. Only the layout on screen gets the media element.
+  const desktopQuery = "(min-width: 768px)"; // Tailwind `md`, the breakpoint the layouts switch on
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(desktopQuery).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(desktopQuery);
+    const onChange = () => setIsDesktop(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   const flashCopied = useCallback((key: string) => {
     setCopiedKey(key);
     setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1600);
@@ -883,7 +895,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         {/* Image — natural size. Swipe left/right to navigate. */}
         <div className="w-full bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {isVideo ? (
-            <video src={selectedUrl} controls autoPlay loop playsInline className="w-full max-h-[68vh]" />
+            !isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline className="w-full max-h-[68vh]" />
           ) : (
             <img src={selectedUrl} alt="" className="w-full max-h-[68vh] object-contain" />
           )}
@@ -908,7 +920,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         {/* Image */}
         <div className="flex-1 flex items-center justify-center py-6 min-w-0">
           {isVideo ? (
-            <video src={selectedUrl} controls autoPlay loop playsInline className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" />
+            isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" />
           ) : (
             <img src={selectedUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
           )}
