@@ -3142,6 +3142,16 @@ async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
     return job
 
 
+def _untracked_status(db_status: str, reachable: bool) -> tuple[str, str | None]:
+    """Status for a job ai-toolkit returned no record of. Never pass the DB's
+    last word off as live: an active DB status means the trainer lost it."""
+    if db_status not in _ACTIVE_TRAINING_STATUSES:
+        return db_status, None
+    if not reachable:
+        return "unreachable", "Trainer did not respond"
+    return "failed", "Trainer has no record of this job"
+
+
 def _build_training_config(request: LoraTrainingStartRequest) -> tuple[Path, dict[str, Any]]:
     template_path = _TRAINING_DIR / f"{request.base_config}_template.yaml"
     if not template_path.is_file():
@@ -3426,13 +3436,7 @@ async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatu
             started_at=started_at,
         )
 
-    # No live data from the trainer: never pass the DB's last word off as live.
-    error: str | None = None
-    if db_status in _ACTIVE_TRAINING_STATUSES:
-        if not aitk_reachable:
-            db_status, error = "unreachable", "Trainer did not respond"
-        else:
-            db_status, error = "failed", "Trainer has no record of this job"
+    db_status, error = _untracked_status(db_status, aitk_reachable)
     return LoraTrainingStatus(
         ok=True,
         status=db_status,
@@ -3683,9 +3687,52 @@ async def lora_training_checkpoint_download(name: str) -> FileResponse:
 
 @app.get("/api/lora-training/jobs")
 async def lora_training_jobs():
-    """List all training jobs known to the local DB."""
+    """List all training jobs known to the local DB.
+
+    Jobs the DB calls active carry the trainer's own status, step and info,
+    or `unreachable` / `failed` with an `error` when the trainer can't back them up.
+    """
     jobs = await list_training_jobs()
+    active = [job for job in jobs if job.get("status") in _ACTIVE_TRAINING_STATUSES]
+    lookups = await asyncio.gather(*(_aitk_lookup(job["job_name"]) for job in active))
+    for job, (aitk_job, reachable) in zip(active, lookups):
+        if aitk_job:
+            job["status"] = aitk_job.get("status", job["status"])
+            job["current_step"] = aitk_job.get("step") or 0
+            job["info"] = aitk_job.get("info") or None
+        else:
+            job["status"], job["error"] = _untracked_status(job["status"], reachable)
     return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.get("/api/lora-training/log")
+async def lora_training_log(job_name: str, offset: int | None = None):
+    """The trainer's own log for a job, passed through from ai-toolkit.
+
+    `offset` is the byte offset from the previous response; omit it for the tail.
+    Returns `{log, offset, reset}`; `reset` means the text replaces what you have.
+    """
+    aitk_job, reachable = await _aitk_lookup(job_name)
+    if not reachable:
+        raise HTTPException(status_code=503, detail="Trainer did not respond")
+    if not aitk_job or not aitk_job.get("id"):
+        raise HTTPException(status_code=404, detail="Trainer has no record of this job")
+    params = {"offset": offset} if offset is not None else {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{_AITK_API_URL}/api/jobs/{aitk_job['id']}/log",
+                params=params,
+                headers=_aitk_headers(),
+            )
+    except Exception as exc:
+        _training_logger.warning("ai-toolkit unreachable reading log for %s: %s", job_name, exc)
+        raise HTTPException(status_code=503, detail="Trainer did not respond") from exc
+    if resp.status_code != 200:
+        _training_logger.warning("ai-toolkit returned HTTP %s reading log for %s", resp.status_code, job_name)
+        raise HTTPException(status_code=502, detail=f"Trainer returned HTTP {resp.status_code}")
+    data = resp.json()
+    return {"log": data.get("log", ""), "offset": data.get("offset", 0), "reset": bool(data.get("reset", True))}
 
 
 @app.get("/api/lora-training/datasets")
@@ -3711,9 +3758,10 @@ async def lora_training_datasets_create(body: CreateDatasetRequest):
 
 @app.get("/api/lora-training/samples")
 async def lora_training_samples(job_name: str):
-    """List sample images synced from training to the VPS."""
+    """List sample images synced from training to the VPS that are still on disk."""
     db_job = await get_training_job(job_name)
     paths = (db_job.get("metadata") or {}).get("sample_paths", []) if db_job else []
+    paths = [path for path in paths if (_OUTPUT_DIR / path.lstrip("/")).is_file()]
     return {"ok": True, "samples": paths, "count": len(paths)}
 
 

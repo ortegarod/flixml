@@ -163,7 +163,7 @@ function CharactersTab({ onSelectCharacter }: { onSelectCharacter?: (characterId
           <span className="text-[10px] uppercase tracking-wider text-gray-300 border border-white/15 bg-white/5 rounded-full px-2 py-0.5">Owned</span>
         </div>
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          These are characters you created or own the rights to use. Each one is backed by a fine-tuned LoRA trained on AMD MI300X.
+          These are characters you created or own the rights to use.
         </p>
       </div>
 

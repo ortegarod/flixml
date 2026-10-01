@@ -216,11 +216,14 @@ curl -X POST <your-api-url>/api/lora-training/start \
 # Check status
 curl <your-api-url>/api/lora-training/status?job_name=my-character-v1
 
+# Read the trainer's own log
+curl <your-api-url>/api/lora-training/log?job_name=my-character-v1
+
 # List checkpoints
 curl <your-api-url>/api/lora-training/checkpoints
 ```
 
-Training runs on AMD ROCm via the Ostris AI Toolkit.
+Training runs on the Ostris AI Toolkit at `AITK_API_URL`. Status, steps and log come from it; a job it can't back up shows as `unreachable` or `failed`, never as running.
 
 ## Repository Layout
 

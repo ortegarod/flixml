@@ -38,7 +38,7 @@ interface Checkpoint {
 function statusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
   if (status === "training" || status === "running") return "default";
   if (status === "completed") return "secondary";
-  if (status === "failed") return "destructive";
+  if (status === "failed" || status === "error") return "destructive";
   return "outline";
 }
 
@@ -56,98 +56,8 @@ export function LoraTrainingPage() {
   const jobs = ctx.trainingJobs ?? [];
   const live = ctx.training;
 
-  // ── SSE live stream for the running job ──────────────────────────────────
-  const [sseData, setSseData] = useState<any>(null);
-  const [sseConnected, setSseConnected] = useState(false);
-
-  // Derive effective live state: SSE overrides polled data.
-  // SSE provides raw step/status/info; polled data provides total_steps, eta, lr, loss.
-  const effectiveLive = React.useMemo(() => {
-    if (!sseData && !live) return null;
-    return {
-      ...(live || {}),
-      ...(sseData || {}),
-      current_step: sseData?.step ?? live?.current_step ?? 0,
-      status: sseData?.status ?? live?.status,
-      info: sseData?.info ?? live?.info,
-      speed_string: sseData?.speed_string ?? live?.speed_string,
-    };
-  }, [sseData, live]);
-
-  // Open SSE stream whenever there is a running/training job.
-  useEffect(() => {
-    const runningJob = jobs.find((j: any) => j.status === "running" || j.status === "training" || j.status === "pending");
-    if (!runningJob) {
-      setSseConnected(false);
-      setSseData(null);
-      return;
-    }
-
-    let es: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let intentionalClose = false;
-
-    const connect = () => {
-      if (intentionalClose) return;
-      const url = `/api/lora-training/stream?job_name=${encodeURIComponent(runningJob.job_name)}`;
-      es = new EventSource(url);
-
-      es.addEventListener("connected", () => {
-        setSseConnected(true);
-      });
-
-      es.addEventListener("poll", (e) => {
-        try {
-          const data = JSON.parse((e as MessageEvent).data);
-          setSseData(data);
-        } catch { /* ignore malformed */ }
-      });
-
-      es.addEventListener("samples", (e) => {
-        try {
-          const data = JSON.parse((e as MessageEvent).data);
-          if (data.job_name) {
-            loadExpanded(data.job_name);
-          }
-        } catch { /* ignore malformed */ }
-      });
-
-      es.addEventListener("terminal", (e) => {
-        try {
-          const data = JSON.parse((e as MessageEvent).data);
-          setSseData(data);
-          setSseConnected(false);
-          intentionalClose = true;
-          es?.close();
-          // Force a full refresh to pick up synced checkpoints/samples.
-          ctx.load();
-        } catch { /* ignore malformed */ }
-      });
-
-      es.addEventListener("error", (e) => {
-        try {
-          const data = JSON.parse((e as MessageEvent).data);
-          setSseData((prev: any) => ({ ...prev, status: "failed", error: data.error }));
-        } catch { /* ignore malformed */ }
-      });
-
-      es.onerror = () => {
-        setSseConnected(false);
-        es?.close();
-        if (!intentionalClose) {
-          reconnectTimer = setTimeout(connect, 5000);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      intentionalClose = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      es?.close();
-    };
-  }, [jobs, ctx]);
+  // Live status of the latest job, polled by App from /api/lora-training/status.
+  const effectiveLive = live;
 
   // Datasets
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -206,22 +116,11 @@ export function LoraTrainingPage() {
   };
 
   const mergedJobs = jobs.map((job: any) => {
-    // Merge live ai-toolkit data into the matching job row so we get real
-    // current_step / total_steps / loss / info. ai-toolkit uses "running"
-    // while the DB-backed job list may say "training".
+    // The jobs list already carries the trainer's status for active jobs
+    // (server-side). The polled status adds total_steps / eta / speed for the
+    // latest one.
     if (effectiveLive && effectiveLive.job_name === job.job_name && (effectiveLive.status === "running" || effectiveLive.status === "training")) {
       return { ...job, ...effectiveLive, _live: true };
-    }
-    // The API couldn't reach the trainer, so nothing about this run is known.
-    if (effectiveLive && effectiveLive.job_name === job.job_name && effectiveLive.status === "unreachable") {
-      return { ...job, status: "unreachable", error: effectiveLive.error };
-    }
-    // Job says running/training in the DB but ai-toolkit has no matching
-    // live process. The job died or was abandoned — treat as failed.
-    if (!effectiveLive || effectiveLive.job_name !== job.job_name) {
-      if (job.status === "running" || job.status === "training") {
-        return { ...job, status: "failed", _dead: true };
-      }
     }
     return job;
   });
@@ -314,7 +213,7 @@ export function LoraTrainingPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Characters &amp; LoRA Training</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Train fine-tuned character LoRAs on AMD MI300X. Track all jobs, checkpoints, and stats.
+            Train character LoRAs with ai-toolkit. Track all jobs, checkpoints, and stats.
           </p>
         </div>
       </div>
@@ -534,12 +433,6 @@ export function LoraTrainingPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-sm text-white">{job.job_name}</span>
                         <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
-                        {sseConnected && (job.status === "running" || job.status === "training") && (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400" title="Live SSE connection">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            live
-                          </span>
-                        )}
                         {job.model && <span className="text-[11px] text-gray-600">{job.model}</span>}
                       </div>
                       <p className="text-[11px] text-gray-500 mt-1">
@@ -576,22 +469,20 @@ export function LoraTrainingPage() {
                     </div>
                   )}
 
-                  {job.status === "completed" && (
+                  {job.status === "completed" && job.total_steps > 0 && (
                     <p className="text-[11px] text-gray-500 font-mono mt-1.5">
-                      {job.total_steps || 0} steps
+                      {job.total_steps} steps
                       {job.elapsed ? ` · ${job.elapsed}` : ""}
                       {job.loss != null ? ` · final loss ${job.loss.toFixed(4)}` : ""}
                     </p>
                   )}
 
-                  {job.status === "unreachable" && (
+                  {job.status === "unreachable" && job.error && (
                     <p className="text-[11px] text-amber-400/70 mt-1.5 line-clamp-2">{job.error}</p>
                   )}
 
-                  {job.status === "failed" && (
-                    <p className="text-[11px] text-red-400/70 mt-1.5 line-clamp-2">
-                      {job._dead ? "Process died or was abandoned" : job.error || "Job failed"}
-                    </p>
+                  {(job.status === "failed" || job.status === "error") && (job.error || job.info) && (
+                    <p className="text-[11px] text-red-400/70 mt-1.5 line-clamp-2">{job.error || job.info}</p>
                   )}
                 </div>
 
@@ -602,6 +493,8 @@ export function LoraTrainingPage() {
                       <p className="text-sm text-gray-500">Loading…</p>
                     ) : (
                       <>
+                        <TrainerLog jobName={job.job_name} active={["running", "training", "pending", "queued", "stopping"].includes(job.status)} />
+
                         {/* Training samples */}
                         {samples.length > 0 && (
                           <div>
@@ -665,6 +558,67 @@ export function LoraTrainingPage() {
           })
         )}
       </div>
+    </div>
+  );
+}
+
+// The trainer's own log, passed through from ai-toolkit. Polled while the job
+// is active; a progress bar rewrites its line with \r, so only the last
+// rewrite of each line is shown.
+function TrainerLog({ jobName, active }: { jobName: string; active: boolean }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const offsetRef = React.useRef<number | null>(null);
+  const boxRef = React.useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    offsetRef.current = null;
+    setText("");
+    const poll = async () => {
+      const q = offsetRef.current == null ? "" : `&offset=${offsetRef.current}`;
+      try {
+        const res = await fetch(`/api/lora-training/log?job_name=${encodeURIComponent(jobName)}${q}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.detail || `HTTP ${res.status}`);
+          return;
+        }
+        setError(null);
+        offsetRef.current = data.offset;
+        setText((prev) => (data.reset ? data.log : prev + data.log));
+      } catch (e: any) {
+        if (!cancelled) setError(e.message);
+      }
+    };
+    poll();
+    const timer = active ? setInterval(poll, 3000) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [jobName, active]);
+
+  const shown = React.useMemo(
+    () => text.split("\n").map((line) => line.split("\r").filter(Boolean).pop() ?? "").slice(-400).join("\n"),
+    [text],
+  );
+
+  useEffect(() => {
+    if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
+  }, [shown]);
+
+  return (
+    <div>
+      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Trainer log</h4>
+      {error ? (
+        <p className="text-[11px] text-amber-400/70">{error}</p>
+      ) : (
+        <pre ref={boxRef} className="max-h-72 overflow-auto rounded-lg border border-gray-800 bg-black/60 p-3 text-[11px] leading-relaxed text-gray-300 font-mono whitespace-pre-wrap">
+          {shown || "The trainer has written no log for this job."}
+        </pre>
+      )}
     </div>
   );
 }
