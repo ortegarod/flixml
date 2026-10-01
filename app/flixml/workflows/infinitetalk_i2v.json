@@ -15,17 +15,13 @@
     "class_type": "WanVideoBlockSwap",
     "inputs": {"blocks_to_swap": "{{blocks_to_swap}}", "offload_img_emb": false, "offload_txt_emb": false, "use_non_blocking": true, "vace_blocks_to_swap": 0, "prefetch_blocks": 1, "block_swap_debug": false}
   },
-  "293": {
-    "class_type": "GetImageSize",
-    "inputs": {"image": ["284", 0]}
-  },
   "245": {
-    "class_type": "ComfyMathExpression",
-    "inputs": {"expression": "floor(sqrt(409600 * a / b) / 16) * 16", "values.a": ["293", 0], "values.b": ["293", 1]}
+    "class_type": "INTConstant",
+    "inputs": {"value": "{{width}}"}
   },
   "246": {
-    "class_type": "ComfyMathExpression",
-    "inputs": {"expression": "floor(sqrt(409600 * b / a) / 16) * 16", "values.a": ["293", 0], "values.b": ["293", 1]}
+    "class_type": "INTConstant",
+    "inputs": {"value": "{{height}}"}
   },
   "237": {
     "class_type": "WanVideoClipVisionEncode",
@@ -49,7 +45,7 @@
   },
   "281": {
     "class_type": "ImageResizeKJv2",
-    "inputs": {"image": ["284", 0], "width": ["245", 1], "height": ["246", 1], "upscale_method": "lanczos", "keep_proportion": "crop", "pad_color": "0, 0, 0", "crop_position": "center", "divisible_by": 16, "device": "cpu"}
+    "inputs": {"image": ["284", 0], "width": ["245", 0], "height": ["246", 0], "upscale_method": "lanczos", "keep_proportion": "crop", "pad_color": "0, 0, 0", "crop_position": "center", "divisible_by": 16, "device": "cpu"}
   },
   "125": {
     "class_type": "LoadAudio",

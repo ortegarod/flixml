@@ -21,7 +21,7 @@
     "image": {
       "type": "str",
       "required": true,
-      "description": "Input image filename (staged to ComfyUI input). The clip keeps this image's aspect ratio and is rendered at the area of 640x640, Kijai's reference area, in steps of 16 — a portrait image stays portrait, nothing is cropped away."
+      "description": "Input image filename (staged to ComfyUI input)."
     },
     "audio": {
       "type": "str",
@@ -32,10 +32,20 @@
       "type": "str",
       "default": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     },
+    "width": {
+      "type": "int",
+      "default": 640,
+      "description": "Resize target width (divisible by 16). Kijai's example: 640, center crop."
+    },
+    "height": {
+      "type": "int",
+      "default": 640,
+      "description": "Resize target height (divisible by 16). Kijai's example: 640, center crop."
+    },
     "length": {
       "type": "int",
-      "default": 201,
-      "description": "Generous CAP on output frames (num_frames into MultiTalkWav2VecEmbeds), NOT an exact length — same as infinitetalk_v2v and Kijai's reference, which sets a big cap. The node clamps to the audio: actual = min(num_frames, audio_duration*fps), so the AUDIO drives real length. 201 ~= 8s at 25fps, bounding RAM on 12GB nodes. The windowed generation overshoots to the next window boundary, then VHS_VideoCombine trim_to_audio cuts the tail back to the audio track. A cap below the audio length cuts the voice line short, so only lower this to force a hard shorter clip."
+      "default": 400,
+      "description": "Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 400 is Kijai's example_03 value."
     },
     "fps": {
       "type": "int",
@@ -67,7 +77,7 @@
     "blocks_to_swap": {
       "type": "int",
       "default": 20,
-      "description": "Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's reference (example_03 / V2V example_02). Measured on a 12 GB card, same 528x768 clip: 12 blocks took 30.5 min, 20 blocks took 16 min."
+      "description": "Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's example_03 value."
     },
     "model": {
       "type": "str",

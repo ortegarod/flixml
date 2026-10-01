@@ -22,7 +22,7 @@
     "video": {
       "type": "str",
       "required": true,
-      "description": "Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement. The clip keeps this video's aspect ratio and is rendered at the area of 640x640, Kijai's V2V reference area, in steps of 16 — a portrait video stays portrait, nothing is cropped away."
+      "description": "Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement."
     },
     "audio": {
       "type": "str",
@@ -33,15 +33,20 @@
       "type": "str",
       "default": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
     },
-    "denoise_strength": {
-      "type": "float",
-      "default": 0.4,
-      "description": "V2V motion-adherence knob — THE key dial. At 1.0 the driving video is noised to pure noise and InfiniteTalk regenerates a talking head from the first frame, DISCARDING the body motion (the subject won't bend/dance). Lower preserves the driving motion: the sampler starts the denoise partway and keeps the driving latents. Default 0.4 is the verified sweet spot for body-motion clips (ride/dance) — holds hip/body motion better than Kijai's 0.5 reference while lip-sync stays clean. Raise to 0.5-0.7 for stronger lip-sync when the driving motion is subtle; drop to 0.35 for even more motion at the cost of slightly softer sync."
+    "width": {
+      "type": "int",
+      "default": 640,
+      "description": "Resize target width (divisible by 16). Kijai's example: 640, center crop."
+    },
+    "height": {
+      "type": "int",
+      "default": 640,
+      "description": "Resize target height (divisible by 16). Kijai's example: 640, center crop."
     },
     "length": {
       "type": "int",
-      "default": 201,
-      "description": "Generous CAP on output frames (num_frames into MultiTalkWav2VecEmbeds), NOT an exact length — matches Kijai's reference which sets a big cap. The node internally clamps to the audio: actual = min(num_frames, audio_duration*fps), so the AUDIO drives real length. 201 ~= 8s at 25fps, bounding RAM on 12GB nodes; audio shorter than that (the usual case) clamps below it. The windowed generation overshoots to the next 81-frame boundary, then VHS_VideoCombine trim_to_audio cuts the tail back to the audio track. Only lower this to force a hard shorter clip."
+      "default": 1000,
+      "description": "Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value."
     },
     "fps": {
       "type": "int",
@@ -56,7 +61,7 @@
     "steps": {
       "type": "int",
       "default": 4,
-      "description": "Sampler steps. 4 matches Kijai's V2V reference (the lightx2v speed-distill LoRA is trained for ~4 steps). With denoise_strength 0.5 the sampler starts ~halfway (start_step 2 of 4), preserving driving motion."
+      "description": "Sampler steps. 4 is Kijai's V2V example_02 value; the sampler starts at step 2 with denoise 1.0, as in his graph, which keeps the driving clip's motion."
     },
     "cfg": {
       "type": "float",
@@ -73,7 +78,7 @@
     "blocks_to_swap": {
       "type": "int",
       "default": 20,
-      "description": "Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's reference (example_03 / V2V example_02). Measured on a 12 GB card, same 528x768 clip: 12 blocks took 30.5 min, 20 blocks took 16 min."
+      "description": "Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's V2V example_02 value."
     },
     "model": {
       "type": "str",

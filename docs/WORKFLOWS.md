@@ -291,17 +291,19 @@ Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** · default `a woman is talking` — Drives expression/motion. InfiniteTalk is talking-head; keep it simple.
-  - `image` · _str_ · **required** — Input image filename (staged to ComfyUI input). The clip keeps this image's aspect ratio and is rendered at the area of 640x640, Kijai's reference area, in steps of 16 — a portrait image stays portrait, nothing is cropped away.
+  - `image` · _str_ · **required** — Input image filename (staged to ComfyUI input).
   - `audio` · _str_ · **required** — Input audio filename (wav) staged to ComfyUI input. Drives lip-sync + clip length.
   - `negative_prompt` · _str_ · default `bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards`
-  - `length` · _int_ · default `201` — Generous CAP on output frames (num_frames into MultiTalkWav2VecEmbeds), NOT an exact length — same as infinitetalk_v2v and Kijai's reference, which sets a big cap. The node clamps to the audio: actual = min(num_frames, audio_duration*fps), so the AUDIO drives real length. 201 ~= 8s at 25fps, bounding RAM on 12GB nodes. The windowed generation overshoots to the next window boundary, then VHS_VideoCombine trim_to_audio cuts the tail back to the audio track. A cap below the audio length cuts the voice line short, so only lower this to force a hard shorter clip.
+  - `width` · _int_ · default `640` — Resize target width (divisible by 16). Kijai's example: 640, center crop.
+  - `height` · _int_ · default `640` — Resize target height (divisible by 16). Kijai's example: 640, center crop.
+  - `length` · _int_ · default `400` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 400 is Kijai's example_03 value.
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps; do not change unless you know why.
   - `seed` · _int_ · default `2`
   - `steps` · _int_ · default `6` — Sampler steps. 6 with the lightx2v speed LoRA is the tuned default.
   - `cfg` · _float_ · default `1.0`
   - `shift` · _float_ · default `11.0`
   - `scheduler` · _str_ · default `dpm++_sde`
-  - `blocks_to_swap` · _int_ · default `20` — Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's reference (example_03 / V2V example_02). Measured on a 12 GB card, same 528x768 clip: 12 blocks took 30.5 min, 20 blocks took 16 min.
+  - `blocks_to_swap` · _int_ · default `20` — Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's example_03 value.
   - `model` · _str_ · default `wan2.1-i2v-14b-480p-Q3_K_S.gguf` — GGUF-quantized Wan2.1 I2V 14B backbone (~7.9GB). Fits 12GB card with block-swap. fp8 safetensors OOMs a 12GB card.
   - `multitalk_model` · _str_ · default `Wan2_1-InfiniteTalk_Single_Q4_K_M.gguf` — GGUF-quantized InfiniteTalk module (~1.3GB). Must be GGUF to pair with the GGUF backbone.
   - `wav2vec_model` · _str_ · default `wav2vec2-chinese-base_fp16.safetensors`
@@ -402,18 +404,19 @@ Audio-driven lip-sync applied on top of a driving motion clip. Loads a source vi
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** · default `a woman is talking` — Drives expression. The body motion comes from the driving video, so keep this simple.
-  - `video` · _str_ · **required** — Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement. The clip keeps this video's aspect ratio and is rendered at the area of 640x640, Kijai's V2V reference area, in steps of 16 — a portrait video stays portrait, nothing is cropped away.
+  - `video` · _str_ · **required** — Driving motion video filename (staged to ComfyUI input). Its motion is preserved; supplies the body movement.
   - `audio` · _str_ · **required** — Input audio filename (wav) staged to ComfyUI input. Drives lip-sync + clip length.
   - `negative_prompt` · _str_ · default `bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards`
-  - `denoise_strength` · _float_ · default `0.4` — V2V motion-adherence knob — THE key dial. At 1.0 the driving video is noised to pure noise and InfiniteTalk regenerates a talking head from the first frame, DISCARDING the body motion (the subject won't bend/dance). Lower preserves the driving motion: the sampler starts the denoise partway and keeps the driving latents. Default 0.4 is the verified sweet spot for body-motion clips (ride/dance) — holds hip/body motion better than Kijai's 0.5 reference while lip-sync stays clean. Raise to 0.5-0.7 for stronger lip-sync when the driving motion is subtle; drop to 0.35 for even more motion at the cost of slightly softer sync.
-  - `length` · _int_ · default `201` — Generous CAP on output frames (num_frames into MultiTalkWav2VecEmbeds), NOT an exact length — matches Kijai's reference which sets a big cap. The node internally clamps to the audio: actual = min(num_frames, audio_duration*fps), so the AUDIO drives real length. 201 ~= 8s at 25fps, bounding RAM on 12GB nodes; audio shorter than that (the usual case) clamps below it. The windowed generation overshoots to the next 81-frame boundary, then VHS_VideoCombine trim_to_audio cuts the tail back to the audio track. Only lower this to force a hard shorter clip.
+  - `width` · _int_ · default `640` — Resize target width (divisible by 16). Kijai's example: 640, center crop.
+  - `height` · _int_ · default `640` — Resize target height (divisible by 16). Kijai's example: 640, center crop.
+  - `length` · _int_ · default `1000` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value.
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps. Also re-times the driving video to this rate (force_rate). Do not change unless you know why.
   - `seed` · _int_ · default `2`
-  - `steps` · _int_ · default `4` — Sampler steps. 4 matches Kijai's V2V reference (the lightx2v speed-distill LoRA is trained for ~4 steps). With denoise_strength 0.5 the sampler starts ~halfway (start_step 2 of 4), preserving driving motion.
+  - `steps` · _int_ · default `4` — Sampler steps. 4 is Kijai's V2V example_02 value; the sampler starts at step 2 with denoise 1.0, as in his graph, which keeps the driving clip's motion.
   - `cfg` · _float_ · default `1.0`
   - `shift` · _float_ · default `11.0`
   - `scheduler` · _str_ · default `dpm++_sde`
-  - `blocks_to_swap` · _int_ · default `20` — Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's reference (example_03 / V2V example_02). Measured on a 12 GB card, same 528x768 clip: 12 blocks took 30.5 min, 20 blocks took 16 min.
+  - `blocks_to_swap` · _int_ · default `20` — Transformer blocks kept in system RAM instead of VRAM. 20 is Kijai's V2V example_02 value.
   - `model` · _str_ · default `wan2.1-i2v-14b-480p-Q3_K_S.gguf` — GGUF-quantized Wan2.1 I2V 14B backbone (~7.9GB). Fits 12GB card with block-swap. fp8 safetensors OOMs a 12GB card.
   - `multitalk_model` · _str_ · default `Wan2_1-InfiniteTalk_Single_Q4_K_M.gguf` — GGUF-quantized InfiniteTalk module (~1.3GB). Must be GGUF to pair with the GGUF backbone.
   - `wav2vec_model` · _str_ · default `wav2vec2-chinese-base_fp16.safetensors`

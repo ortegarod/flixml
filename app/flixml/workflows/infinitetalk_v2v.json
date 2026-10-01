@@ -15,17 +15,13 @@
     "class_type": "WanVideoBlockSwap",
     "inputs": {"blocks_to_swap": "{{blocks_to_swap}}", "offload_img_emb": false, "offload_txt_emb": false, "use_non_blocking": true, "vace_blocks_to_swap": 0, "prefetch_blocks": 1, "block_swap_debug": false}
   },
-  "293": {
-    "class_type": "GetImageSize",
-    "inputs": {"image": ["228", 0]}
-  },
   "245": {
-    "class_type": "ComfyMathExpression",
-    "inputs": {"expression": "floor(sqrt(409600 * a / b) / 16) * 16", "values.a": ["293", 0], "values.b": ["293", 1]}
+    "class_type": "INTConstant",
+    "inputs": {"value": "{{width}}"}
   },
   "246": {
-    "class_type": "ComfyMathExpression",
-    "inputs": {"expression": "floor(sqrt(409600 * b / a) / 16) * 16", "values.a": ["293", 0], "values.b": ["293", 1]}
+    "class_type": "INTConstant",
+    "inputs": {"value": "{{height}}"}
   },
   "228": {
     "class_type": "VHS_LoadVideo",
@@ -33,7 +29,7 @@
   },
   "230": {
     "class_type": "ImageResizeKJv2",
-    "inputs": {"image": ["228", 0], "width": ["245", 1], "height": ["246", 1], "upscale_method": "lanczos", "keep_proportion": "crop", "pad_color": "0, 0, 0", "crop_position": "center", "divisible_by": 16, "device": "cpu"}
+    "inputs": {"image": ["228", 0], "width": ["245", 0], "height": ["246", 0], "upscale_method": "lanczos", "keep_proportion": "crop", "pad_color": "0, 0, 0", "crop_position": "center", "divisible_by": 16, "device": "cpu"}
   },
   "229": {
     "class_type": "WanVideoEncode",
@@ -89,10 +85,10 @@
   },
   "192": {
     "class_type": "WanVideoImageToVideoMultiTalk",
-    "inputs": {"vae": ["129", 0], "width": ["291", 1], "height": ["291", 2], "frame_window_size": 81, "motion_frame": 9, "force_offload": false, "colormatch": "disabled", "start_image": ["291", 0], "tiled_vae": true, "clip_embeds": ["237", 0], "mode": "infinitetalk", "output_path": ""}
+    "inputs": {"vae": ["129", 0], "width": ["291", 1], "height": ["291", 2], "frame_window_size": 81, "motion_frame": 9, "force_offload": false, "colormatch": "disabled", "start_image": ["291", 0], "tiled_vae": false, "clip_embeds": ["237", 0], "mode": "infinitetalk", "output_path": ""}
   },
   "128": {
     "class_type": "WanVideoSampler",
-    "inputs": {"model": ["122", 0], "image_embeds": ["192", 0], "samples": ["229", 0], "steps": "{{steps}}", "cfg": "{{cfg}}", "shift": "{{shift}}", "seed": "{{seed}}", "force_offload": true, "scheduler": "{{scheduler}}", "riflex_freq_index": 0, "text_embeds": ["241", 0], "denoise_strength": "{{denoise_strength}}", "batched_cfg": false, "rope_function": "comfy", "multitalk_embeds": ["194", 0], "start_step": 0, "end_step": -1, "add_noise_to_samples": true}
+    "inputs": {"model": ["122", 0], "image_embeds": ["192", 0], "samples": ["229", 0], "steps": "{{steps}}", "cfg": "{{cfg}}", "shift": "{{shift}}", "seed": "{{seed}}", "force_offload": true, "scheduler": "{{scheduler}}", "riflex_freq_index": 0, "text_embeds": ["241", 0], "denoise_strength": 1.0, "batched_cfg": false, "rope_function": "comfy", "multitalk_embeds": ["194", 0], "start_step": 2, "end_step": -1, "add_noise_to_samples": true}
   }
 }
