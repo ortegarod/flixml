@@ -1166,6 +1166,8 @@ def _media_where(
     clauses = [
         "workflow_type IS DISTINCT FROM 'project_render'",
         "NOT (filename LIKE 'projects/%' AND filename LIKE '%render-%')",
+        # TTS lines are catalogued so their owner can reference them, not to be shown.
+        "type <> 'audio'",
     ]
     params: list[Any] = []
 

@@ -2277,6 +2277,16 @@ async def generate_tts(body: TTSGenerateRequest, agent: Agent | None = Depends(c
     if not ok:
         raise HTTPException(status_code=503, detail="TTS unavailable: no ElevenLabs API key configured.")
 
+    # Catalog it now, owned by the caller, so the caller can reference it in a job.
+    stat = output_path.stat()
+    await upsert_media({
+        "filename": f"{prefix}.wav",
+        "type": "audio",
+        "size": stat.st_size,
+        "modified": utc_from_timestamp(stat.st_mtime),
+        "metadata": json.dumps({"owner_id": agent.id}) if agent else None,
+    })
+
     audio = f"{prefix}.wav"
     return TTSGenerateResponse(
         ok=True,
