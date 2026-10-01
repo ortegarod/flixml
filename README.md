@@ -216,6 +216,9 @@ curl -X POST <your-api-url>/api/lora-training/start \
 # Check status
 curl <your-api-url>/api/lora-training/status?job_name=my-character-v1
 
+# What the trainer reports right now: reachable, GPUs, queue, every job on it
+curl <your-api-url>/api/lora-training/trainer
+
 # Read the trainer's own log
 curl <your-api-url>/api/lora-training/log?job_name=my-character-v1
 

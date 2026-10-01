@@ -125,35 +125,6 @@ export function LoraTrainingPage() {
     return job;
   });
 
-  const [showForm] = useState(true);
-  const [formJobName, setFormJobName] = useState("");
-  const [formTrigger, setFormTrigger] = useState("");
-  const [formCharacterId, setFormCharacterId] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  const submitTraining = async () => {
-    if (!window.confirm("Start Training will provision a paid AMD GPU droplet if one is not already running. Continue?")) return;
-    setSubmitError(null);
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/lora-training/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job_name: formJobName, trigger_word: formTrigger, character_id: formCharacterId }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.ok === false) throw new Error(data.detail || data.error || "Failed to start training");
-      setFormJobName("");
-      setFormTrigger("");
-      ctx.load();
-    } catch (e: any) {
-      setSubmitError(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   // Cache samples + checkpoints per job so expanding one doesn't overwrite another.
   const [expandedData, setExpandedData] = useState<Map<string, { samples: Sample[]; checkpoints: Checkpoint[] }>>(new Map());
@@ -213,79 +184,12 @@ export function LoraTrainingPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Characters &amp; LoRA Training</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Train character LoRAs with ai-toolkit. Track all jobs, checkpoints, and stats.
+            Agents start training through the API. This page shows what the trainer reports.
           </p>
         </div>
       </div>
 
-      {/* New training form */}
-      {showForm && (
-        <div className="rounded-xl border border-gray-800 bg-gray-950 p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-brand uppercase tracking-wide">Start Training Job</h2>
-
-          {/* Before-you-train guidance — follows RunComfy FLUX.2 LoRA guide */}
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-100/90 space-y-2">
-            <p className="font-semibold text-amber-200 uppercase tracking-wide text-[11px]">Before you train</p>
-            <div>
-              <p className="font-medium text-amber-200">Trigger word</p>
-              <p>Short, <span className="font-semibold">unique</span> token that isn't a real English word — e.g. <code className="text-amber-300">ch4rtrig</code>, <code className="text-amber-300">subj_v1</code>, <code className="text-amber-300">midnight_tarot</code>. Don't use the character's actual name — it collides with base-model priors and dilutes identity learning.</p>
-            </div>
-            <div>
-              <p className="font-medium text-amber-200">Captions (.txt next to each image)</p>
-              <p>Format: <code className="text-amber-300">&lt;trigger&gt;, a woman, [scene description]</code> (or <code className="text-amber-300">a man</code> / <code className="text-amber-300">a person</code>). The class word stays available to the base model; the trigger absorbs identity.</p>
-              <p className="mt-1">Describe what's visible (pose, clothing, setting, lighting, framing). Don't describe the person's face/features — those are what the trigger should learn.</p>
-            </div>
-            <div>
-              <p className="font-medium text-amber-200">Dataset size</p>
-              <p>Character LoRA target: <span className="font-semibold">30–60 images</span>. More isn't better — it dilutes per-image exposure.</p>
-            </div>
-            <p className="text-amber-200/70 text-[11px] pt-1 border-t border-amber-500/10">Full guide: <a href="https://www.runcomfy.com/trainer/ai-toolkit/flux-2-dev-lora-training" target="_blank" rel="noreferrer" className="underline hover:text-amber-200">RunComfy FLUX.2 LoRA training guide</a></p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs text-gray-400 uppercase tracking-wide">Job Name</label>
-              <Input
-                placeholder="e.g. character_v1"
-                value={formJobName}
-                onChange={e => setFormJobName(e.target.value)}
-                className="bg-black/40 border-gray-700 text-white placeholder:text-gray-600"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-gray-400 uppercase tracking-wide">Trigger Word</label>
-              <Input
-                placeholder="e.g. ch4rtrig (must be unique)"
-                value={formTrigger}
-                onChange={e => setFormTrigger(e.target.value)}
-                className="bg-black/40 border-gray-700 text-white placeholder:text-gray-600"
-              />
-              <p className="text-[10px] text-gray-500 leading-snug">Short, unique token. Not a real word and not the character's name.</p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-gray-400 uppercase tracking-wide">Character</label>
-              <select
-                value={formCharacterId}
-                onChange={e => setFormCharacterId(e.target.value)}
-                className="w-full rounded-md border border-gray-700 bg-black/40 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-brand"
-              >
-                <option value="">Select character…</option>
-                {ctx.characters.map(character => (
-                  <option key={character.id} value={character.id}>{character.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {submitError && <p className="text-sm text-red-400">{submitError}</p>}
-          <Button
-            onClick={submitTraining}
-            disabled={submitting || !formJobName || !formTrigger || !formCharacterId}
-            className="bg-brand hover:brightness-110 text-white"
-          >
-            {submitting ? "Starting…" : "Start Training"}
-          </Button>
-        </div>
-      )}
+      <TrainerPanel />
 
       {/* Datasets */}
       <section className="rounded-xl border border-gray-800/60 bg-gray-950 overflow-hidden">
@@ -559,6 +463,108 @@ export function LoraTrainingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Live view of the trainer itself — what ai-toolkit reports, nothing inferred.
+function TrainerPanel() {
+  const [trainer, setTrainer] = useState<any>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/lora-training/trainer");
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        setTrainer(data);
+        setFetchError(null);
+      } catch (e: any) {
+        if (!cancelled) setFetchError(e.message);
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const reachable = trainer?.reachable === true;
+  const dot = reachable ? "bg-emerald-400" : "bg-red-400";
+
+  return (
+    <section className="rounded-xl border border-gray-800/60 bg-gray-950 p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${trainer ? dot : "bg-gray-600"}`} />
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">Trainer</h2>
+          {trainer && (
+            <span className={`text-xs ${reachable ? "text-emerald-400" : "text-red-400"}`}>
+              {reachable ? "connected" : trainer.error}
+            </span>
+          )}
+        </div>
+        {trainer?.url && <span className="text-[11px] font-mono text-gray-500">ai-toolkit · {trainer.url}</span>}
+      </div>
+
+      {fetchError && <p className="text-xs text-red-400">Studio API: {fetchError}</p>}
+      {trainer && !trainer.configured && <p className="text-xs text-gray-400">{trainer.error}</p>}
+
+      {reachable && (
+        <>
+          <div className="space-y-1.5">
+            {(trainer.gpus || []).map((gpu: any) => (
+              <div key={gpu.index} className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-gray-400">
+                <span className="text-gray-200">GPU {gpu.index}: {gpu.name}</span>
+                <span>{gpu.memory?.used} / {gpu.memory?.total} MB</span>
+                <span>{gpu.utilization?.gpu}% util</span>
+                <span>{gpu.temperature}°C</span>
+                <span>{gpu.power?.draw?.toFixed?.(0)} / {gpu.power?.limit} W</span>
+              </div>
+            ))}
+            {(trainer.queues || []).map((q: any) => (
+              <p key={q.gpu_ids} className="text-xs font-mono text-gray-400">
+                Queue GPU {q.gpu_ids}: <span className={q.is_running ? "text-emerald-400" : "text-gray-500"}>{q.is_running ? "running" : "stopped"}</span>
+              </p>
+            ))}
+          </div>
+
+          <div>
+            <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Jobs on the trainer ({(trainer.jobs || []).length})</h3>
+            {(trainer.jobs || []).length === 0 ? (
+              <p className="text-xs text-gray-500">The trainer has no jobs.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {trainer.jobs.map((job: any) => (
+                  <div key={job.id} className="rounded-lg border border-gray-800 bg-black/40 px-3 py-2 text-xs font-mono">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="text-gray-200">{job.name}</span>
+                      <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
+                      {job.total_steps ? <span className="text-gray-400">step {job.step}/{job.total_steps}</span> : job.step ? <span className="text-gray-400">step {job.step}</span> : null}
+                      {job.speed_string && <span className="text-gray-500">{job.speed_string}</span>}
+                      {job.updated_at && <span className="text-gray-600">updated {formatDate(job.updated_at)}</span>}
+                    </div>
+                    {job.info && <p className="mt-1 text-gray-500">ai-toolkit: {job.info}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {trainer.folders && (
+            <p className="text-[11px] font-mono text-gray-600">
+              datasets: {trainer.folders.datasets} · output: {trainer.folders.training}
+            </p>
+          )}
+        </>
+      )}
+
+      {trainer?.checked_at && <p className="text-[10px] text-gray-600">Checked {formatDate(trainer.checked_at)} · every 5 s</p>}
+    </section>
   );
 }
 

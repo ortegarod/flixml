@@ -3705,6 +3705,49 @@ async def lora_training_jobs():
     return {"jobs": jobs, "count": len(jobs)}
 
 
+@app.get("/api/lora-training/trainer")
+async def lora_training_trainer():
+    """What the trainer (ai-toolkit at AITK_API_URL) reports right now.
+
+    Asked live on every call: whether it answers, its GPUs, its queues, every
+    job on it (including ones Studio didn't start), and its folders.
+    """
+    checked_at = datetime.now(UTC).isoformat()
+    if not _AITK_API_URL:
+        return {"configured": False, "url": None, "reachable": False, "error": "AITK_API_URL is not set", "checked_at": checked_at}
+
+    async def _get(client: httpx.AsyncClient, path: str) -> Any:
+        resp = await client.get(f"{_AITK_API_URL}{path}", headers=_aitk_headers())
+        if resp.status_code == 401:
+            raise RuntimeError("Trainer rejected the token (HTTP 401)")
+        resp.raise_for_status()
+        return resp.json()
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            gpu, queue, jobs, settings = await asyncio.gather(
+                _get(client, "/api/gpu"), _get(client, "/api/queue"),
+                _get(client, "/api/jobs"), _get(client, "/api/settings"),
+            )
+    except Exception as exc:
+        _training_logger.warning("ai-toolkit trainer check failed: %s", exc)
+        error = str(exc) if isinstance(exc, RuntimeError) else "Trainer did not respond"
+        return {"configured": True, "url": _AITK_API_URL, "reachable": False, "error": error, "checked_at": checked_at}
+
+    job_fields = ("id", "name", "job_ref", "job_type", "status", "step", "total_steps", "info", "speed_string", "gpu_ids", "queue_position", "created_at", "updated_at")
+    return {
+        "configured": True,
+        "url": _AITK_API_URL,
+        "reachable": True,
+        "error": None,
+        "checked_at": checked_at,
+        "gpus": gpu.get("gpus", []),
+        "queues": queue.get("queues", []),
+        "jobs": [{k: job.get(k) for k in job_fields} for job in jobs.get("jobs", [])],
+        "folders": {"training": settings.get("TRAINING_FOLDER"), "datasets": settings.get("DATASETS_FOLDER")},
+    }
+
+
 @app.get("/api/lora-training/log")
 async def lora_training_log(job_name: str, offset: int | None = None):
     """The trainer's own log for a job, passed through from ai-toolkit.
