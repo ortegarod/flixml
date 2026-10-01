@@ -19,19 +19,11 @@
     "image": {
       "type": "str",
       "required": true,
-      "description": "Input image filename"
+      "description": "Input image filename. The clip keeps this image's aspect ratio and is rendered at the area of 1280x720, the Wan 2.2 authors' default (wan/image2video.py, max_area=720*1280), in steps of 16."
     },
     "negative_prompt": {
       "type": "str",
       "default": "bright colors, overexposed, static, blurred details"
-    },
-    "width": {
-      "type": "int",
-      "default": 480
-    },
-    "height": {
-      "type": "int",
-      "default": 832
     },
     "length": {
       "type": "int",
@@ -40,7 +32,8 @@
     },
     "fps": {
       "type": "int",
-      "default": 16
+      "default": 32,
+      "description": "Frame rate of the saved clip. Wan renders 16 fps; every clip then goes through RIFE x2 frame interpolation (rife49, ComfyUI-Frame-Interpolation), which doubles the frames, so 32 plays at the speed Wan rendered it."
     },
     "seed": {
       "type": "int",

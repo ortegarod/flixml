@@ -2467,6 +2467,16 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
         task = meta.task if meta else ""
         body.mode = "t2v" if task.startswith("text-") else "v2v" if task.startswith("video-") else "i2v"
 
+    # A workflow that sizes its own output (Wan i2v takes the start image's shape at the
+    # authors' area) has no width/height param; a size sent to it would be dropped silently.
+    meta = get_registry().get(body.workflow)
+    for _key in ("width", "height"):
+        if getattr(body, _key) is not None and meta is not None and _key not in meta.params:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{body.workflow} takes no {_key}: it sets the output size itself. See GET /api/workflows/{body.workflow}.",
+            )
+
     if agent is not None:
         agent.require_workflow(body.workflow)
         agent.require_characters([r.get("id") for r in character_records if r.get("id")])

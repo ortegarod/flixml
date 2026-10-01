@@ -47,15 +47,47 @@
       "image": "{{image}}"
     }
   },
+  "93": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": ["62", 0]
+    }
+  },
+  "94": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "floor(sqrt(921600 * a / b) / 16) * 16",
+      "values.a": ["93", 0],
+      "values.b": ["93", 1]
+    }
+  },
+  "95": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "floor(sqrt(921600 * b / a) / 16) * 16",
+      "values.a": ["93", 0],
+      "values.b": ["93", 1]
+    }
+  },
+  "92": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": ["62", 0],
+      "upscale_method": "bicubic",
+      "width": ["94", 1],
+      "height": ["95", 1],
+      "crop": "disabled"
+    }
+  },
   "63": {
     "class_type": "WanImageToVideo",
     "inputs": {
       "positive": ["6", 0],
       "negative": ["7", 0],
       "vae": ["39", 0],
-      "start_image": ["62", 0],
-      "width": "{{width}}",
-      "height": "{{height}}",
+      "start_image": ["92", 0],
+      "width": ["94", 1],
+      "height": ["95", 1],
       "length": "{{length}}",
       "batch_size": 1
     }
@@ -167,11 +199,26 @@
       "vae": ["39", 0]
     }
   },
+  "96": {
+    "class_type": "RIFE VFI",
+    "inputs": {
+      "frames": ["8", 0],
+      "ckpt_name": "rife49.pth",
+      "clear_cache_after_n_frames": 10,
+      "multiplier": 2,
+      "fast_mode": true,
+      "ensemble": true,
+      "scale_factor": 1.0,
+      "dtype": "float32",
+      "torch_compile": false,
+      "batch_size": 1
+    }
+  },
   "60": {
     "class_type": "CreateVideo",
     "inputs": {
       "fps": "{{fps}}",
-      "images": ["8", 0]
+      "images": ["96", 0]
     }
   },
   "61": {

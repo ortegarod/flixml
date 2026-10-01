@@ -323,12 +323,10 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
 - **Providers:** local, cloud_serverless
 - **Params:**
   - `prompt` · _str_ · **required** — Motion prompt. Name an action a viewer could describe afterwards - she stands up and walks toward the camera, he throws the bag over his shoulder. Add a camera instruction on top of it, never instead of it. Words like subtle, slowly or gently are instructions to do nothing.
-  - `image` · _str_ · **required** — Input image filename
+  - `image` · _str_ · **required** — Input image filename. The clip keeps this image's aspect ratio and is rendered at the area of 1280x720, the Wan 2.2 authors' default (wan/image2video.py, max_area=720*1280), in steps of 16.
   - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
-  - `width` · _int_ · default `480`
-  - `height` · _int_ · default `832`
   - `length` · _int_ · default `81` — Frame count, must be 4n+1 (33/49/65/81). Default 81 is the length Wan itself ships and generates at: wan_shared_cfg.frame_num = 81 with sample_fps = 16 in wan/configs/shared_config.py, i.e. 5.06 s. The 4n+1 rule is the authors' too - generate.py --frame_num help: "How many frames of video are generated. The number should be 4n+1". Source: github.com/Wan-Video/Wan2.2, both files read 2026-09-21. Going past 81 in this single-window workflow is untested here; use wan22_i2v_context for longer clips.
-  - `fps` · _int_ · default `16`
+  - `fps` · _int_ · default `32` — Frame rate of the saved clip. Wan renders 16 fps; every clip then goes through RIFE x2 frame interpolation (rife49, ComfyUI-Frame-Interpolation), which doubles the frames, so 32 plays at the speed Wan rendered it.
   - `seed` · _int_
   - `steps_high` · _int_ · default `2` — 2+2=4 total. The model authors' published value, not one we tuned. The Lightning LoRA is step-distilled: it was trained on the noise schedule a 4-step run produces, and ComfyUI derives its sigma spacing from the step count you pass, so any other count denoises at noise levels the LoRA never saw. That shows up as rising contrast and a light that blooms across the clip. Source: lightx2v/Wan2.2-Lightning, official native-ComfyUI workflow Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1-NativeComfy.json — steps 4, split 0-2 / 2-4.
   - `steps_low` · _int_ · default `2` — See steps_high. 2+2=4 total, per the authors' workflow.
@@ -364,17 +362,15 @@ Image-to-video past the model's 81-frame limit, generated as ONE clip instead of
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** — Motion prompt. Name an action a viewer could describe afterwards - she stands up and walks toward the camera, he throws the bag over his shoulder. Add a camera instruction on top of it, never instead of it. Words like subtle, slowly or gently are instructions to do nothing. One sustained action works better here than a sequence: every window reads the same prompt, so asking for a beginning and an end gives you neither.
-  - `image` · _str_ · **required** — Input image filename. With cond_retain_index_list at "0" it anchors the subject and set in every window, not just the first.
+  - `image` · _str_ · **required** — Input image filename. With cond_retain_index_list at "0" it anchors the subject and set in every window, not just the first. The clip keeps this image's aspect ratio and is rendered at the area of 1280x720, the Wan 2.2 authors' default (wan/image2video.py, max_area=720*1280), in steps of 16.
   - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
-  - `width` · _int_ · default `480`
-  - `height` · _int_ · default `832`
   - `length` · _int_ · default `161` — Total frame count, must be 4k+1. 161 frames at 16 fps is about 10 seconds. This is the whole point of the workflow: set it past 81 and the windows handle the rest.
   - `context_length` · _int_ · default `21` — Window size in LATENT frames, not real frames - Wan packs 4 real frames into 1 latent, so 21 latent is the model's native 81 real frames ((81-1)/4+1). This sets the per-step VRAM cost. Keep at 21.
   - `context_overlap` · _int_ · default `12` — Latent frames shared between neighbouring windows; 12 latent is 48 real frames. This overlap is what carries the motion across a join, so it is the knob to raise if the action stutters or the face shifts mid-clip. Measured 2026-09-17: at 7 latent (28 real) a 161-frame clip showed a visible artefact where the second window blends in, and 12 removed it. Raising it also adds windows, so it costs time.
   - `cond_retain_index_list` · _str_ · default `0` — Pins the start image into EVERY window instead of only the first. Leave at "0". Measured 2026-09-17: with this empty, only the first window is anchored to the image, and a 161-frame clip ended on a different subject in a different location than it started - each later window invents its own. Set it empty only if you want the clip free to wander.
   - `context_schedule` · _str_ · default `standard_static` — standard_static cuts the clip into fixed sequential windows, each starting context_length - context_overlap frames after the last, and reuses that same set on every step - which is what a one-way action wants. standard_uniform instead re-picks strided windows per step from a shifting offset, and looped_uniform lets them wrap around to the start; both come from AnimateDiff's scheduler and suit looping or ambient motion. Read from comfy/context_windows.py, create_windows_static_standard vs create_windows_uniform_standard.
   - `fuse_method` · _str_ · default `pyramid` — How overlapping windows are blended. pyramid weights the middle of each window highest.
-  - `fps` · _int_ · default `16`
+  - `fps` · _int_ · default `32` — Frame rate of the saved clip. Wan renders 16 fps; every clip then goes through RIFE x2 frame interpolation (rife49, ComfyUI-Frame-Interpolation), which doubles the frames, so 32 plays at the speed Wan rendered it.
   - `seed` · _int_
   - `steps_high` · _int_ · default `2` — 2+2=4, the Lightning LoRA authors' own reference config. Defaults here match that reference rather than the tuned numbers in wan22_i2v: over a clip this long the tuned high-noise CFG blows the exposure out within the first window.
   - `steps_low` · _int_ · default `2` — See steps_high. 2+2=4.
