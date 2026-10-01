@@ -217,9 +217,13 @@ export function StudioView({
   const merged = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    // Only show active jobs (pending/running/failed) — completed jobs appear as items via /api/listing
+    // Only show active jobs (pending/running/failed) — completed jobs appear as items via /api/listing.
+    // A cancelled job is stored as failed but was stopped on purpose, so it leaves the lane.
     const activeJobs = jobs.filter(
-      (job) => job.status === "pending" || job.status === "running" || job.status === "failed"
+      (job) =>
+        job.status === "pending" ||
+        job.status === "running" ||
+        (job.status === "failed" && job.error !== "Cancelled")
     );
 
     // Items are already filtered/search-paged by the backend. Keeping this as-is

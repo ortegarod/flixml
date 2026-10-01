@@ -998,6 +998,10 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
     if status == "completed" and outputs and stored_status != "completed":
         status = "completed" if await _persist_outputs(prompt_id, outputs) else "running"
 
+    # A cancelled job comes back from its node as an execution error, or as unknown when
+    # it was dequeued before it ran; keep the failed/"Cancelled" it was stored with.
+    if stored_status == "failed" and status in {"failed", "unknown"}:
+        return {"status": "failed", "outputs": [], "raw": raw}
     if status in {"pending", "running", "completed", "failed"}:
         await update_job_status(prompt_id, status, error=error)
     return {"status": status, "outputs": outputs if status == "completed" else [], "raw": raw}
@@ -2951,6 +2955,35 @@ async def job(prompt_id: str) -> JobStatusResponse:
         started_at=record.get("started_at"),
         finished_at=record.get("finished_at"),
     )
+
+
+CANCELLED_ERROR = "Cancelled"
+
+
+@app.post("/api/jobs/{prompt_id}/cancel")
+async def cancel_job(prompt_id: str, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """Take an unfinished job off its node and mark it failed with error "Cancelled".
+
+    A queued job is deleted from the node's queue. A running one is interrupted only
+    when the node reports it as the job on the GPU, since an untargeted /interrupt stops
+    whatever is running, and older ComfyUI builds ignore the prompt_id it is sent with.
+    """
+    record = await get_job(prompt_id)
+    if not record or not owns(agent, record):
+        raise HTTPException(status_code=404, detail=f"Job '{prompt_id}' not found")
+    if record.get("status") in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail=f"Job '{prompt_id}' already {record['status']}")
+
+    client = comfy(comfy_node_for_provider(record.get("provider")))
+    queue = await client.get("/queue")
+    running = {item[1] for item in queue.get("queue_running", [])}
+    if prompt_id in running:
+        await client.post("/interrupt", {"prompt_id": prompt_id})
+    else:
+        await client.post("/queue", {"delete": [prompt_id]})
+    await update_job_status(prompt_id, "failed", error=CANCELLED_ERROR)
+    logger.info("job %s cancelled (%s)", prompt_id, "interrupted" if prompt_id in running else "dequeued")
+    return {"ok": True, "prompt_id": prompt_id, "status": "failed", "error": CANCELLED_ERROR}
 
 
 import os

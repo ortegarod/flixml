@@ -29,6 +29,8 @@ Regardless of the workflow chosen, DO NOT wait for generation to complete, unles
 
 Be kind to the GPUs, queue up only one generation at a time, unless explicitly asked to generate a batch.
 
+`POST /api/jobs/{prompt_id}/cancel` stops a job your key queued: it leaves the queue if it is waiting and the GPU if it is running.
+
 ### Images
 
 ```bash
