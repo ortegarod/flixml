@@ -93,8 +93,8 @@
       "negative": ["96", 0],
       "latent_image": ["105", 0],
       "seed": "{{seed}}",
-      "steps": 20,
-      "cfg": 3.0,
+      "steps": 40,
+      "cfg": 4.0,
       "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1
