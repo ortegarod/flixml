@@ -3108,8 +3108,16 @@ async def _sync_training_samples(job_name: str) -> list[str]:
     return vps_rel_paths
 
 
-async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
-    """Look up an ai-toolkit job by job_ref (our job_name)."""
+_training_logger = logging.getLogger("flixml.training")
+_ACTIVE_TRAINING_STATUSES = {"pending", "running", "training"}
+
+
+async def _aitk_lookup(job_name: str) -> tuple[dict[str, Any] | None, bool]:
+    """Look up an ai-toolkit job by job_ref (our job_name).
+
+    Returns (job, reachable). reachable is False when ai-toolkit didn't answer,
+    so callers can tell a dead trainer from a job the trainer doesn't know.
+    """
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
@@ -3117,11 +3125,21 @@ async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
                 params={"job_ref": job_name},
                 headers=_aitk_headers(),
             )
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
-    return None
+    except Exception as exc:
+        _training_logger.warning("ai-toolkit unreachable looking up job %s: %s", job_name, exc)
+        return None, False
+    if resp.status_code == 200:
+        return (resp.json() or None), True
+    if resp.status_code == 404:
+        return None, True
+    _training_logger.warning("ai-toolkit returned HTTP %s looking up job %s", resp.status_code, job_name)
+    return None, False
+
+
+async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
+    """Look up an ai-toolkit job by job_ref (our job_name)."""
+    job, _ = await _aitk_lookup(job_name)
+    return job
 
 
 def _build_training_config(request: LoraTrainingStartRequest) -> tuple[Path, dict[str, Any]]:
@@ -3364,7 +3382,7 @@ async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatu
     db_status = db_job.get("status", "configured") if db_job else "configured"
     started_at = (db_job.get("created_at").isoformat() if db_job and db_job.get("created_at") else None)
 
-    aitk_job = await _aitk_job_by_ref(job_name)
+    aitk_job, aitk_reachable = await _aitk_lookup(job_name)
     if aitk_job:
         # Sync any new samples from the droplet to the VPS
         await _sync_training_samples(job_name)
@@ -3408,12 +3426,20 @@ async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatu
             started_at=started_at,
         )
 
+    # No live data from the trainer: never pass the DB's last word off as live.
+    error: str | None = None
+    if db_status in _ACTIVE_TRAINING_STATUSES:
+        if not aitk_reachable:
+            db_status, error = "unreachable", "Trainer did not respond"
+        else:
+            db_status, error = "failed", "Trainer has no record of this job"
     return LoraTrainingStatus(
         ok=True,
         status=db_status,
         job_name=job_name,
         updated_at=updated_at,
         started_at=started_at,
+        error=error,
     )
 
 

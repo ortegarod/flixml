@@ -212,6 +212,10 @@ export function LoraTrainingPage() {
     if (effectiveLive && effectiveLive.job_name === job.job_name && (effectiveLive.status === "running" || effectiveLive.status === "training")) {
       return { ...job, ...effectiveLive, _live: true };
     }
+    // The API couldn't reach the trainer, so nothing about this run is known.
+    if (effectiveLive && effectiveLive.job_name === job.job_name && effectiveLive.status === "unreachable") {
+      return { ...job, status: "unreachable", error: effectiveLive.error };
+    }
     // Job says running/training in the DB but ai-toolkit has no matching
     // live process. The job died or was abandoned — treat as failed.
     if (!effectiveLive || effectiveLive.job_name !== job.job_name) {
@@ -510,7 +514,7 @@ export function LoraTrainingPage() {
           mergedJobs.map((job: any) => {
             const hasLiveProgress = job.current_step > 0 && job.total_steps > 0;
             const isTraining = (job.status === "training" || job.status === "running") && hasLiveProgress;
-            const isInitializing = (job.status === "running" || job.status === "training") && !hasLiveProgress && job._live;
+            const isInitializing = (job.status === "running" || job.status === "training") && !hasLiveProgress && job._live && job.info;
             const progress = hasLiveProgress ? Math.round((job.current_step / job.total_steps) * 100) : 0;
             const isExpanded = expandedJob === job.job_name;
             const isLoading = isExpanded && loadingExpanded && !expandedData.has(job.job_name);
@@ -568,7 +572,7 @@ export function LoraTrainingPage() {
                   {isInitializing && (
                     <div className="flex items-center gap-2 mt-2 text-sm text-brand">
                       <span className="inline-block w-2 h-2 rounded-full bg-brand animate-pulse flex-shrink-0" />
-                      {job.info || "Initializing — loading models, caching latents…"}
+                      ai-toolkit: {job.info}
                     </div>
                   )}
 
@@ -578,6 +582,10 @@ export function LoraTrainingPage() {
                       {job.elapsed ? ` · ${job.elapsed}` : ""}
                       {job.loss != null ? ` · final loss ${job.loss.toFixed(4)}` : ""}
                     </p>
+                  )}
+
+                  {job.status === "unreachable" && (
+                    <p className="text-[11px] text-amber-400/70 mt-1.5 line-clamp-2">{job.error}</p>
                   )}
 
                   {job.status === "failed" && (
