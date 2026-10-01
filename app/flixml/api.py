@@ -2967,11 +2967,15 @@ def _resolve_filename_prefix(prefix: str | None, subfolder: str) -> str:
     """Return a unique filename prefix.
 
     If prefix is None, generate a random 8-char hex ID under subfolder.
-    If prefix is provided, raise 409 if any file with that prefix already exists locally.
+    If prefix is provided, raise 400 if it climbs out of the output dir (a `..` part,
+    either separator, since a node may be Windows) and 409 if any file with that
+    prefix already exists locally.
     """
     if prefix is None:
         return f"{subfolder}/{uuid.uuid4().hex[:8]}"
     safe = prefix.strip().lstrip("/")
+    if ".." in re.split(r"[\\/]", safe):
+        raise HTTPException(status_code=400, detail=f"Filename prefix '{safe}' must stay inside the output folder.")
     existing = list((_OUTPUT_DIR / safe).parent.glob(f"{(_OUTPUT_DIR / safe).name}*"))
     if existing:
         raise HTTPException(status_code=409, detail=f"Filename prefix '{safe}' already exists - choose a different name.")
