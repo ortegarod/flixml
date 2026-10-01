@@ -296,7 +296,7 @@ Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 
   - `negative_prompt` · _str_ · default `bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards`
   - `width` · _int_ · default `640` — Resize target width (divisible by 16)
   - `height` · _int_ · default `640` — Resize target height (divisible by 16)
-  - `length` · _int_ · default `81` — Frame count. At 25fps: 81 frames ~= 3.2s. Keep short — long renders choke 12GB/16GB RAM.
+  - `length` · _int_ · default `201` — Generous CAP on output frames (num_frames into MultiTalkWav2VecEmbeds), NOT an exact length — same as infinitetalk_v2v and Kijai's reference, which sets a big cap. The node clamps to the audio: actual = min(num_frames, audio_duration*fps), so the AUDIO drives real length. 201 ~= 8s at 25fps, bounding RAM on 12GB nodes. The windowed generation overshoots to the next window boundary, then VHS_VideoCombine trim_to_audio cuts the tail back to the audio track. A cap below the audio length cuts the voice line short, so only lower this to force a hard shorter clip.
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps; do not change unless you know why.
   - `seed` · _int_ · default `2`
   - `steps` · _int_ · default `6` — Sampler steps. 6 with the lightx2v speed LoRA is the tuned default.
