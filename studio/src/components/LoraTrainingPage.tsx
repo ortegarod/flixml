@@ -189,7 +189,7 @@ export function LoraTrainingPage() {
         </div>
       </div>
 
-      <TrainerPanel />
+      <TrainerPanel studioJobNames={jobs.map((j: any) => j.job_name)} />
 
       {/* Datasets */}
       <section className="rounded-xl border border-gray-800/60 bg-gray-950 overflow-hidden">
@@ -467,7 +467,7 @@ export function LoraTrainingPage() {
 }
 
 // Live view of the trainer itself — what ai-toolkit reports, nothing inferred.
-function TrainerPanel() {
+function TrainerPanel({ studioJobNames }: { studioJobNames: string[] }) {
   const [trainer, setTrainer] = useState<any>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -494,6 +494,8 @@ function TrainerPanel() {
   }, []);
 
   const reachable = trainer?.reachable === true;
+  // Jobs Studio started are listed under Training Jobs; only show the rest here.
+  const otherJobs = (trainer?.jobs || []).filter((job: any) => !studioJobNames.includes(job.job_ref) && !studioJobNames.includes(job.name));
   const dot = reachable ? "bg-emerald-400" : "bg-red-400";
 
   return (
@@ -533,13 +535,11 @@ function TrainerPanel() {
             ))}
           </div>
 
+          {otherJobs.length > 0 && (
           <div>
-            <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Jobs on the trainer ({(trainer.jobs || []).length})</h3>
-            {(trainer.jobs || []).length === 0 ? (
-              <p className="text-xs text-gray-500">The trainer has no jobs.</p>
-            ) : (
+            <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">On the trainer, not started by Studio ({otherJobs.length})</h3>
               <div className="space-y-1.5">
-                {trainer.jobs.map((job: any) => (
+                {otherJobs.map((job: any) => (
                   <div key={job.id} className="rounded-lg border border-gray-800 bg-black/40 px-3 py-2 text-xs font-mono">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="text-gray-200">{job.name}</span>
@@ -552,8 +552,8 @@ function TrainerPanel() {
                   </div>
                 ))}
               </div>
-            )}
           </div>
+          )}
 
           {trainer.folders && (
             <p className="text-[11px] font-mono text-gray-600">
