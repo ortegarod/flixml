@@ -882,7 +882,7 @@ class LoraTrainingStartRequest(BaseModel):
     low_vram: bool | None = None
     save_every: int | None = Field(default=None, ge=1)
     sample_every: int | None = Field(default=None, ge=1)
-    sample_prompts: list[str] | None = Field(default=None, description="The previews: one image per prompt every `sample_every` steps, shown on the LoRA Training page. `[trigger]` becomes `trigger_word`. Default: the template's prompts")
+    sample_prompts: list[str] | None = Field(default=None, description="The previews: one image per prompt every `sample_every` steps, shown on the LoRA Training page. `[trigger]` becomes `trigger_word`. Default: 3 captions spread across the dataset, so each preview shows beside its training image")
     sample_width: int | None = Field(default=None, ge=64)
     sample_height: int | None = Field(default=None, ge=64)
     sample_steps: int | None = Field(default=None, ge=1)
@@ -3332,6 +3332,10 @@ async def _aitk_dataset_captions(dataset: str) -> list[tuple[str, str]]:
     return [(path, captions.get(path, "").strip()) for path in paths]
 
 
+# Previews per run when the caller gives none: captions spread across the dataset.
+_DEFAULT_PREVIEW_COUNT = 3
+
+
 async def _build_training_config(request: LoraTrainingStartRequest, folders: dict[str, str]) -> tuple[Path, dict[str, Any]]:
     """Fill the template with this run's identity. The template's recipe is used as written.
 
@@ -3361,10 +3365,23 @@ async def _build_training_config(request: LoraTrainingStartRequest, folders: dic
     if request.steps is not None:
         studio.pop("steps_per_image", None)
 
+    items = await _aitk_dataset_captions(request.dataset)
+    if not items:
+        raise HTTPException(status_code=400, detail=f"Dataset '{request.dataset}' has no images on the trainer")
+
+    # Previews default to captions from the dataset, so the LoRA Training page can
+    # show each preview beside the training image it was captioned from. The
+    # template's generic prompts match no image.
+    if request.sample_prompts is None:
+        captioned = [caption.strip() for _, caption in items if caption.strip()]
+        if captioned:
+            count = min(_DEFAULT_PREVIEW_COUNT, len(captioned))
+            process.setdefault("sample", {})["prompts"] = [
+                captioned[i * len(captioned) // count] for i in range(count)
+            ]
+            _training_logger.info("training config %s: %d previews from dataset captions", job_name, count)
+
     if "steps_per_image" in studio:
-        items = await _aitk_dataset_captions(request.dataset)
-        if not items:
-            raise HTTPException(status_code=400, detail=f"Dataset '{request.dataset}' has no images on the trainer")
         batch = process["train"].get("batch_size", 1) * process["train"].get("gradient_accumulation_steps", 1)
         process["train"]["steps"] = -(-len(items) * int(studio["steps_per_image"]) // batch)
         _training_logger.info("training config %s: %d images, steps=%s", job_name, len(items), process["train"]["steps"])
