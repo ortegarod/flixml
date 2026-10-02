@@ -2718,6 +2718,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
             "size": stat.st_size,
             "modified": utc_from_timestamp(stat.st_mtime),
             "prompt": job_meta.get("prompt"),
+            "negative_prompt": job_meta.get("negative_prompt"),
             "steps": job_meta.get("steps"),
             "guidance": job_meta.get("guidance"),
             "sampler": job_meta.get("sampler"),
@@ -4196,7 +4197,9 @@ async def listing(
             "url": f"/media/{filename}",
             "thumb": f"/api/thumb/{filename}",
             "prompt": row.get("prompt"),
-            "negative_prompt": row.get("negative_prompt"),
+            # Rows written before the job's negative was copied onto the file still
+            # carry it in the request echo.
+            "negative_prompt": row.get("negative_prompt") or db.request_negative(meta),
             "description": row.get("description"),
             "prompt_id": row.get("prompt_id"),
             "character_ids": row.get("character_ids") or [],

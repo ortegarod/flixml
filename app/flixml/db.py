@@ -248,6 +248,27 @@ def graph_settings(workflow_json: Any) -> dict[str, Any]:
     return settings
 
 
+def request_negative(metadata: Any) -> str | None:
+    """The negative prompt a caller sent, wherever its route filed it.
+
+    Image routes fold `negative` into workflow_params as `negative_prompt`; video
+    routes keep `negative` on the request and copy it into workflow_params as
+    `negative`. Nothing stores it at a top-level `negative_prompt`, so a reader
+    looking only there sees null for a negative that was applied.
+    """
+    if isinstance(metadata, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            metadata = json.loads(metadata)
+    if not isinstance(metadata, dict):
+        return None
+    params = metadata.get("workflow_params")
+    params = params if isinstance(params, dict) else {}
+    for value in (metadata.get("negative"), params.get("negative_prompt"), params.get("negative")):
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def _job_row(row: asyncpg.Record) -> dict[str, Any]:
     data = dict(row)
     data.update(graph_models(data.get("workflow_json")))
@@ -259,6 +280,7 @@ def _job_row(row: asyncpg.Record) -> dict[str, Any]:
     if isinstance(metadata, dict):
         for key, value in metadata.items():
             data.setdefault(key, value)
+    data.setdefault("negative_prompt", request_negative(metadata))
     return data
 
 
