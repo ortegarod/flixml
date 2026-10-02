@@ -722,7 +722,10 @@ class ImageGenerateRequest(BaseModel):
     unet: str | None = None  # Workflow-specific, set by service
     clip: str | None = None  # Workflow-specific, set by service
     vae: str | None = None  # Workflow-specific, set by service
-    lora_strength: float = 1.0
+    lora_strength: float | None = Field(
+        default=None,
+        description="Strength of the workflow's LoRA slot. Unset: the bound character's LoRA strength, else the workflow's default.",
+    )
     image: str | None = Field(
         default=None,
         description="Source image filename or Studio output path for img2img / face-reference workflows.",
@@ -3704,10 +3707,11 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
     # Build workflow-specific params (only pass what the workflow builder accepts).
     # Omitting a key (rather than passing None) lets the workflow's own meta.json
     # default apply when the request doesn't set it.
-    workflow_params: dict[str, Any] = {
-        "loras": loras,
-        "lora_strength": body.lora_strength,
-    }
+    workflow_params: dict[str, Any] = {"loras": loras}
+    # Only an explicit strength goes in: a default here would shadow the bound
+    # character's own strength (it ran at 1.0 while the binding said 0.8).
+    if body.lora_strength is not None:
+        workflow_params["lora_strength"] = body.lora_strength
     if body.steps is not None:
         workflow_params["steps"] = body.steps
     if body.cfg is not None:
