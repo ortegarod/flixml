@@ -17,16 +17,14 @@
 #   DG keys live UNDER train: as `do_differential_guidance` / `differential_guidance_scale`.
 #   Earlier versions of this file used wrong nesting/names and DOP+DG were silently no-ops.
 #
-# To use: copy this file, replace "my-character" with job name,
-# replace "character_trigger" with your trigger word, and point folder_path
-# to your dataset.
+# Studio fills in the job name, trigger word, checkpoint path, dataset and folders.
 ---
 job: extension
 config:
   name: "my-character"
   process:
     - type: "ui_trainer"
-      training_folder: "/root/flixml/training/output"
+      training_folder: "output"
       device: cuda:0
       # Replace with the private trigger for the subject, e.g. a short unique token.
       trigger_word: "character_trigger"
@@ -40,7 +38,7 @@ config:
         max_step_saves_to_keep: 6
         push_to_hub: false
       datasets:
-        - folder_path: "/root/flixml/training/datasets/identity-flux2"
+        - folder_path: "dataset"
           caption_ext: "txt"
           # 0.05 dropout is the guide default when text embeddings are NOT cached.
           caption_dropout_rate: 0.05
