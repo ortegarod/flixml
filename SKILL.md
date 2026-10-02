@@ -23,7 +23,7 @@ https://flixml.com/docs/workflows/
 `/api/workflows` Pick a workflow and run it on an appropriate node. It lists what each one makes and needs. 
 
 `/api/workflows/{id}` then gives you the one you picked
-in full — every param, its default, and what the value does. The `prompt` param's description is how to write the prompt for that workflow: its order, tags and wording. Follow it. When it's silent, the model author's page is the authority.
+in full — every param, its default, and what the value does. The `prompt` param's description is how to write the prompt for that workflow: its order, tags and wording. Follow it. Everything you need to run a workflow is in its params, so don't go searching the web for settings or prompt rules. If a guide doesn't cover what you're doing, tell your human: that's a gap in the guide, and it gets fixed there.
 
 Regardless of the workflow chosen, DO NOT wait for generation to complete, unless explicitly asked to. It lands in Studio UI.
 
