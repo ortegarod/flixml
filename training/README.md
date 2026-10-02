@@ -7,7 +7,6 @@ Training config templates for character LoRA fine-tuning on [AI Toolkit](https:/
 **Templates (provided):**
 - `flux2_character_template.yaml` — FLUX.2-dev character LoRA template
 - `sdxl_character_template.yaml` — SDXL character LoRA template (any SDXL-architecture checkpoint, from a single `.safetensors`)
-- `wan22_i2v_character_template.yaml` — Wan 2.2 image-to-video character template (untested)
 
 **Generated at runtime (do not edit):**
 - `config/` — job configs generated from templates per training run
@@ -80,7 +79,7 @@ The dataset (images plus a `.txt` caption per image) must already be in the trai
 
 ## Templates
 
-`flux2_character_template.yaml` and `wan22_i2v_character_template.yaml` follow the defaults in the RunComfy guide. Most settings should not be changed without reading the guide first.
+`flux2_character_template.yaml` follows the defaults in the RunComfy guide. Most settings should not be changed without reading the guide first.
 
 ## References
 

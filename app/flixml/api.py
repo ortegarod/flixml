@@ -863,7 +863,7 @@ class LoraTrainingStartRequest(BaseModel):
 
     job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", json_schema_extra={"examples": ["mycharacter_flux2_v1"]})
     trigger_word: str = Field(min_length=1, json_schema_extra={"examples": ["mycharacter"]})
-    base_config: str = Field(default="flux2_character", description="Training template name; resolves to <name>_template.yaml in the training dir (shipped: flux2_character, sdxl_character, wan22_i2v_character)", json_schema_extra={"examples": ["flux2_character"]})
+    base_config: str = Field(default="flux2_character", description="Training template name; resolves to <name>_template.yaml in the training dir (shipped: flux2_character, sdxl_character)", json_schema_extra={"examples": ["flux2_character"]})
     dataset: str = Field(min_length=1, description="Dataset folder name inside the trainer's DATASETS_FOLDER (see GET /api/lora-training/trainer)", json_schema_extra={"examples": ["mycharacter_dataset_v1"]})
     model: str = Field(default="flux2_dev", description="Base model label, stored with the job", json_schema_extra={"examples": ["flux2_dev"]})
     model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Base checkpoint: a Hugging Face repo id, or for SDXL a single .safetensors path on the trainer", json_schema_extra={"examples": ["black-forest-labs/FLUX.2-dev"]})
