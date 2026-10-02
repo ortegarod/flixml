@@ -40,7 +40,7 @@
     "seed": {
       "type": "int",
       "required": false,
-      "description": "Random seed (auto if omitted)"
+      "description": "Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record."
     },
     "steps": {
       "type": "int",
