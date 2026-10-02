@@ -70,6 +70,8 @@ config:
         sample_every: 250
         width: 832
         height: 1216
+        # Preview prompts: AI Toolkit publishes none for character LoRAs, so these are
+        # Studio's placeholders, not from a source. Pass your own as sample_prompts.
         prompts:
           - "[trigger], portrait, natural light"
         neg: ""
