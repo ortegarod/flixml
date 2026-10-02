@@ -30,7 +30,6 @@ interface CharacterRecord {
   name: string;
   kind: string | null;
   trigger: string | null;
-  description: string | null;
   source_images: string[];
   loras: LoraEntry[];
   voice?: { provider: string; voice_id: string; name?: string | null; settings?: Record<string, unknown> } | null;
@@ -42,7 +41,6 @@ interface FormState {
   name: string;
   kind: string;
   trigger: string;
-  description: string;
   source_images: string[];
   voice_provider: string;
   voice_id: string;
@@ -77,7 +75,6 @@ function recordToForm(record: CharacterRecord): FormState {
     name: record.name ?? "",
     kind: record.kind ?? "",
     trigger: record.trigger ?? "",
-    description: record.description ?? "",
     source_images: [...(record.source_images || [])],
     voice_provider: record.voice?.provider ?? "elevenlabs",
     voice_id: record.voice?.voice_id ?? "",
@@ -106,7 +103,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
     name: "",
     kind: "",
     trigger: "",
-    description: "",
     source_images: [],
     voice_provider: "elevenlabs",
     voice_id: "",
@@ -182,7 +178,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
         name: form.name.trim(),
         kind: form.kind.trim() || null,
         trigger: form.trigger.trim() || null,
-        description: form.description.trim() || null,
         source_images: form.source_images.filter((s) => s.trim()),
         voice: form.voice_id.trim()
           ? {
@@ -356,14 +351,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
                 onChange={(e) => updateField("name", e.target.value)}
                 className="w-full max-w-lg text-3xl font-bold tracking-tight bg-transparent border-b border-gray-700 focus:border-brand focus:outline-none px-0 py-1 transition text-white placeholder-gray-600"
                 placeholder="Character name"
-              />
-
-              <textarea
-                value={form.description}
-                onChange={(e) => updateField("description", e.target.value)}
-                rows={2}
-                className="w-full max-w-2xl text-sm text-gray-300 bg-transparent border border-gray-700 focus:border-brand focus:bg-black/20 focus:outline-none rounded-lg px-3 py-2 transition resize-none placeholder-gray-600"
-                placeholder="Description"
               />
             </div>
 

@@ -482,7 +482,6 @@ class CharacterRecord(BaseModel):
     name: str = Field(min_length=1)
     kind: Literal["human", "agent"] | None = None
     trigger: str | None = None
-    description: str | None = None
     source_images: list[str] = Field(default_factory=list)
     loras: list[CharacterLoraBinding] = Field(default_factory=list)
     voice: VoiceConfig | None = None
@@ -1499,7 +1498,7 @@ async def patch_character(character_id: str, patch: dict[str, Any], agent: Agent
     current = await get_character(character_id)
     if not current:
         raise HTTPException(status_code=404, detail="Character not found")
-    allowed = {"name", "kind", "trigger", "description", "source_images", "loras", "voice", "metadata"}
+    allowed = {"name", "kind", "trigger", "source_images", "loras", "voice", "metadata"}
     if "owner_id" in patch:
         if owner_scope(agent) is not None:
             raise HTTPException(status_code=403, detail="Only an admin key can change a character's owner")

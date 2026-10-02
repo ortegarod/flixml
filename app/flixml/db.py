@@ -514,13 +514,12 @@ async def upsert_character(character: dict[str, Any]) -> dict[str, Any]:
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO characters (id, name, kind, trigger, description, source_images, loras, voice, owner_id, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,NOW())
+            INSERT INTO characters (id, name, kind, trigger, source_images, loras, voice, owner_id, updated_at)
+            VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8,NOW())
             ON CONFLICT (id) DO UPDATE SET
                 name=EXCLUDED.name,
                 kind=EXCLUDED.kind,
                 trigger=EXCLUDED.trigger,
-                description=EXCLUDED.description,
                 source_images=EXCLUDED.source_images,
                 loras=EXCLUDED.loras,
                 voice=EXCLUDED.voice,
@@ -532,7 +531,6 @@ async def upsert_character(character: dict[str, Any]) -> dict[str, Any]:
             character["name"],
             character.get("kind"),
             character.get("trigger"),
-            character.get("description"),
             _json(character.get("source_images", [])),
             _json(character.get("loras", [])),
             _json(character.get("voice")),
