@@ -951,6 +951,14 @@ _RECONCILE_INTERVAL_SECONDS = 3.0
 # How long a job may be unknown to its node before we call it abandoned. Covers the
 # window between our DB insert and the node registering the prompt.
 _ABANDON_AFTER_SECONDS = 600
+# How long a job's node may stay unreachable before the job is written off. A stopped
+# or restarted ComfyUI loses its whole queue, so its jobs are gone; this only rides out
+# a network blip. Before this, an offline node raised on every poll, the job never
+# reached the abandon check, and it showed "pending" forever (2026-10-02: a pose edit
+# sat 30 minutes after the pc's ComfyUI was stopped for training).
+_NODE_OFFLINE_FAIL_AFTER_SECONDS = 300
+# prompt_id -> when its node first failed to answer, cleared when it answers again.
+_NODE_UNREACHABLE_SINCE: dict[str, float] = {}
 # Node statuses that mean the GPU is on this job right now, as opposed to holding it
 # in the queue behind another one.
 _RUNNING_STATUSES = {"running", "in_progress"}
@@ -1060,9 +1068,22 @@ async def _reconcile_loop() -> None:
                     continue
                 try:
                     result = await _reconcile_job(prompt_id, job.get("provider"), job.get("status"))
+                except httpx.TransportError as exc:
+                    since = _NODE_UNREACHABLE_SINCE.setdefault(prompt_id, time.monotonic())
+                    offline_for = time.monotonic() - since
+                    if offline_for > _NODE_OFFLINE_FAIL_AFTER_SECONDS:
+                        logger.warning("job %s lost: node %s unreachable for %ds", prompt_id, job.get("provider"), offline_for)
+                        await update_job_status(
+                            prompt_id, "failed", error="Lost — the GPU node went offline while this job was on it."
+                        )
+                        _NODE_UNREACHABLE_SINCE.pop(prompt_id, None)
+                    else:
+                        logger.info("job %s: node %s unreachable (%s), %ds so far", prompt_id, job.get("provider"), type(exc).__name__, offline_for)
+                    continue
                 except Exception:
                     logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
                     continue
+                _NODE_UNREACHABLE_SINCE.pop(prompt_id, None)
                 if result["status"] == "unknown" and _abandoned(job):
                     logger.warning("job %s abandoned: node has no record of it", prompt_id)
                     await update_job_status(
@@ -2940,7 +2961,12 @@ async def job(prompt_id: str) -> JobStatusResponse:
     """Get status, outputs and provenance for a single job, reconciled live against its node."""
     record = await get_job(prompt_id) or {}
     provider = record.get("provider")  # _job_row flattens metadata keys to top level
-    result = await _reconcile_job(prompt_id, provider, record.get("status"))
+    try:
+        result = await _reconcile_job(prompt_id, provider, record.get("status"))
+    except httpx.TransportError:
+        # Node offline: answer with what we hold rather than a 500. The reconcile loop
+        # fails the job once the node has been gone long enough.
+        result = {"status": record.get("status") or "unknown", "outputs": [], "raw": {}}
     status = result["status"]
     return JobStatusResponse(
         ok=True,
