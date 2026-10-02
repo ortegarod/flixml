@@ -6,12 +6,13 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**16 workflows** across 5 task types.
+**17 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
 | `flux2_dev_lora` | Text → Image | Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt |
 | `flux2_klein` | Text → Image | Text-to-image with FLUX.2 Klein 4B |
+| `krea2_turbo` | Text → Image | Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K |
 | `qwen_image_21` | Text → Image | Qwen-Image 2.1 makes an image from a prompt |
 | `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint |
 | `sdxl_lora` | Text → Image | Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt |
@@ -42,7 +43,7 @@ Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consist
   - `lora_strength` · _float_ · default `1.0`
   - `width` · _int_ · default `1248` — Output width
   - `height` · _int_ · default `832` — Output height
-  - `seed` · _int_ — Random seed (auto if omitted)
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `20`
   - `cfg` · _float_ · default `4.0`
   - `sampler` · _str_ · default `euler`
@@ -66,13 +67,32 @@ Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt, with two
   - `lora_strength_2` · _float_ · default `1.0` — Weight of the second LoRA. Ignored when lora_name_2 is empty.
   - `width` · _int_ · default `832` — Output width
   - `height` · _int_ · default `832` — Output height
-  - `seed` · _int_ — Random seed (auto if omitted)
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `4` — Klein is distilled to 4 steps; raise it only when running undistilled FLUX.2 weights through the unet param
   - `sampler` · _str_ · default `euler`
   - `guidance` · _float_ · default `4.0` — FLUX guidance scale
   - `unet` · _str_ · default `flux-2-klein-4b-fp8.safetensors`
   - `clip` · _str_ · default `qwen_3_4b_fp4_flux2.safetensors`
   - `vae` · _str_ · default `flux2-vae.safetensors`
+
+### `krea2_turbo` — Krea 2 Turbo
+
+Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K. Krea 2 Community License: https://www.krea.ai/krea-2-licensing
+
+- **Output:** image
+- **Requirements:** ~12 GB VRAM, loads ~18.6 GB of model files (VRAM + system RAM)
+- **Providers:** local
+- **Params:**
+  - `prompt` · _str_ · **required** — Natural language, not a tag list: Krea recommends natural-language prompts and says long, detailed ones give the best results. Name the medium (a photograph, a digital painting) along with the subject, framing, setting and light. Put any text to render in quotes.
+  - `width` · _int_ · default `1024` — Krea 2 Turbo generates from 1K to 2K. Multiples of 16.
+  - `height` · _int_ · default `1024` — Multiples of 16.
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
+  - `steps` · _int_ · default `8` — Turbo is distilled for 8 steps, the number Krea and ComfyUI both run.
+  - `sampler` · _str_ · default `euler`
+  - `scheduler` · _str_ · default `simple`
+  - `unet` · _str_ · default `krea2_turbo_fp8_scaled.safetensors` — Diffusion model file on the node. ComfyUI recommends the fp8 build for most users.
+  - `clip` · _str_ · default `qwen3vl_4b_fp8_scaled.safetensors`
+  - `vae` · _str_ · default `qwen_image_vae.safetensors`
 
 ### `qwen_image_21` — Qwen-Image 2.1
 
@@ -86,7 +106,7 @@ Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use 
   - `negative_prompt` · _str_ · default `` — Only read when cfg is above 1.
   - `width` · _int_ · default `1024` — Multiples of 32. Qwen's listed sizes run from 2048x2048 at 1:1 to 2752x1536 at 16:9.
   - `height` · _int_ · default `1024` — Multiples of 32.
-  - `seed` · _int_ — Random seed (auto if omitted)
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `25` — ComfyUI's template runs 25; Qwen's own examples run 40.
   - `cfg` · _float_ · default `1.0` — Keep at 1 for the official path. Raise it only to use a negative prompt.
   - `sampler` · _str_ · default `euler`
@@ -107,7 +127,7 @@ Text-to-image with an SDXL checkpoint. General-purpose still generation from a p
   - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. SDXL uses this — unlike FLUX.2, which has no negative and needs the positive to say 'sharp focus' instead. Start with the defects you actually see rather than a stock wall of tags: 'blurry, low quality, extra fingers, watermark, text'. An oversized negative eats guidance and flattens the image.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
-  - `seed` · _integer_ · default `42`
+  - `seed` · _integer_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _integer_ · default `40`
   - `cfg` · _float_ · default `5.0`
   - `sampler` · _string_ · default `dpmpp_2m`
@@ -126,7 +146,7 @@ Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consiste
   - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, extra fingers, watermark'. An oversized negative eats guidance and flattens the image.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
-  - `seed` · _integer_ · default `42`
+  - `seed` · _integer_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _integer_ · default `28`
   - `cfg` · _float_ · default `7.0`
   - `sampler` · _string_ · default `dpmpp_2m`
@@ -165,7 +185,7 @@ Generate a new image from a reference image and a plain-English instruction. FLU
 - **Params:**
   - `image` · _str_ · **required** — Reference image filename
   - `prompt` · _str_ · **required** — An instruction, not a scene description. Name the change, then name what stays: 'Change her outfit to a black leather coat and place her on a castle rampart at dusk. Keep her face and hair exactly as they are.' Never re-describe the subject's face, hair or body — the reference carries them, and describing them again makes the model draw its own version instead.
-  - `seed` · _int_ — Random seed (auto if omitted)
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `lora_name` · _str_ · default `` — Optional LoRA file in the node's loras folder. Leave empty and the slot is removed from the graph entirely. A FLUX.2 LoRA is built for one variant: a Klein 4B LoRA does not load on Klein 9B or on FLUX.2-dev, and a dev LoRA does not load here — the residual stream is 3072 wide on 4B against 6144 on dev, so the tensors do not fit. Match the LoRA's stated base model to the weights in the unet param.
   - `lora_strength` · _float_ · default `1.0` — Weight of the first LoRA. Ignored when lora_name is empty.
   - `lora_name_2` · _str_ · default `` — Second LoRA, chained after the first — for stacking a concept LoRA on top of a likeness or style one. Same variant rule as lora_name.
@@ -192,7 +212,7 @@ Qwen-Image 2.1 makes a new image from one to three reference images and a plain-
   - `image_3` · _str_ · default `` — Optional third reference, sent the same way as image_2.
   - `negative_prompt` · _str_ · default `` — Only read when cfg is above 1.
   - `reference_resolution` · _int_ · default `1024` — Each reference is resized to about this many pixels squared, keeping its aspect ratio; the output comes out at the first reference's size. 0 keeps each reference at its own size.
-  - `seed` · _int_ — Random seed (auto if omitted)
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `25` — ComfyUI's template runs 25; Qwen's own examples run 40.
   - `cfg` · _float_ · default `1.0` — Keep at 1 for the official path. Raise it only to use a negative prompt.
   - `sampler` · _str_ · default `euler`
@@ -211,7 +231,7 @@ Re-shoot an existing image of the same subject from a new camera angle. Qwen-Ima
 - **Params:**
   - `image` · _string_ · **required** — Source image filename or Studio output path to re-angle
   - `prompt` · _string_ · **required** — Camera-angle spec only (the <sks> trigger is prepended automatically; do NOT pass a character/scene prompt here). Format: '<azimuth> view <elevation> shot <distance>'. Azimuth: front | front-right quarter | right side | back-right quarter | back | back-left quarter | left side | front-left quarter. Elevation: low-angle | eye-level | elevated | high-angle. Distance: wide shot | medium shot | close-up. Example: 'front-right quarter view eye-level shot medium shot'
-  - `seed` · _integer_ · default `42`
+  - `seed` · _integer_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
 
 ### `qwen_pose_edit` — Qwen Pose/Position Edit (instruction)
 
@@ -223,7 +243,7 @@ Edit an existing image from a plain-English instruction — change a subject's p
 - **Params:**
   - `image` · _string_ · **required** — Source image filename or Studio output path to edit
   - `prompt` · _string_ · **required** — Plain-English edit instruction. Describe only what changes; the model keeps everything else. Name each body part and where it goes ('left hand on her left hip'). Place the subject against named objects with an exact position ('on the path, one step left of the bench, not touching it'). 'Next to the bench' is too loose and can put the subject in front of the bench instead.
-  - `seed` · _integer_ · default `42`
+  - `seed` · _integer_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
 
 ### `sdxl_img2img` — SDXL Image-to-Image
 
@@ -238,7 +258,7 @@ Generate SDXL image variations from a source image using prompt guidance and den
   - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, watermark'.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
-  - `seed` · _integer_ · default `42`
+  - `seed` · _integer_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _integer_ · default `28`
   - `cfg` · _float_ · default `7.0`
   - `sampler` · _string_ · default `dpmpp_2m`
@@ -262,7 +282,7 @@ Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no 
   - `height` · _int_ · default `640`
   - `length` · _int_ · default `81` — Frame count
   - `fps` · _int_ · default `16`
-  - `seed` · _int_
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps_high` · _int_ · default `2`
   - `steps_low` · _int_ · default `2`
   - `total_steps` · _int_ · default `4` — steps_high + steps_low; passed to KSamplerAdvanced.steps
@@ -298,7 +318,7 @@ Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 
   - `height` · _int_ · default `640` — Resize target height (divisible by 16). Kijai's example: 640, center crop.
   - `length` · _int_ · default `400` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 400 is Kijai's example_03 value.
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps; do not change unless you know why.
-  - `seed` · _int_ · default `2`
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `6` — Sampler steps. 6 with the lightx2v speed LoRA is the tuned default.
   - `cfg` · _float_ · default `1.0`
   - `shift` · _float_ · default `11.0`
@@ -327,7 +347,7 @@ Image-to-video with Wan 2.2 — animate a still into a short clip, with a motion
   - `negative_prompt` · _str_ · default `bright colors, overexposed, static, blurred details`
   - `length` · _int_ · default `81` — Frame count, must be 4n+1 (33/49/65/81). Default 81 is the length Wan itself ships and generates at: wan_shared_cfg.frame_num = 81 with sample_fps = 16 in wan/configs/shared_config.py, i.e. 5.06 s. The 4n+1 rule is the authors' too - generate.py --frame_num help: "How many frames of video are generated. The number should be 4n+1". Source: github.com/Wan-Video/Wan2.2, both files read 2026-09-21. Going past 81 in this single-window workflow is untested here; use wan22_i2v_context for longer clips.
   - `fps` · _int_ · default `32` — Frame rate of the saved clip. Wan renders 16 fps; every clip then goes through RIFE x2 frame interpolation (rife49, ComfyUI-Frame-Interpolation), which doubles the frames, so 32 plays at the speed Wan rendered it.
-  - `seed` · _int_
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps_high` · _int_ · default `2` — 2+2=4 total. The model authors' published value, not one we tuned. The Lightning LoRA is step-distilled: it was trained on the noise schedule a 4-step run produces, and ComfyUI derives its sigma spacing from the step count you pass, so any other count denoises at noise levels the LoRA never saw. That shows up as rising contrast and a light that blooms across the clip. Source: lightx2v/Wan2.2-Lightning, official native-ComfyUI workflow Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1-NativeComfy.json — steps 4, split 0-2 / 2-4.
   - `steps_low` · _int_ · default `2` — See steps_high. 2+2=4 total, per the authors' workflow.
   - `total_steps` · _int_ · default `4` — steps_high + steps_low; passed to KSamplerAdvanced.steps. Fixed by what the distillation was trained on, not by quality preference — changing it means changing the LoRA.
@@ -371,7 +391,7 @@ Image-to-video past the model's 81-frame limit, generated as ONE clip instead of
   - `context_schedule` · _str_ · default `standard_static` — standard_static cuts the clip into fixed sequential windows, each starting context_length - context_overlap frames after the last, and reuses that same set on every step - which is what a one-way action wants. standard_uniform instead re-picks strided windows per step from a shifting offset, and looped_uniform lets them wrap around to the start; both come from AnimateDiff's scheduler and suit looping or ambient motion. Read from comfy/context_windows.py, create_windows_static_standard vs create_windows_uniform_standard.
   - `fuse_method` · _str_ · default `pyramid` — How overlapping windows are blended. pyramid weights the middle of each window highest.
   - `fps` · _int_ · default `32` — Frame rate of the saved clip. Wan renders 16 fps; every clip then goes through RIFE x2 frame interpolation (rife49, ComfyUI-Frame-Interpolation), which doubles the frames, so 32 plays at the speed Wan rendered it.
-  - `seed` · _int_
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps_high` · _int_ · default `2` — 2+2=4, the Lightning LoRA authors' own reference config. Defaults here match that reference rather than the tuned numbers in wan22_i2v: over a clip this long the tuned high-noise CFG blows the exposure out within the first window.
   - `steps_low` · _int_ · default `2` — See steps_high. 2+2=4.
   - `total_steps` · _int_ · default `4` — steps_high + steps_low; passed to KSamplerAdvanced.steps
@@ -411,7 +431,7 @@ Audio-driven lip-sync applied on top of a driving motion clip. Loads a source vi
   - `height` · _int_ · default `640` — Resize target height (divisible by 16). Kijai's example: 640, center crop.
   - `length` · _int_ · default `1000` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value.
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps. Also re-times the driving video to this rate (force_rate). Do not change unless you know why.
-  - `seed` · _int_ · default `2`
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `4` — Sampler steps. 4 is Kijai's V2V example_02 value; the sampler starts at step 2 with denoise 1.0, as in his graph, which keeps the driving clip's motion.
   - `cfg` · _float_ · default `1.0`
   - `shift` · _float_ · default `11.0`

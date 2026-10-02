@@ -1,0 +1,72 @@
+{
+  "id": "krea2_turbo",
+  "name": "Krea 2 Turbo",
+  "description": "Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K. Krea 2 Community License: https://www.krea.ai/krea-2-licensing",
+  "task": "text-to-image",
+  "output_type": "image",
+  "requirements": {
+    "vram_gb": 12,
+    "model_files_gb": 18.6,
+    "workflow_type": "krea2_turbo",
+    "supports_lora": false,
+    "requires_image": false
+  },
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "description": "Natural language, not a tag list: Krea recommends natural-language prompts and says long, detailed ones give the best results. Name the medium (a photograph, a digital painting) along with the subject, framing, setting and light. Put any text to render in quotes."
+    },
+    "width": {
+      "type": "int",
+      "default": 1024,
+      "description": "Krea 2 Turbo generates from 1K to 2K. Multiples of 16."
+    },
+    "height": {
+      "type": "int",
+      "default": 1024,
+      "description": "Multiples of 16."
+    },
+    "seed": {
+      "type": "int",
+      "required": false,
+      "description": "Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record."
+    },
+    "steps": {
+      "type": "int",
+      "default": 8,
+      "min": 1,
+      "max": 30,
+      "description": "Turbo is distilled for 8 steps, the number Krea and ComfyUI both run."
+    },
+    "sampler": {
+      "type": "str",
+      "default": "euler"
+    },
+    "scheduler": {
+      "type": "str",
+      "default": "simple"
+    },
+    "unet": {
+      "type": "str",
+      "default": "krea2_turbo_fp8_scaled.safetensors",
+      "description": "Diffusion model file on the node. ComfyUI recommends the fp8 build for most users."
+    },
+    "clip": {
+      "type": "str",
+      "default": "qwen3vl_4b_fp8_scaled.safetensors"
+    },
+    "vae": {
+      "type": "str",
+      "default": "qwen_image_vae.safetensors"
+    }
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "example": {
+    "prompt": "A lighthouse keeper in a yellow oilcoat climbing the spiral stairs of a stone lighthouse at dusk, lantern in hand, warm light spilling down the steps, cold blue sea visible through a small window.",
+    "width": 1024,
+    "height": 1024
+  }
+}
