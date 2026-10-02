@@ -3101,7 +3101,8 @@ async def _sync_training_samples(job_name: str) -> list[str]:
 
     vps_rel_paths: list[str] = []
     for dp in trainer_paths:
-        filename = Path(dp).name
+        # The trainer may run on Windows; Path() on Linux won't split its backslashes.
+        filename = re.split(r"[\\/]", dp)[-1]
         vps_abs = _TRAINING_SAMPLES_DIR / job_name / filename
         vps_rel = vps_abs.relative_to(_OUTPUT_DIR).as_posix()
         if await _fetch_sample_from_trainer(dp, vps_abs):
