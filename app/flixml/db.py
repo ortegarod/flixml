@@ -1191,9 +1191,13 @@ def _media_where(
         # account generates is required to name it. Typing an account's name returned the 8 files
         # whose prompt spelled it out, of the 30 she made. The raw owner_id is matched
         # directly as well as through agents, so files outlive the key that made them.
+        #
+        # The job id is matched because the lightbox shows it as the file's "ID", and an
+        # id pasted from there into the box has to find its file.
         clauses.append(
             f"(LOWER(COALESCE(prompt, '')) LIKE {token} "
             f"OR LOWER(filename) LIKE {token} "
+            f"OR LOWER(COALESCE(prompt_id, '')) LIKE {token} "
             f"OR EXISTS (SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE {token}) "
             f"OR LOWER(COALESCE(metadata->>'owner_id', '')) LIKE {token} "
             f"OR EXISTS (SELECT 1 FROM agents a WHERE a.id = metadata->>'owner_id' "
