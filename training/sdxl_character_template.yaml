@@ -71,7 +71,7 @@ config:
         width: 832
         height: 1216
         prompts:
-          - "[trigger], a woman, portrait, natural light"
+          - "[trigger], portrait, natural light"
         neg: ""
         seed: 42
         walk_seed: false
