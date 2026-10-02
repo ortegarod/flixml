@@ -1202,14 +1202,14 @@ def _media_where(
         params.append(f"%{search.lower()}%")
         # Characters are matched by name, id and trigger word as well as by prompt text:
         # a character's prompt rarely contains their name (it describes a face, not a
-        # person), so typing a character's name has to reach the files bound to her, not only the
+        # person), so typing a character's name has to reach the files bound to them, not only the
         # handful that happen to spell it out. The character dropdown still exists for
         # picking one exactly; this is the same filter reachable by typing.
         #
         # The owning account is matched the same way, and for the same reason: a name
         # typed into the box is as often an account as a character, and nothing an
-        # account generates is required to name it. Typing an account's name returned the 8 files
-        # whose prompt spelled it out, of the 30 she made. The raw owner_id is matched
+        # account generates is required to name it: matching prompts alone found 8 of one
+        # account's 30 files. The raw owner_id is matched
         # directly as well as through agents, so files outlive the key that made them.
         #
         # The job id is matched because the lightbox shows it as the file's "ID", and an
