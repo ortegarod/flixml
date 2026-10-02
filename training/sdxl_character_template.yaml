@@ -7,13 +7,14 @@
 #   SD1, you can put the path to an all in one safetensors checkpoint here."
 # - kohya-ss/sd-scripts docs/train_SDXL-en.md: "The default resolution of SDXL is
 #   1024x1024"; for LoRA: train U-Net only, gradient checkpointing, an 8bit optimizer.
-#   docs/train_network.md: example rank 16, lr 1e-4 ("1e-4 to 1e-3" is common).
+#   docs/train_network.md: example `--network_dim=16`, `--learning_rate=1e-4`; "relatively
+#   higher values (e.g., from `1e-4` to `1e-3`) are often used".
 # - github.com/mikeabakumoff/sdxl-character-lora-guide (SDXL character, 12 GB GPU): rank
-#   16-32, U-Net lr ~1e-4, AdamW8bit, 1024; "25-frame dataset at 10 repeats x 10 epochs".
+#   16-32, U-Net lr ~1e-4, AdamW8bit, 1024; "25-frame dataset at 10 repeats × 10 epochs".
 #   civitai.com/articles/9205 lands on the same exposure (30 images x 20 repeats, epoch 5).
 #   So steps ~= 100 x image count at batch 1; Studio sets steps per run.
-# - Both guides, and civitai.com/models/351583: the last checkpoint is often not the
-#   best one, so every save is kept for side-by-side comparison.
+# - Both guides: the last checkpoint is often not the best one, so every save is kept
+#   for side-by-side comparison.
 #
 # Studio fills in the job name, trigger word, checkpoint path, dataset and folders.
 job: extension
@@ -26,6 +27,8 @@ config:
       trigger_word: "character_trigger"
       network:
         type: "lora"
+        # Rank 16, alpha 16: ai-toolkit's own example config. The guide above gives
+        # alpha = dim/2; kohya says about half, or the same as dim.
         linear: 16
         linear_alpha: 16
       save:
