@@ -61,7 +61,6 @@ class SecurityConfig(BaseModel):
 class Settings(BaseSettings):
     """Runtime settings for the agent-native API wrapper."""
 
-    comfy_url: str | None = Field(default=None, validation_alias="COMFY_URL")
     request_timeout_seconds: float = Field(default=120.0, validation_alias="REQUEST_TIMEOUT_SECONDS")
     database_url: str = Field(validation_alias="DATABASE_URL")
     output_dir: str = Field(validation_alias="FLIXML_OUTPUT_DIR")
