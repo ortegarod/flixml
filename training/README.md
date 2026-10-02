@@ -66,9 +66,9 @@ POST /api/lora-training/start
 }
 ```
 
-That is all a run needs. The recipe (rank, learning rate, resolution, steps, previews) comes from the template, as its sources give it. Any recipe field can still be set in the request (`steps`, `lora_rank`, `learning_rate`, `sample_prompts`, …; see `GET /openapi.json`); an unset field keeps the template's value. A template's `studio:` block sets steps from the dataset size (`steps_per_image`).
+That is all a run needs. The recipe (rank, learning rate, resolution, steps) comes from the template, as its sources give it. Any recipe field can still be set in the request (`steps`, `lora_rank`, `learning_rate`, `sample_prompts`, …; see `GET /openapi.json`); an unset field keeps the template's value. A template's `studio:` block sets steps from the dataset size (`steps_per_image`).
 
-`sample_prompts` are the previews: the trainer renders one image per prompt every `sample_every` steps, and the LoRA Training page shows them. `[trigger]` in a prompt becomes the trigger word. Unset, the run previews the template's prompts; the start response lists the ones it will use.
+`sample_prompts` are the previews: the trainer renders one image per prompt every `sample_every` steps, and the LoRA Training page shows them. `[trigger]` in a prompt becomes the trigger word. Unset, the run previews three captions spread across the dataset, so each preview shows beside the training image it was captioned from; a dataset with no captions previews the template's prompts. The start response lists the ones it will use.
 
 The dataset (images plus a `.txt` caption per image) must already be in the trainer's datasets folder, uploaded with ai-toolkit's `POST /api/datasets/upload`. The backend generates the job YAML from the template named by `base_config`, with the trainer's own folders, and starts the run.
 

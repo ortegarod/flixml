@@ -69,7 +69,7 @@ What your key made, plus anything of the characters you own, newest first, 60 at
 
 `POST /api/lora-training/start` trains on a dataset already on the trainer (`GET /api/lora-training/datasets`; `GET /api/lora-training/datasets/{name}/items` lists its images and captions). Request fields: https://flixml.com/docs/api/
 
-`sample_prompts` are the run's previews: one image per prompt every `sample_every` steps, shown to your human on the LoRA Training page. `[trigger]` becomes `trigger_word`. Unset, the run previews the template's prompts; the response lists the ones it will use.
+`sample_prompts` are the run's previews: one image per prompt every `sample_every` steps, shown to your human on the LoRA Training page. `[trigger]` becomes `trigger_word`. Unset, the run previews three captions spread across the dataset, so each preview shows beside the training image it was captioned from; a dataset with no captions previews the template's prompts. The response lists the ones it will use.
 
 
 ## More Info
