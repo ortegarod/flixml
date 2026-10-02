@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Settings, Terminal, X, Cpu, Users, Search, Box, Film, Activity, ChevronLeft, ChevronRight, Code2, Workflow } from "lucide-react";
+import { Settings, X, Cpu, Users, Search, Film, Activity, ChevronLeft, ChevronRight, Code2, Workflow } from "lucide-react";
 import type { ProjectModeData } from "../../types";
 import { WorkflowsTab } from "./WorkflowsTab";
 import { NodesTab } from "./NodesTab";
@@ -226,9 +226,6 @@ function CharactersTab({ onSelectCharacter }: { onSelectCharacter?: (characterId
         );
       })}
 
-      {/* Training workflow below the character card */}
-      <CreateCharacterWorkflow />
-
       <div className="pt-2 border-t border-gray-800/40">
         <a
           href="#"
@@ -244,64 +241,3 @@ function CharactersTab({ onSelectCharacter }: { onSelectCharacter?: (characterId
   );
 }
 
-function CreateCharacterWorkflow() {
-  return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 space-y-4">
-      <div className="flex items-center gap-2">
-        <Box className="w-4 h-4 text-brand" />
-        <span className="text-xs font-semibold text-brand uppercase tracking-wider">LoRA Fine-tuning</span>
-        <span className="text-[10px] uppercase tracking-wider text-amber-300/80 border border-amber-500/20 bg-amber-500/5 rounded-full px-2 py-0.5 ml-auto">AMD MI300X</span>
-      </div>
-
-      <p className="text-xs text-gray-300 leading-relaxed">
-        <strong className="text-gray-100">Train your own character LoRA in ~90 minutes on AMD MI300X.</strong> Once fine-tuned, your AI agent can generate consistent images and videos with your face — every single time.
-      </p>
-
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-        <p className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5 mb-1">
-          <Cpu className="w-3.5 h-3.5" />
-          AMD MI300X — 192 GB VRAM
-        </p>
-        <p className="text-[11px] text-amber-200/70 leading-relaxed">
-          Fine-tuning runs on AMD's flagship GPU via ROCm. No CUDA required. Train a Flux2 LoRA in ~90 minutes, then generate images and videos immediately.
-        </p>
-      </div>
-
-      <div className="rounded-xl border border-gray-700/40 bg-gray-900/40 p-3">
-        <p className="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5 mb-2">
-          <Terminal className="w-3.5 h-3.5 text-brand" />
-          Tell your AI agent:
-        </p>
-        <p className="text-[11px] text-gray-400 leading-relaxed">
-          "Create a character for me. Upload my reference images, register the character, start a LoRA fine-tune on AMD MI300X, and let me know when it's ready to use."
-        </p>
-      </div>
-
-      <div className="space-y-2.5">
-        <p className="text-[11px] font-medium text-gray-400">How it works:</p>
-        {[
-          { n: 1, title: "Upload your images", body: "5-20 reference photos. Different angles and lighting work best. Your agent can even generate variations to build a dataset." },
-          { n: 2, title: "Register your character", body: "A character record with a unique trigger word — this is how the agent references your identity in every generation." },
-          { n: 3, title: "Fine-tune on AMD MI300X", body: "Training a Flux2 LoRA on 192 GB MI300X VRAM via ROCm. Takes about 90 minutes. Your agent monitors progress and notifies you when done.", highlight: true },
-          { n: 4, title: "Generate consistently", body: 'Your character appears in the registry. From then on, just say "generate a shot with [character name] doing X" — your agent handles the rest.' },
-        ].map((step) => (
-          <div key={step.n} className="flex gap-2.5">
-            <div className={`flex-shrink-0 w-5 h-5 rounded-md flex items-center justify-center mt-0.5 ${step.highlight ? "bg-amber-500/20" : "bg-gray-800"}`}>
-              <span className={`text-[10px] font-medium ${step.highlight ? "text-amber-400" : "text-gray-500"}`}>{step.n}</span>
-            </div>
-            <div>
-              <p className={`text-[11px] ${step.highlight ? "text-amber-300 font-medium" : "text-gray-200"}`}>{step.title}</p>
-              <p className="text-[10px] text-gray-500 leading-relaxed mt-0.5">{step.body}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="pt-1 border-t border-gray-800/40">
-        <p className="text-[10px] text-gray-600">
-          Your agent knows the API. It uses <code className="text-gray-500">/api/characters</code> to register and <code className="text-gray-500">/api/lora-training</code> to fine-tune; <code className="text-gray-500">/api/guide</code> is the full reference it reads.
-        </p>
-      </div>
-    </div>
-  );
-}

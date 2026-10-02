@@ -53,7 +53,7 @@ curl -s $API/api/characters
 
 The characters your account owns: only those can be bound to your jobs, and one you create with `POST /api/characters` is yours. An admin key sees them all.
 
-A character's `base_prompt` is their look. Studio never adds it for you: copy it into your prompt where the workflow's prompt guide puts the subject. Binding a character doesn't change the workflow's settings. Its `trigger` is injected only when that character's LoRA loads for the workflow you chose — check its `loras` for an entry naming that exact workflow. Without one, the likeness is the look your prompt describes.
+Binding a character doesn't change the workflow's settings. Its `trigger` is injected only when that character's LoRA loads for the workflow you chose — check its `loras` for an entry naming that exact workflow. Without one, the likeness is the look your prompt describes.
 
 ### Your gallery
 
@@ -64,6 +64,12 @@ curl -s "$API/api/listing?view=summary"
 What your key made, plus anything of the characters you own, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files. Without `view=summary` each item carries every setting it was made with.
 
 `PATCH /api/media/{filename}/metadata` with `{"tags": [...], "description": "..."}` replaces an item's tag list and sets its caption. Only the key that made a file can change it.
+
+## Train a LoRA
+
+`POST /api/lora-training/start` trains on a dataset already on the trainer (`GET /api/lora-training/datasets`; `GET /api/lora-training/datasets/{name}/items` lists its images and captions). Request fields: https://flixml.com/docs/api/
+
+`sample_prompts` are the run's previews: one image per prompt every `sample_every` steps, shown to your human on the LoRA Training page. `[trigger]` becomes `trigger_word`. Unset, the run previews the template's prompts; the response lists the ones it will use.
 
 
 ## More Info

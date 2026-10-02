@@ -27,14 +27,6 @@ class ComfyRuntime(BaseModel):
         return self.url.rstrip("/")
 
 
-class AiToolkitRuntime(BaseModel):
-    toolkit_dir: str = "/root/ai-toolkit"
-    venv: str = "/root/ai-toolkit-venv"
-    training_dir: str = "/root/flixml/training"
-    runner: str = "/root/flixml/training/run-ai-toolkit.sh"
-    status: Literal["local_cli", "remote_cli", "manual", "unknown"] = "local_cli"
-
-
 class GpuNode(BaseModel):
     """Configured GPU worker and the runtimes available on it."""
 
@@ -43,7 +35,6 @@ class GpuNode(BaseModel):
     roles: list[NodeRole] = Field(default_factory=lambda: ["default"])
     enabled: bool = True
     comfyui: ComfyRuntime | None = None
-    ai_toolkit: AiToolkitRuntime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -77,13 +68,6 @@ class Settings(BaseSettings):
     aitk_api_url: str | None = Field(default=None, validation_alias="AITK_API_URL")
     elevenlabs_api_key: str | None = Field(default=None, validation_alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str | None = Field(default=None, validation_alias="ELEVENLABS_VOICE_ID")
-    digitalocean_token: str | None = Field(default=None, validation_alias="DIGITALOCEAN_TOKEN")
-    training_cloud_region: str = Field(default="atl1", validation_alias="TRAINING_CLOUD_REGION")
-    training_cloud_size: str = Field(default="gpu-mi300x1-192gb", validation_alias="TRAINING_CLOUD_SIZE")
-    training_cloud_image: str = Field(default="gpu-amd-base", validation_alias="TRAINING_CLOUD_IMAGE")
-    training_cloud_ttl_hours: int = Field(default=12, validation_alias="TRAINING_CLOUD_TTL_HOURS")
-    training_cloud_repo_url: str = Field(default="https://github.com/ortegarod/flixml.git", validation_alias="TRAINING_CLOUD_REPO_URL")
-    training_cloud_ssh_keys: str | None = Field(default=None, validation_alias="TRAINING_CLOUD_SSH_KEYS")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

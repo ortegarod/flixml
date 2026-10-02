@@ -1,0 +1,86 @@
+# SDXL character LoRA for ai-toolkit (any SDXL-architecture checkpoint).
+#
+# Sources, read 2026-10-01:
+# - ai-toolkit (ostris/ai-toolkit ecee894) ships no SDXL example. Structure from
+#   config/examples/train_lora_flux_24gb.yaml; arch "sdxl" and the "ddpm" noise scheduler
+#   from toolkit/config_modules.py; ui/src/docs.tsx: "For some models, such as SDXL and
+#   SD1, you can put the path to an all in one safetensors checkpoint here."
+# - kohya-ss/sd-scripts docs/train_SDXL-en.md: "The default resolution of SDXL is
+#   1024x1024"; for LoRA: train U-Net only, gradient checkpointing, an 8bit optimizer.
+#   docs/train_network.md: example rank 16, lr 1e-4 ("1e-4 to 1e-3" is common).
+# - github.com/mikeabakumoff/sdxl-character-lora-guide (SDXL character, 12 GB GPU): rank
+#   16-32, U-Net lr ~1e-4, AdamW8bit, 1024; "25-frame dataset at 10 repeats x 10 epochs".
+#   civitai.com/articles/9205 lands on the same exposure (30 images x 20 repeats, epoch 5).
+#   So steps ~= 100 x image count at batch 1; Studio sets steps per run.
+# - Both guides, and civitai.com/models/351583: the last checkpoint is often not the
+#   best one, so every save is kept for side-by-side comparison.
+#
+# Studio fills in the job name, trigger word, checkpoint path, dataset and folders.
+job: extension
+config:
+  name: "my-character"
+  process:
+    - type: "ui_trainer"
+      training_folder: "output"
+      device: cuda:0
+      trigger_word: "character_trigger"
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 250
+        max_step_saves_to_keep: 40
+        push_to_hub: false
+      datasets:
+        - folder_path: "dataset"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.0
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [1024]
+      train:
+        batch_size: 1
+        steps: 2000
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "ddpm"
+        optimizer: "adamw8bit"
+        lr: 1.0e-4
+        dtype: bf16
+        # Off, as ai-toolkit's UI defaults it for SDXL. Its docs (ui/src/docs.tsx) mark it
+        # experimental and say it "does not work with things that dynamically change the
+        # prompt such as trigger words, caption dropout" — this template uses a trigger word.
+        cache_text_embeddings: false
+      model:
+        name_or_path: "path/to/sdxl_checkpoint.safetensors"
+        arch: "sdxl"
+      logging:
+        use_ui_logger: true
+      # Previews render the way the checkpoint is used. "ddpm" (ai-toolkit's default) is
+      # an ancestral sampler that needs far more than 20 steps; toolkit/sampler.py itself
+      # marks it "ddpm is not supported ?". k_dpmsolver++ = DPM++ 2M Karras.
+      # Size, steps and CFG: set them to your checkpoint card's recommended settings
+      # (these are a common SDXL card's: DPM++ 2M Karras, 30+ steps, CFG 5, 832x1216).
+      sample:
+        sampler: "k_dpmsolver++"
+        sample_every: 250
+        width: 832
+        height: 1216
+        prompts:
+          - "[trigger], a woman, portrait, natural light"
+        neg: ""
+        seed: 42
+        walk_seed: false
+        guidance_scale: 5
+        sample_steps: 30
+# Read by Studio, removed before the config reaches ai-toolkit.
+studio:
+  # ~100 passes per image at batch 1 (mikeabakumoff guide; civitai.com/articles/9205).
+  steps_per_image: 100
+meta:
+  name: "[name]"
+  version: "1.0"

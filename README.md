@@ -51,7 +51,7 @@ Each node becomes a provider named `local-<id>`, here `local-gpu-1` and `local-g
 
 ### Characters
 
-Register persistent characters with LoRA associations and trigger words. Reference them by name in any generation — the Studio resolves the right LoRA for that workflow and injects the character's trigger word with it. A workflow the character has no LoRA for loads none and injects no trigger: the likeness is its base prompt alone.
+Register persistent characters with LoRA associations and trigger words. Reference them by name in any generation — the Studio resolves the right LoRA for that workflow and injects the character's trigger word with it. A workflow the character has no LoRA for loads none and injects no trigger: the likeness is the look your prompt describes.
 
 ### Agent Identity & API Keys
 
@@ -174,35 +174,25 @@ install doesn't require keys.
 
 ## LoRA Training
 
-Register a dataset, start training, monitor checkpoints — all through the API. The examples below use `<your-api-url>` as a placeholder for your Studio API base URL.
+Start training, watch it, collect checkpoints — all through the API. The LoRA Training page shows the same runs live. The examples below use `<your-api-url>` as a placeholder for your Studio API base URL.
 
 ### Configuration
 
-LoRA training is designed around disposable DigitalOcean GPU droplets. Set these variables so the Studio can provision an AMD ROCm droplet, install AI Toolkit, and run training in one step:
+Training runs on [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit) on a machine with your own GPU, Windows or Linux. Studio talks to it only through its HTTP API, so the trainer can be this machine or another one on your network. Start the AI Toolkit UI with `AI_TOOLKIT_AUTH` set, then point Studio at it:
 
 | Variable | Description |
 |---|---|
-| `DIGITALOCEAN_TOKEN` | DigitalOcean API token |
-| `TRAINING_CLOUD_SIZE` | Droplet size slug |
-| `TRAINING_CLOUD_IMAGE` | Droplet image slug |
-| `TRAINING_CLOUD_TTL_HOURS` | Droplet lifetime in hours |
-| `TRAINING_CLOUD_REPO_URL` | Repository cloned onto the droplet |
-| `TRAINING_CLOUD_SSH_KEYS` | Comma-separated SSH key IDs or fingerprints |
+| `AITK_API_URL` | AI Toolkit UI URL, e.g. `http://<trainer-host>:8675` |
+| `AITK_API_TOKEN` | Required. The `AI_TOOLKIT_AUTH` value the trainer was started with |
+| `AITK_GPU_IDS` | GPU IDs to train on — optional, default `0` |
 
-If you already run your own AI Toolkit server, point the Studio at it instead:
-
-| Variable | Description |
-|---|---|
-| `AITK_API_URL` | AI Toolkit API URL |
-| `AITK_API_TOKEN` | AI Toolkit API token — optional |
-| `AITK_GPU_IDS` | GPU IDs to use for training — optional |
+A dataset is a folder of images with one `.txt` caption per image, in the trainer's datasets folder. Upload it with the AI Toolkit UI or its `POST /api/datasets/upload`.
 
 ### Usage
 
 ```bash
-# Register dataset
-curl -X POST <your-api-url>/api/lora-training/datasets \
-  -d '{"id": "my-character", "name": "My Character"}'
+# A dataset's images and captions, read from the trainer
+curl <your-api-url>/api/lora-training/datasets/my-character/items
 
 # Start training
 curl -X POST <your-api-url>/api/lora-training/start \
@@ -210,7 +200,7 @@ curl -X POST <your-api-url>/api/lora-training/start \
     "job_name": "my-character-v1",
     "trigger_word": "mycharacter",
     "dataset": "my-character",
-    "base_config": "flux2_identity"
+    "base_config": "flux2_character"
   }'
 
 # Check status

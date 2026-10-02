@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 
 type RuntimeMap = {
   comfyui?: { url: string; client_id?: string; online?: boolean; error?: string };
-  ai_toolkit?: { toolkit_dir: string; venv: string; training_dir: string; runner: string; status: string };
 };
 
 type NodeInfo = {
@@ -74,7 +73,7 @@ export function NodesTab() {
       <div>
         <h2 className="text-sm font-semibold">GPU Nodes</h2>
         <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-          Compute workers and runtimes. ComfyUI handles image/video generation; ai-toolkit handles LoRA training on AMD GPUs.
+          Compute workers and runtimes. ComfyUI handles image/video generation; ai-toolkit handles LoRA training.
         </p>
       </div>
 
@@ -90,7 +89,6 @@ export function NodesTab() {
       {entries.map(([id, node]) => {
         const percent = vramPercent(node);
         const comfy = node.runtimes?.comfyui;
-        const aiToolkit = node.runtimes?.ai_toolkit;
         return (
           <div key={id} className="rounded-xl border border-gray-800/60 bg-gray-900/30 p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -129,16 +127,6 @@ export function NodesTab() {
                 </div>
               )}
 
-              {aiToolkit && (
-                <div className="rounded-lg border border-amber-900/40 bg-amber-950/10 p-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-amber-200">ai-toolkit</p>
-                    <span className="text-amber-300">training</span>
-                  </div>
-                  <p className="text-[11px] text-amber-100/60 mt-1">AMD GPU LoRA training runtime.</p>
-                  <p className="text-[10px] text-gray-600 mt-1 break-all">{aiToolkit.training_dir}</p>
-                </div>
-              )}
             </div>
 
             {node.online && (

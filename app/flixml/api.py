@@ -8,10 +8,11 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 import wave
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 from urllib.parse import quote, urlparse
 
@@ -143,7 +144,7 @@ API_DESCRIPTION = """Agent-native API for driving ComfyUI image and video genera
 Core surfaces:
 - **Studio** — generate single images or clips (`/api/image/generate`, `/api/video/generate`).
 - **Projects** — structured stories: projects → scenes → shots → images → videos → final render.
-- **Characters** — reusable identities with base prompts, LoRAs, and voices (`/api/characters`).
+- **Characters** — reusable identities with LoRAs and voices (`/api/characters`).
 - **LoRA training** — train and manage custom models: datasets, start/status, checkpoints, samples (`/api/lora-training/*`).
 
 Workflows and providers are discovered live (`GET /api/workflows`, `GET /api/providers`).
@@ -482,7 +483,6 @@ class CharacterRecord(BaseModel):
     kind: Literal["human", "agent"] | None = None
     trigger: str | None = None
     description: str | None = None
-    base_prompt: str | None = None
     source_images: list[str] = Field(default_factory=list)
     loras: list[CharacterLoraBinding] = Field(default_factory=list)
     voice: VoiceConfig | None = None
@@ -827,6 +827,9 @@ class LoraTrainingStatus(BaseModel):
     total_duration_seconds: float | None = None
     updated_at: str
     error: str | None = None
+    settings: dict[str, Any] | None = Field(default=None, description="The run's training settings, from the trainer's job config")
+    loss_history: list[dict[str, float]] = Field(default_factory=list, description="Loss as the trainer logged it: [{step, value}]")
+    files: list[dict[str, Any]] = Field(default_factory=list, description="LoRA files the trainer has saved for this run: [{name, size_bytes}]")
 
 
 class LoraCheckpoint(BaseModel):
@@ -846,60 +849,64 @@ class LoraCheckpointsResponse(BaseModel):
 
 
 class LoraTrainingStartRequest(BaseModel):
-    # -- Job ------------------------------------------------------------------
+    """A training run. Only the first block is needed.
+
+    The recipe (rank, learning rate, resolution, steps, previews) comes from the template
+    named by `base_config`, taken from that model's sources. Every field under
+    "Overrides" defaults to the template's value; set one only to deliberately depart
+    from it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     job_name: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", json_schema_extra={"examples": ["mycharacter_flux2_v1"]})
     trigger_word: str = Field(min_length=1, json_schema_extra={"examples": ["mycharacter"]})
-    base_config: str = Field(default="flux2_identity", description="Training template name; resolves to <name>_template.yaml in the training dir", json_schema_extra={"examples": ["flux2_identity"]})
-    dataset: str = Field(min_length=1, description="Dataset folder name on the droplet under /root/flixml-training/datasets/", json_schema_extra={"examples": ["mycharacter_dataset_v1"]})
-
-    # -- Model -----------------------------------------------------------------
+    base_config: str = Field(default="flux2_character", description="Training template name; resolves to <name>_template.yaml in the training dir (shipped: flux2_character, sdxl_character, wan22_i2v_character)", json_schema_extra={"examples": ["flux2_character"]})
+    dataset: str = Field(min_length=1, description="Dataset folder name inside the trainer's DATASETS_FOLDER (see GET /api/lora-training/trainer)", json_schema_extra={"examples": ["mycharacter_dataset_v1"]})
     model: str = Field(default="flux2_dev", description="Base model label, stored with the job", json_schema_extra={"examples": ["flux2_dev"]})
-    model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Hugging Face repo id for the base checkpoint", json_schema_extra={"examples": ["black-forest-labs/FLUX.2-dev"]})
-    low_vram: bool = Field(default=False, description="Enable Low VRAM mode (Tier A 16-24 GB)")
-    layer_offloading: bool = Field(default=False, description="Stream layers from CPU RAM (Tier A only)")
-    transformer_quantization: Literal["qfloat8", "uint4", "none"] = Field(default="qfloat8")
-    te_quantization: Literal["qfloat8", "uint4", "none"] = Field(default="qfloat8")
+    model_name_or_path: str = Field(default="black-forest-labs/FLUX.2-dev", description="Base checkpoint: a Hugging Face repo id, or for SDXL a single .safetensors path on the trainer", json_schema_extra={"examples": ["black-forest-labs/FLUX.2-dev"]})
 
-    # -- Target (LoRA network) -------------------------------------------------
-    lora_rank: int = Field(default=32, ge=4, le=128)
+    # -- Overrides: unset = the template's value ---------------------------------
+    lora_rank: int | None = Field(default=None, ge=1, le=256)
+    lora_alpha: int | None = Field(default=None, ge=1, le=256)
+    steps: int | None = Field(default=None, ge=1, description="Default: the template's steps_per_image x images in the dataset, or its fixed steps")
+    learning_rate: float | None = Field(default=None, gt=0)
+    batch_size: int | None = Field(default=None, ge=1)
+    optimizer: str | None = None
+    resolution: list[int] | None = Field(default=None, description="Resolution buckets")
+    caption_dropout_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    cache_text_embeddings: bool | None = Field(default=None, description="ai-toolkit documents it as breaking trigger words, DOP and caption dropout")
+    low_vram: bool | None = None
+    save_every: int | None = Field(default=None, ge=1)
+    sample_every: int | None = Field(default=None, ge=1)
+    sample_prompts: list[str] | None = Field(default=None, description="The previews: one image per prompt every `sample_every` steps, shown on the LoRA Training page. `[trigger]` becomes `trigger_word`. Default: the template's prompts")
+    sample_width: int | None = Field(default=None, ge=64)
+    sample_height: int | None = Field(default=None, ge=64)
+    sample_steps: int | None = Field(default=None, ge=1)
+    sample_guidance_scale: float | None = Field(default=None, ge=0.0)
+    sample_seed: int | None = None
 
-    # -- Training --------------------------------------------------------------
-    steps: int = Field(default=1800, ge=100, le=10000)
-    learning_rate: float = Field(default=1e-4, ge=1e-6, le=1e-2)
-    batch_size: int = Field(default=1, ge=1, le=8)
-    gradient_accumulation: int = Field(default=1, ge=1, le=16)
-    optimizer: Literal["adamw8bit", "adamw", "sgd"] = Field(default="adamw8bit")
-    weight_decay: float = Field(default=1e-4, ge=0, le=1e-1)
-    timestep_type: Literal["weighted", "sigmoid"] = Field(default="weighted")
-    loss_type: Literal["mse", "l1", "huber"] = Field(default="mse")
-    cache_text_embeddings: bool | None = Field(default=None, description="Auto: true unless DOP enabled. Encode captions once to save VRAM; incompatible with DOP or caption dropout.")
-    unload_text_encoder: bool = Field(default=False, description="Unload TE after caching embeddings (VRAM saver)")
 
-    # -- Dataset ---------------------------------------------------------------
-    resolution: list[int] = Field(default=[768, 896, 1024], description="Resolution buckets for training")
-    caption_dropout_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="Dropout rate for captions; set 0 when cache_text_embeddings is on")
-    cache_latents: bool = Field(default=True, description="Cache VAE latents to disk to save VRAM")
-
-    # -- Regularization --------------------------------------------------------
-    dop_enabled: bool = Field(default=False, description="Differential Output Preservation - keep base model behaviour outside your trigger")
-    preservation_class: str = Field(default="photo", description="Neutral class word for DOP non-trigger path")
-
-    # -- Advanced --------------------------------------------------------------
-    differential_guidance: bool = Field(default=False, description="Exaggerate the gap toward target for faster detail lock-in")
-    differential_guidance_scale: float = Field(default=3.0, ge=1.0, le=10.0)
-
-    # -- Sampling --------------------------------------------------------------
-    sample_every: int = Field(default=250, ge=50, le=5000)
-    sample_steps: int = Field(default=25, ge=10, le=100)
-    sample_width: int = Field(default=1024, ge=512, le=2048)
-    sample_height: int = Field(default=1024, ge=512, le=2048)
-    sample_guidance_scale: float = Field(default=1.0, ge=0.0, le=10.0)
-    sample_seed: int = Field(default=42)
-    sample_prompts: list[str] = Field(default_factory=lambda: [
-        "a person sitting at a cafe, holding a coffee cup, morning light through the window",
-        "a person walking down a busy city street, candid shot, afternoon sun",
-        "a person in a garden, surrounded by flowers, soft natural light, portrait",
-    ])
+# Where each LoraTrainingStartRequest override lands in ai-toolkit's process config.
+_TRAINING_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "lora_rank": ("network", "linear"),
+    "lora_alpha": ("network", "linear_alpha"),
+    "steps": ("train", "steps"),
+    "learning_rate": ("train", "lr"),
+    "batch_size": ("train", "batch_size"),
+    "optimizer": ("train", "optimizer"),
+    "cache_text_embeddings": ("train", "cache_text_embeddings"),
+    "low_vram": ("model", "low_vram"),
+    "save_every": ("save", "save_every"),
+    "sample_every": ("sample", "sample_every"),
+    "sample_prompts": ("sample", "prompts"),
+    "sample_width": ("sample", "width"),
+    "sample_height": ("sample", "height"),
+    "sample_steps": ("sample", "sample_steps"),
+    "sample_guidance_scale": ("sample", "guidance_scale"),
+    "sample_seed": ("sample", "seed"),
+}
+_TRAINING_DATASET_OVERRIDES = ("resolution", "caption_dropout_rate")
 
 
 class LoraTrainingStartResponse(BaseModel):
@@ -908,6 +915,7 @@ class LoraTrainingStartResponse(BaseModel):
     status: str
     config_path: str
     output_dir: str
+    sample_prompts: list[str] = Field(default_factory=list, description="The preview prompts this run renders")
     error: str | None = None
 
 
@@ -1061,6 +1069,12 @@ async def _reconcile_loop() -> None:
             raise
         except Exception:
             logger.warning("reconcile cycle failed", exc_info=True)
+        try:
+            await _record_finished_training_runs()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _training_logger.warning("training record cycle failed", exc_info=True)
         await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
 
 
@@ -1409,7 +1423,7 @@ async def agent_chat(payload: dict[str, Any]) -> dict[str, Any]:
     text = (
         "I'm the built-in FlixML agent surface. I can use the same API shape OpenClaw uses: "
         "characters, image/video generation, projects, GPU nodes, and ai-toolkit LoRA training. "
-        "For this hackathon demo I'm wired through assistant-ui; the next step is enabling tool execution for requests like"
+        "Tool execution isn't wired up here yet, so I can't act on requests like"
         f" '{last_text or 'generate an image'}'."
     )
     return {"ok": True, "text": text}
@@ -1461,7 +1475,7 @@ async def patch_character(character_id: str, patch: dict[str, Any], agent: Agent
     current = await get_character(character_id)
     if not current:
         raise HTTPException(status_code=404, detail="Character not found")
-    allowed = {"name", "kind", "trigger", "description", "base_prompt", "source_images", "loras", "voice", "metadata"}
+    allowed = {"name", "kind", "trigger", "description", "source_images", "loras", "voice", "metadata"}
     if "owner_id" in patch:
         if owner_scope(agent) is not None:
             raise HTTPException(status_code=403, detail="Only an admin key can change a character's owner")
@@ -1723,7 +1737,7 @@ async def _project_character_ids(project_id: str, scene_id: str, shot: dict[str,
 
 @app.post("/api/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/generate-image", response_model=ImageGenerateResponse)
 async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: str, body: ShotGenerateRequest, agent: Agent | None = Depends(current_agent)) -> ImageGenerateResponse:
-    """Generate an image for a project shot using its description/image_prompt and character LoRAs."""
+    """Generate an image for a project shot from its description/image_prompt, loading each character's LoRA where one is set for the workflow."""
     shot = await get_project_shot(project_id, scene_id, shot_id)
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
@@ -1745,8 +1759,6 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
         await agent.require_capacity()
 
     loras = _character_loras(records, workflow, bindings)
-    if not loras:
-        raise HTTPException(status_code=400, detail=f"No character LoRA resolved for workflow: {workflow}")
 
     # Same rule as POST /api/image/generate: a trigger word only means something when
     # that character's LoRA loads for this workflow. A shot with two characters where
@@ -1813,7 +1825,7 @@ async def generate_project_shot_image(project_id: str, scene_id: str, shot_id: s
     return ImageGenerateResponse(
         ok=True,
         workflow=workflow,
-        lora_name=loras[0].get("name"),
+        lora_name=loras[0].get("name") if loras else None,
         prompt_id=prompt_id,
     )
 
@@ -2414,8 +2426,6 @@ async def nodes() -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001 - status endpoint should report offline, not fail the UI
                 node["error"] = str(exc)
                 node["runtimes"]["comfyui"]["error"] = str(exc)
-        if configured.ai_toolkit:
-            node["runtimes"]["ai_toolkit"] = configured.ai_toolkit.model_dump()
         result[configured.id] = node
     return {"nodes": result}
 
@@ -3018,15 +3028,8 @@ if not _TRAINING_DIR_VAL:
     raise RuntimeError("FLIXML_TRAINING_DIR environment variable is required")
 _TRAINING_DIR = Path(_TRAINING_DIR_VAL)
 _TRAINING_CONFIG_DIR = _TRAINING_DIR / "config"
-# Droplet paths - these live on the GPU worker, referenced by name only from the VPS.
-_DROPLET_TRAINING_DIR = Path("/root/flixml-training")
-_DROPLET_OUTPUT_DIR = _DROPLET_TRAINING_DIR / "output"
-_DROPLET_LOGS_DIR = _DROPLET_TRAINING_DIR / "logs"
-_DROPLET_DATASETS_DIR = _DROPLET_TRAINING_DIR / "datasets"
 _AITK_API_URL = get_settings().aitk_api_url
 _AITK_AUTH_TOKEN = os.environ.get("AITK_API_TOKEN")
-if not _AITK_AUTH_TOKEN:
-    raise RuntimeError("AITK_API_TOKEN environment variable is required")
 _AITK_GPU_IDS = os.environ.get("AITK_GPU_IDS", "0")
 
 
@@ -3036,7 +3039,7 @@ def _aitk_headers() -> dict[str, str]:
     return {}
 
 
-# Local VPS paths for LoRA checkpoints synced from the droplet.
+# Local paths for LoRA checkpoints synced from the trainer.
 _LORA_OUTPUT_DIR_VAL = os.environ.get("FLIXML_LORA_OUTPUT_DIR")
 if not _LORA_OUTPUT_DIR_VAL:
     raise RuntimeError("FLIXML_LORA_OUTPUT_DIR environment variable is required")
@@ -3045,14 +3048,16 @@ _COMFY_LORA_DIR_VAL = os.environ.get("FLIXML_COMFY_LORA_DIR")
 if not _COMFY_LORA_DIR_VAL:
     raise RuntimeError("FLIXML_COMFY_LORA_DIR environment variable is required")
 _COMFY_LORA_DIR = Path(_COMFY_LORA_DIR_VAL)
-_TRAINING_SAMPLES_DIR = _OUTPUT_DIR / "samples"
+# Hidden dir: the media catalog sweep skips dot-dirs, so trainer previews never
+# land in the gallery. They are served only by /api/lora-training/sample-image.
+_TRAINING_SAMPLES_DIR = _OUTPUT_DIR / ".training-samples"
 
 
-async def _fetch_sample_from_droplet(droplet_path: str, vps_dest: Path) -> bool:
-    """Download a single sample image from the droplet to the VPS."""
+async def _fetch_sample_from_trainer(trainer_path: str, vps_dest: Path) -> bool:
+    """Download a single sample image from the trainer to the VPS."""
     if vps_dest.exists():
         return True  # already synced
-    encoded = quote(droplet_path, safe="")
+    encoded = quote(trainer_path, safe="")
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
@@ -3087,22 +3092,22 @@ async def _sync_training_samples(job_name: str) -> list[str]:
             )
             if resp.status_code != 200:
                 return []
-            droplet_paths = resp.json().get("samples", [])
+            trainer_paths = resp.json().get("samples", [])
     except Exception:
         return []
 
     vps_rel_paths: list[str] = []
-    for dp in droplet_paths:
+    for dp in trainer_paths:
         filename = Path(dp).name
-        vps_rel = f"samples/{job_name}/{filename}"
-        vps_abs = _OUTPUT_DIR / vps_rel
-        if await _fetch_sample_from_droplet(dp, vps_abs):
+        vps_abs = _TRAINING_SAMPLES_DIR / job_name / filename
+        vps_rel = vps_abs.relative_to(_OUTPUT_DIR).as_posix()
+        if await _fetch_sample_from_trainer(dp, vps_abs):
             vps_rel_paths.append(vps_rel)
 
     # Cache the VPS-relative paths in DB metadata
     if vps_rel_paths:
         await update_training_job_status(
-            job_name, aitk_job.get("status", "running"),
+            job_name, _training_db_status(aitk_job.get("status")),
             metadata={"sample_paths": vps_rel_paths},
         )
     return vps_rel_paths
@@ -3110,6 +3115,15 @@ async def _sync_training_samples(job_name: str) -> list[str]:
 
 _training_logger = logging.getLogger("flixml.training")
 _ACTIVE_TRAINING_STATUSES = {"pending", "running", "training"}
+
+
+def _training_db_status(trainer_status: str | None) -> str:
+    """The trainer's job status as one the training_jobs table accepts."""
+    if trainer_status == "completed":
+        return "completed"
+    if trainer_status in {"error", "stopped"}:
+        return "failed"
+    return "running"
 
 
 async def _aitk_lookup(job_name: str) -> tuple[dict[str, Any] | None, bool]:
@@ -3136,6 +3150,126 @@ async def _aitk_lookup(job_name: str) -> tuple[dict[str, Any] | None, bool]:
     return None, False
 
 
+async def _aitk_run_details(aitk_job: dict[str, Any]) -> tuple[list[dict[str, float]], list[dict[str, Any]]]:
+    """The trainer's loss log ([{step, value, wall_time}]) and saved LoRA files for one job.
+
+    Both come from ai-toolkit's own routes (/api/jobs/{id}/loss, /api/jobs/{id}/files);
+    either is empty when the trainer has nothing yet or doesn't answer.
+    """
+    loss: list[dict[str, float]] = []
+    files: list[dict[str, Any]] = []
+    aitk_id = aitk_job["id"]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            loss_resp, files_resp = await asyncio.gather(
+                client.get(f"{_AITK_API_URL}/api/jobs/{aitk_id}/loss", params={"key": "loss/loss"}, headers=_aitk_headers()),
+                client.get(f"{_AITK_API_URL}/api/jobs/{aitk_id}/files", headers=_aitk_headers()),
+            )
+        if loss_resp.status_code == 200:
+            loss = [
+                {"step": p["step"], "value": p["value"], "wall_time": p["wall_time"]}
+                for p in loss_resp.json().get("points", [])
+                if p.get("value") is not None
+            ]
+        if files_resp.status_code == 200:
+            for f in files_resp.json().get("files", []):
+                name = re.split(r"[\\/]", f.get("path", ""))[-1]
+                if name.endswith(".safetensors"):
+                    files.append({"name": name, "size_bytes": f.get("size", 0)})
+    except Exception as exc:
+        _training_logger.warning("ai-toolkit run details failed for job %s: %s", aitk_job.get("name"), exc)
+    return loss, files
+
+
+def _aitk_settings(job_config: dict[str, Any]) -> dict[str, Any]:
+    """The settings a person reading the page cares about, from an ai-toolkit job config."""
+    proc = (job_config.get("config", {}).get("process") or [{}])[0]
+    train, net, model = proc.get("train", {}), proc.get("network", {}), proc.get("model", {})
+    datasets = proc.get("datasets") or [{}]
+    base = re.split(r"[\\/]", str(model.get("name_or_path", "")))[-1]
+    return {
+        "base_model": re.sub(r"\.safetensors$", "", base) or None,
+        "arch": model.get("arch"),
+        "steps": train.get("steps"),
+        "learning_rate": train.get("lr"),
+        "rank": net.get("linear"),
+        "batch_size": train.get("batch_size"),
+        "optimizer": train.get("optimizer"),
+        "resolution": datasets[0].get("resolution"),
+        "save_every": proc.get("save", {}).get("save_every"),
+        "sample_every": proc.get("sample", {}).get("sample_every"),
+    }
+
+
+_TRAINING_RECORD_EVERY_SECONDS = 30.0
+_training_record_checked_at = 0.0
+
+
+def _downsample(points: list[dict[str, float]], keep: int = 200) -> list[dict[str, float]]:
+    if len(points) <= keep:
+        return points
+    stride = len(points) / keep
+    return [points[int(i * stride)] for i in range(keep)] + [points[-1]]
+
+
+async def _record_finished_training_runs() -> None:
+    """Write a permanent record for every training run the trainer reports finished.
+
+    The trainer holds a run's loss, timing and file list only while the run stays on it.
+    This copies them into the run's row (`metadata.record`) the first time the trainer
+    reports it completed, errored or stopped, whether or not anyone has the page open.
+    """
+    global _training_record_checked_at
+    now = time.monotonic()
+    if now - _training_record_checked_at < _TRAINING_RECORD_EVERY_SECONDS:
+        return
+    _training_record_checked_at = now
+
+    for job in await list_training_jobs():
+        # Keyed on the record, not the status: the page's status poll can mark a run
+        # completed before this loop gets to it.
+        if "record" in (job.get("metadata") or {}):
+            continue
+        name = job["job_name"]
+        aitk_job, _ = await _aitk_lookup(name)
+        trainer_status = (aitk_job or {}).get("status")
+        if trainer_status not in {"completed", "error", "stopped"}:
+            continue
+        loss, files = await _aitk_run_details(aitk_job)
+        samples = await _sync_training_samples(name)
+        try:
+            job_config = json.loads(aitk_job.get("job_config") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            job_config = {}
+        started = utc_from_timestamp(loss[0]["wall_time"]) if loss else None
+        ended = utc_from_timestamp(loss[-1]["wall_time"]) if loss else datetime.now(UTC)
+        record = {
+            "trainer_status": trainer_status,
+            "trainer_info": aitk_job.get("info"),
+            "requested_at": job["created_at"].isoformat() if job.get("created_at") else None,
+            "started_at": started.isoformat() if started else None,
+            "ended_at": ended.isoformat(),
+            "duration_seconds": round((ended - started).total_seconds()) if started else None,
+            "steps_done": aitk_job.get("step"),
+            "steps_total": _aitk_settings(job_config).get("steps"),
+            "final_loss": loss[-1]["value"] if loss else None,
+            "min_loss": min(p["value"] for p in loss) if loss else None,
+            "loss_history": _downsample(loss),
+            "settings": _aitk_settings(job_config),
+            "files": files,
+            "samples": samples,
+            "trainer_output_dir": job.get("output_dir"),
+            "config_path": job.get("config_path"),
+        }
+        status = "completed" if trainer_status == "completed" else "failed"
+        error = None if status == "completed" else (aitk_job.get("info") or f"Trainer reported {trainer_status}")
+        await update_training_job_status(name, status, error=error, metadata={"record": record})
+        _training_logger.info(
+            "training run %s recorded: %s, %s/%s steps, %d files, ended %s",
+            name, trainer_status, record["steps_done"], record["steps_total"], len(files), record["ended_at"],
+        )
+
+
 async def _aitk_job_by_ref(job_name: str) -> dict[str, Any] | None:
     """Look up an ai-toolkit job by job_ref (our job_name)."""
     job, _ = await _aitk_lookup(job_name)
@@ -3152,95 +3286,96 @@ def _untracked_status(db_status: str, reachable: bool) -> tuple[str, str | None]
     return "failed", "Trainer has no record of this job"
 
 
-def _build_training_config(request: LoraTrainingStartRequest) -> tuple[Path, dict[str, Any]]:
+def _trainer_path(folder: str, *parts: str) -> str:
+    """Join a path on the trainer's machine, in that machine's own style (Windows or POSIX)."""
+    cls = PureWindowsPath if ("\\" in folder or (len(folder) > 1 and folder[1] == ":")) else PurePosixPath
+    return str(cls(folder, *parts))
+
+
+async def _aitk_folders() -> dict[str, str]:
+    """The trainer's own TRAINING_FOLDER and DATASETS_FOLDER, from ai-toolkit's /api/settings."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{_AITK_API_URL}/api/settings", headers=_aitk_headers())
+        resp.raise_for_status()
+        settings = resp.json()
+    except Exception as exc:
+        _training_logger.warning("ai-toolkit settings unreadable: %s", exc)
+        raise HTTPException(status_code=503, detail="Trainer did not respond") from exc
+    return {"training": settings["TRAINING_FOLDER"], "datasets": settings["DATASETS_FOLDER"]}
+
+
+async def _aitk_dataset_captions(dataset: str) -> list[tuple[str, str]]:
+    """(image path, caption) for every image in a trainer dataset, in the trainer's order."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        listing = await client.post(
+            f"{_AITK_API_URL}/api/datasets/listImages",
+            json={"datasetName": dataset},
+            headers=_aitk_headers(),
+        )
+        if listing.status_code == 404:
+            raise HTTPException(status_code=400, detail=f"Dataset '{dataset}' is not on the trainer")
+        listing.raise_for_status()
+        data = listing.json()
+        paths = [data["root"] + sub for sub in data["images"]]
+        captions_resp = await client.post(
+            f"{_AITK_API_URL}/api/caption/getBatch",
+            json={"imgPaths": paths, "ext": "txt"},
+            headers=_aitk_headers(),
+        )
+        captions_resp.raise_for_status()
+        captions = captions_resp.json().get("captions", {})
+    return [(path, captions.get(path, "").strip()) for path in paths]
+
+
+async def _build_training_config(request: LoraTrainingStartRequest, folders: dict[str, str]) -> tuple[Path, dict[str, Any]]:
+    """Fill the template with this run's identity. The template's recipe is used as written.
+
+    A template may carry a `studio:` block that Studio resolves and strips:
+    - `steps_per_image`: steps = images in the dataset x this.
+    """
     template_path = _TRAINING_DIR / f"{request.base_config}_template.yaml"
     if not template_path.is_file():
         raise HTTPException(status_code=400, detail=f"Unknown base_config '{request.base_config}': no {template_path.name} in training dir")
 
     config = yaml.safe_load(template_path.read_text())
+    studio = config.pop("studio", None) or {}
     job_name = request.job_name
     trigger = request.trigger_word
     process = config["config"]["process"][0]
 
-    # --- Job identity ---------------------------------------------------------
     config["config"]["name"] = job_name
     process["trigger_word"] = trigger
-    process["training_folder"] = str(_DROPLET_OUTPUT_DIR)
-
-    # --- Model ----------------------------------------------------------------
-    model_sec = process["model"]
-    model_sec["name_or_path"] = request.model_name_or_path
-    model_sec["low_vram"] = request.low_vram
-    model_sec.setdefault("model_kwargs", {})
-    if request.layer_offloading:
-        model_sec["model_kwargs"]["layer_offloading"] = True
-    model_sec["quantize"] = request.transformer_quantization != "none"
-    if request.transformer_quantization != "none":
-        model_sec["qtype"] = request.transformer_quantization
-    model_sec["quantize_te"] = request.te_quantization != "none"
-    if request.te_quantization != "none":
-        model_sec["qtype_te"] = request.te_quantization
-
-    # --- Target (LoRA) --------------------------------------------------------
-    process["network"]["linear"] = request.lora_rank
-    process["network"]["linear_alpha"] = request.lora_rank
-
-    # --- Training -------------------------------------------------------------
-    train_sec = process["train"]
-    train_sec["steps"] = request.steps
-    train_sec["lr"] = request.learning_rate
-    train_sec["batch_size"] = request.batch_size
-    train_sec["gradient_accumulation_steps"] = request.gradient_accumulation
-    train_sec["optimizer"] = request.optimizer
-    train_sec.setdefault("optimizer_params", {})
-    train_sec["optimizer_params"]["weight_decay"] = request.weight_decay
-    train_sec["timestep_type"] = request.timestep_type
-    # Auto cache_text_embeddings: True unless DOP enabled
-    if request.cache_text_embeddings is None:
-        train_sec["cache_text_embeddings"] = not request.dop_enabled
-    else:
-        train_sec["cache_text_embeddings"] = request.cache_text_embeddings
-    train_sec["unload_text_encoder"] = request.unload_text_encoder
-
-    # --- Dataset --------------------------------------------------------------
-    datasets = process.get("datasets", [])
-    if datasets:
-        ds = datasets[0]
-        # Dataset lives on the droplet - use droplet path
-        ds["folder_path"] = str(_DROPLET_DATASETS_DIR / request.dataset)
-        ds["resolution"] = request.resolution
-        ds["caption_dropout_rate"] = request.caption_dropout_rate
-        ds["cache_latents_to_disk"] = request.cache_latents
-
-    # --- Regularization (DOP) -------------------------------------------------
-    if request.dop_enabled:
-        process["differential_output_preservation"] = {
-            "enabled": True,
-            "trigger_word": trigger,
-            "preservation_class": request.preservation_class,
-        }
-    elif "differential_output_preservation" in process:
-        del process["differential_output_preservation"]
-
-    # --- Advanced -------------------------------------------------------------
-    process.setdefault("advanced", {})
-    process["advanced"]["differential_guidance"] = request.differential_guidance
-    process["advanced"]["differential_guidance_scale"] = request.differential_guidance_scale
-
-    # --- Logging (always enable UILogger for progress tracking) ---------------
+    process["training_folder"] = folders["training"]
+    process["model"]["name_or_path"] = request.model_name_or_path
+    for ds in process.get("datasets", []):
+        # The dataset lives on the trainer, in its own datasets folder.
+        ds["folder_path"] = _trainer_path(folders["datasets"], request.dataset)
     process["logging"] = {"use_ui_logger": True}
 
-    # --- Sampling -------------------------------------------------------------
-    sample_sec = process["sample"]
-    sample_sec["sample_every"] = request.sample_every
-    sample_sec["sample_steps"] = request.sample_steps
-    sample_sec["width"] = request.sample_width
-    sample_sec["height"] = request.sample_height
-    sample_sec["guidance_scale"] = request.sample_guidance_scale
-    sample_sec["seed"] = request.sample_seed
-    sample_sec["prompts"] = request.sample_prompts
+    # Template values a caller set explicitly win over the studio: block.
+    if request.steps is not None:
+        studio.pop("steps_per_image", None)
 
-    # --- Write config ---------------------------------------------------------
+    if "steps_per_image" in studio:
+        items = await _aitk_dataset_captions(request.dataset)
+        if not items:
+            raise HTTPException(status_code=400, detail=f"Dataset '{request.dataset}' has no images on the trainer")
+        batch = process["train"].get("batch_size", 1) * process["train"].get("gradient_accumulation_steps", 1)
+        process["train"]["steps"] = -(-len(items) * int(studio["steps_per_image"]) // batch)
+        _training_logger.info("training config %s: %d images, steps=%s", job_name, len(items), process["train"]["steps"])
+
+    overrides = request.model_dump(include=set(_TRAINING_OVERRIDES) | set(_TRAINING_DATASET_OVERRIDES), exclude_none=True)
+    for field, value in overrides.items():
+        if field in _TRAINING_DATASET_OVERRIDES:
+            for ds in process.get("datasets", []):
+                ds[field] = value
+        else:
+            section, key = _TRAINING_OVERRIDES[field]
+            process.setdefault(section, {})[key] = value
+    if overrides:
+        _training_logger.info("training config %s: overrides %s", job_name, sorted(overrides))
+
     output_path = _TRAINING_CONFIG_DIR / f"{job_name}.yaml"
     _TRAINING_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     output_path.write_text(yaml.dump(config, default_flow_style=False, sort_keys=False))
@@ -3290,10 +3425,20 @@ def _read_dimensions(path: Path) -> tuple[int, int]:
 @app.post("/api/lora-training/start", response_model=LoraTrainingStartResponse)
 async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingStartResponse:
     """Build the training config locally, then enqueue and start via ai-toolkit UI API."""
-    config_path, config_dict = _build_training_config(body)
+    # A reused name would restart the trainer's old job with its old config and
+    # checkpoints, and overwrite the old run's record here. Every run gets a new name.
+    existing_job, _ = await _aitk_lookup(body.job_name)
+    if existing_job or await get_training_job(body.job_name):
+        raise HTTPException(
+            status_code=409,
+            detail=f"A training run named '{body.job_name}' already exists. Start this run under a new name, e.g. '{body.job_name}_v2'.",
+        )
+    folders = await _aitk_folders()
+    config_path, config_dict = await _build_training_config(body, folders)
+    sample_prompts = config_dict["config"]["process"][0].get("sample", {}).get("prompts", [])
 
     job_name = body.job_name
-    output_dir = str(_DROPLET_OUTPUT_DIR / job_name)
+    output_dir = _trainer_path(folders["training"], job_name)
 
     await save_training_job(
         job_name,
@@ -3320,18 +3465,8 @@ async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingSta
                 },
                 headers=_aitk_headers(),
             )
-            if create_resp.status_code == 409:
-                # Already exists - fetch it
-                existing = await client.get(
-                    f"{_AITK_API_URL}/api/jobs",
-                    params={"job_ref": job_name},
-                    headers=_aitk_headers(),
-                )
-                existing.raise_for_status()
-                aitk_job = existing.json()
-            else:
-                create_resp.raise_for_status()
-                aitk_job = create_resp.json()
+            create_resp.raise_for_status()
+            aitk_job = create_resp.json()
 
             aitk_id = aitk_job["id"]
 
@@ -3356,6 +3491,7 @@ async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingSta
             status="running",
             config_path=str(config_path),
             output_dir=output_dir,
+            sample_prompts=sample_prompts,
         )
     except Exception as exc:
         await update_training_job_status(job_name, "failed", error=str(exc))
@@ -3365,6 +3501,7 @@ async def lora_training_start(body: LoraTrainingStartRequest) -> LoraTrainingSta
             status="failed",
             config_path=str(config_path),
             output_dir=output_dir,
+            sample_prompts=sample_prompts,
             error=str(exc),
         )
 
@@ -3394,7 +3531,7 @@ async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatu
 
     aitk_job, aitk_reachable = await _aitk_lookup(job_name)
     if aitk_job:
-        # Sync any new samples from the droplet to the VPS
+        # Sync any new samples from the trainer to the VPS
         await _sync_training_samples(job_name)
 
         step = aitk_job.get("step") or 0
@@ -3403,8 +3540,9 @@ async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatu
             jc = json.loads(aitk_job.get("job_config") or "{}")
             total = jc.get("config", {}).get("process", [{}])[0].get("train", {}).get("steps", 0)
         except Exception:
-            total = 0
+            jc, total = {}, 0
         progress = round((step / total) * 100, 1) if total and step else None
+        loss_points, files = await _aitk_run_details(aitk_job)
 
         # Parse ETA from speed_string (format: "Xs/it" or "Xit/s")
         eta: str | None = None
@@ -3420,10 +3558,27 @@ async def lora_training_status(job_name: str | None = None) -> LoraTrainingStatu
                 mi, s = divmod(rem, 60)
                 eta = f"{h}:{mi:02d}:{s:02d}" if h else f"{mi}:{s:02d}"
 
+        # ai-toolkit's speed_string is often empty; the loss log carries a wall
+        # time per logged step, so speed and time left come from that instead.
+        if seconds_per_step is None and len(loss_points) >= 2:
+            a, b = loss_points[-2], loss_points[-1]
+            if b["step"] > a["step"]:
+                seconds_per_step = round((b["wall_time"] - a["wall_time"]) / (b["step"] - a["step"]), 2)
+        if eta is None and seconds_per_step and total and step and aitk_job.get("status") == "running":
+            remaining = int((total - step) * seconds_per_step)
+            h, rem = divmod(remaining, 3600)
+            mi, s = divmod(rem, 60)
+            eta = f"{h}:{mi:02d}:{s:02d}" if h else f"{mi}:{s:02d}"
+
         aitk_status = aitk_job.get("status", db_status)
         return LoraTrainingStatus(
             ok=True,
             status=aitk_status,
+            loss=loss_points[-1]["value"] if loss_points else None,
+            lr=_aitk_settings(jc).get("learning_rate"),
+            settings=_aitk_settings(jc),
+            loss_history=[{"step": p["step"], "value": p["value"]} for p in loss_points],
+            files=files,
             job_name=job_name,
             current_step=step,
             total_steps=total,
@@ -3645,7 +3800,7 @@ async def lora_training_checkpoints(job_name: str | None = None) -> LoraCheckpoi
             modified_at=datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
         ))
 
-    # 1. Local VPS checkpoints - always available, persisted across droplets.
+    # 1. Local VPS checkpoints - always available, persisted across trainer runs.
     for d in _LORA_OUTPUT_DIR.parent.glob("*"):
         if not d.is_dir():
             continue
@@ -3786,7 +3941,7 @@ async def lora_training_datasets_list():
 
 
 class CreateDatasetRequest(BaseModel):
-    id: str = Field(min_length=1, description="Folder name on the droplet under /root/flixml-training/datasets/")
+    id: str = Field(min_length=1, description="Dataset folder name inside the trainer's DATASETS_FOLDER")
     name: str = Field(min_length=1)
     description: str | None = None
     image_count: int | None = None
@@ -3810,7 +3965,7 @@ async def lora_training_samples(job_name: str):
 
 @app.get("/api/lora-training/sample-image")
 async def lora_training_sample_image(path: str):
-    """Serve a training sample image from the VPS output directory."""
+    """Serve a training sample image from the VPS output directory (JPEGs of ~60 KB, no thumbnail needed)."""
     target = _OUTPUT_DIR / path.lstrip("/")
     target = target.resolve()
     if not str(target).startswith(str(_OUTPUT_DIR.resolve())):
@@ -3818,6 +3973,93 @@ async def lora_training_sample_image(path: str):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(target)
+
+
+# Copies of trainer dataset images, fetched once for display. Hidden dir: the
+# media catalog sweep skips it, so they never land in the gallery.
+_TRAINING_DATASET_CACHE = _OUTPUT_DIR / ".training-datasets"
+
+
+def _dataset_image_url(dataset: str, name: str) -> str:
+    return f"/api/lora-training/dataset-image?dataset={quote(dataset, safe='')}&name={quote(name, safe='')}"
+
+
+@app.get("/api/lora-training/datasets/{dataset}/items")
+async def lora_training_dataset_items(dataset: str) -> dict[str, Any]:
+    """Every image in a trainer dataset with the caption it is trained on, read from the trainer.
+
+    Read-only: captions are written by the agent, on the trainer, not here.
+    """
+    try:
+        items = await _aitk_dataset_captions(dataset)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _training_logger.warning("dataset %s unreadable on the trainer: %s", dataset, exc)
+        raise HTTPException(status_code=503, detail="Trainer did not respond") from exc
+    runs = [job["job_name"] for job in await list_training_jobs() if job.get("dataset") == dataset]
+    return {
+        "dataset": dataset,
+        "count": len(items),
+        "runs": runs,
+        "items": [
+            {"name": re.split(r"[\\/]", path)[-1], "caption": caption, "image": _dataset_image_url(dataset, re.split(r"[\\/]", path)[-1])}
+            for path, caption in items
+        ],
+    }
+
+
+@app.get("/api/lora-training/dataset-image")
+async def lora_training_dataset_image(dataset: str, name: str, full: bool = False) -> FileResponse:
+    """One dataset image from the trainer: a 512 px JPEG, or the original with `full=true`."""
+    if not re.fullmatch(r"[\w\- ][\w.\- ]*", dataset) or not re.fullmatch(r"[\w\- ][\w.\- ]*", name):
+        raise HTTPException(status_code=400, detail="Invalid dataset or image name")
+    local = _TRAINING_DATASET_CACHE / dataset / name
+    if not local.is_file():
+        folders = await _aitk_folders()
+        trainer_path = _trainer_path(folders["datasets"], dataset, name)
+        if not await _fetch_sample_from_trainer(trainer_path, local):
+            raise HTTPException(status_code=404, detail="Not on the trainer")
+    if full:
+        return FileResponse(local, headers={"Cache-Control": "private, max-age=3600"})
+    thumb = await _thumb_file(local)
+    return FileResponse(thumb or local, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.get("/api/lora-training/jobs/{job_name}/preview-sources")
+async def lora_training_preview_sources(job_name: str) -> dict[str, Any]:
+    """For each preview prompt of a run, the training image whose caption it is, if any.
+
+    ai-toolkit numbers a step's previews _0, _1, _2 in prompt order, so `index`
+    matches the number at the end of a preview's file name.
+    """
+    db_job = await get_training_job(job_name)
+    if not db_job:
+        raise HTTPException(status_code=404, detail=f"No training run {job_name}")
+    config_path = Path(db_job.get("config_path") or "")
+    try:
+        config = yaml.safe_load(config_path.read_text())
+        prompts = config["config"]["process"][0]["sample"]["prompts"]
+    except Exception:
+        return {"job_name": job_name, "sources": []}
+    trigger = db_job.get("trigger_word") or ""
+    dataset = db_job.get("dataset") or ""
+    by_caption: dict[str, str] = {}
+    if dataset:
+        with contextlib.suppress(Exception):
+            for path, caption in await _aitk_dataset_captions(dataset):
+                by_caption.setdefault(caption.strip(), re.split(r"[\\/]", path)[-1])
+    sources = []
+    for index, prompt in enumerate(prompts):
+        bare = prompt.removeprefix(f"{trigger}, ") if trigger else prompt
+        name = by_caption.get(prompt.strip()) or by_caption.get(bare.strip())
+        sources.append({
+            "index": index,
+            "prompt": prompt,
+            "name": name,
+            "image": _dataset_image_url(dataset, name) if name else None,
+        })
+    return {"job_name": job_name, "dataset": dataset, "sources": sources}
 
 
 _LISTING_SUMMARY_FIELDS = ("filename", "type", "workflow", "description", "tags", "prompt", "submitted_at")
@@ -3987,22 +4229,15 @@ _THUMB_DIR = _OUTPUT_DIR / ".thumbs"
 _VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".mkv", ".gif", ".avi"}
 
 
-@app.get("/api/thumb/{path:path}")
-async def media_thumb(path: str) -> FileResponse:
-    """Serve a still poster image for a media file.
+_media_logger = logging.getLogger("flixml.media")
 
-    Images are served as-is. Videos get a cached JPEG poster (first frame,
-    which for i2v is the source image) extracted once with ffmpeg — rendering
-    135 <video> tags to paint frame 0 client-side is what left the gallery full
-    of blank tiles.
+
+async def _thumb_file(target: Path) -> Path | None:
+    """A cached 512 px-wide JPEG of an image or of a video's first frame.
+
+    Made once with ffmpeg and kept under _THUMB_DIR; None when ffmpeg can't make it.
+    A full-size PNG is ~1.6 MB, its thumbnail a few tens of KB.
     """
-    target = await _resolve_media_ref(path)
-    if target is None:
-        raise HTTPException(status_code=404, detail="Not found")
-
-    if target.suffix.lower() not in _VIDEO_SUFFIXES:
-        return FileResponse(target, headers={"Cache-Control": "private, max-age=604800, immutable"})
-
     rel = target.resolve().relative_to(_OUTPUT_DIR.resolve())
     thumb = _THUMB_DIR / rel.with_suffix(rel.suffix + ".jpg")
     if not thumb.is_file() or thumb.stat().st_mtime < target.stat().st_mtime:
@@ -4013,8 +4248,26 @@ async def media_thumb(path: str) -> FileResponse:
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.wait()
-    if not thumb.is_file():
-        # Fall back to the video itself rather than 500 — the tile can still try.
+        if proc.returncode != 0:
+            _media_logger.warning("thumbnail failed for %s (ffmpeg exit %s)", target, proc.returncode)
+    return thumb if thumb.is_file() else None
+
+
+@app.get("/api/thumb/{path:path}")
+async def media_thumb(path: str) -> FileResponse:
+    """Serve a small still for a media file: a 512 px JPEG of an image, or a
+    video's first frame (for i2v, the source image).
+
+    Rendering 135 <video> tags to paint frame 0 client-side is what left the
+    gallery full of blank tiles; serving full-size images as thumbnails cost
+    ~1.6 MB a tile.
+    """
+    target = await _resolve_media_ref(path)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    thumb = await _thumb_file(target)
+    if thumb is None:
+        # Fall back to the file itself rather than 500 — the tile can still try.
         return FileResponse(target, headers={"Cache-Control": "private, max-age=3600"})
     return FileResponse(thumb, headers={"Cache-Control": "private, max-age=604800, immutable"})
 

@@ -475,7 +475,7 @@ function RemixCenter({ project, shots }: { project: Project; shots: Shot[] }) {
           {[
             { n: 1, title: "Pick a shot", body: "Click any shot card to select it. The right panel shows its prompts." },
             { n: 2, title: "Edit the prompt", body: "Change the image prompt or description in the right panel. Save your changes." },
-            { n: 3, title: "Regenerate", body: "Click Generate or Re-image. The API runs the new prompt on AMD MI300X and returns a fresh image." },
+            { n: 3, title: "Regenerate", body: "Click Generate or Re-image. The API runs the new prompt on your GPU and returns a fresh image." },
             { n: 4, title: "Iterate", body: "Not quite right? Edit the prompt again and regenerate. Each run creates a new version you can compare." },
           ].map((step) => (
             <div key={step.n} className="flex gap-2.5">
@@ -534,7 +534,7 @@ function AnimateCenter({ project, shots }: { project: Project; shots: Shot[] }) 
           <p className="text-[11px] font-semibold text-gray-300">How Animate works:</p>
           {[
             { n: 1, title: "Pick a shot", body: "Click any shot card that has an image." },
-            { n: 2, title: "Click Animate", body: "The API sends the image to Wan 2.2 I2V on AMD MI300X and returns a video clip." },
+            { n: 2, title: "Click Animate", body: "The API sends the image to an image-to-video workflow on your GPU and returns a video clip." },
             { n: 3, title: "Iterate", body: "Don't like the video? Animate again — each run creates a new version." },
             { n: 4, title: "Select versions", body: "The bottom strip shows all versions. Click one to make it active." },
           ].map((step) => (
@@ -551,7 +551,7 @@ function AnimateCenter({ project, shots }: { project: Project; shots: Shot[] }) 
         </div>
 
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          <strong className="text-gray-400">API:</strong> <code className="text-gray-500">POST /api/projects/{'{projectId}'}/scenes/{'{sceneId}'}/shots/{'{shotId}'}/animate</code> — returns <code className="text-gray-500">prompt_id</code> for tracking. Backend uses Wan 2.2 I2V on AMD MI300X.
+          <strong className="text-gray-400">API:</strong> <code className="text-gray-500">POST /api/projects/{'{projectId}'}/scenes/{'{sceneId}'}/shots/{'{shotId}'}/animate</code> — returns <code className="text-gray-500">prompt_id</code> for tracking.
         </p>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { TrainingDatasetSection } from "./TrainingDataset";
 import { Cpu, Film, Image, Mic, RotateCcw, Save, Sparkles, Trash2, UserRound, X, Check } from "lucide-react";
 import { MediaTile } from "./MediaTile";
 import type { MediaItem } from "../types";
@@ -30,7 +31,6 @@ interface CharacterRecord {
   kind: string | null;
   trigger: string | null;
   description: string | null;
-  base_prompt: string | null;
   source_images: string[];
   loras: LoraEntry[];
   voice?: { provider: string; voice_id: string; name?: string | null; settings?: Record<string, unknown> } | null;
@@ -43,7 +43,6 @@ interface FormState {
   kind: string;
   trigger: string;
   description: string;
-  base_prompt: string;
   source_images: string[];
   voice_provider: string;
   voice_id: string;
@@ -79,7 +78,6 @@ function recordToForm(record: CharacterRecord): FormState {
     kind: record.kind ?? "",
     trigger: record.trigger ?? "",
     description: record.description ?? "",
-    base_prompt: record.base_prompt ?? "",
     source_images: [...(record.source_images || [])],
     voice_provider: record.voice?.provider ?? "elevenlabs",
     voice_id: record.voice?.voice_id ?? "",
@@ -109,7 +107,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
     kind: "",
     trigger: "",
     description: "",
-    base_prompt: "",
     source_images: [],
     voice_provider: "elevenlabs",
     voice_id: "",
@@ -186,7 +183,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
         kind: form.kind.trim() || null,
         trigger: form.trigger.trim() || null,
         description: form.description.trim() || null,
-        base_prompt: form.base_prompt.trim() || null,
         source_images: form.source_images.filter((s) => s.trim()),
         voice: form.voice_id.trim()
           ? {
@@ -254,8 +250,6 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
 
   const inputBase =
     "w-full rounded-lg border border-gray-700 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-brand focus:bg-black/50 focus:outline-none transition";
-  const textareaBase =
-    "w-full rounded-lg border border-gray-700 bg-black/30 px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-brand focus:bg-black/50 focus:outline-none transition resize-none font-mono leading-relaxed";
 
   return (
     <div className="p-5 lg:p-7 space-y-6">
@@ -397,23 +391,7 @@ export function CharacterProfileView({ characterId, onOpen, onDelete, onGenerate
         </div>
       </section>
 
-      {/* ── Base Prompt ── */}
-      <section className="rounded-3xl border border-gray-800/60 bg-gray-950/40 p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-amber-300" />
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-300">Base Prompt</h2>
-        </div>
-        <textarea
-          value={form.base_prompt}
-          onChange={(e) => updateField("base_prompt", e.target.value)}
-          rows={8}
-          className={textareaBase}
-          placeholder="The base prompt appended to every generation for this character..."
-        />
-        <p className="text-[11px] text-gray-500">
-          This prompt is merged into every image and video generation. Click Save to apply changes.
-        </p>
-      </section>
+      <TrainingDatasetSection dataset={characterId} />
 
       {/* ── Voice ── */}
       <section className="rounded-3xl border border-gray-800/60 bg-gray-950/40 p-5 space-y-4">

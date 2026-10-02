@@ -218,6 +218,7 @@ function Shell() {
   const location = useLocation();
   const projectMatch = useMatch("/studio/projects/:projectId");
   const loraMatch = useMatch("/studio/lora-training");
+  const characterMatch = useMatch("/studio/characters/*");
   const settingsMatch = useMatch("/studio/settings/*");
   const jobsMatch = useMatch("/studio/jobs");
 
@@ -232,10 +233,10 @@ function Shell() {
     }
   }, [projectMatch?.params.projectId]);
 
-  // Keep "Characters & LoRA Training" sidebar tab highlighted when on /lora-training
+  // Keep "Characters & LoRA Training" sidebar tab highlighted on /lora-training and a character's page
   useEffect(() => {
-    if (loraMatch) ctx.setActiveSidebarTab("characters");
-  }, [loraMatch]);
+    if (loraMatch || characterMatch) ctx.setActiveSidebarTab("characters");
+  }, [!!loraMatch, !!characterMatch]);
 
   useEffect(() => {
     // Settings has its own section nav; however it was reached, drop the empty side panel

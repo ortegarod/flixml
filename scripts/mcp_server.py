@@ -518,8 +518,7 @@ TOOLS = {
     },
     "list_characters": {
         "description": (
-            "The characters your account owns (an admin key sees all). Copy a "
-            "character's `base_prompt` into your prompt for its look; passing "
+            "The characters your account owns (an admin key sees all). Passing "
             "`character` binds the result to it and loads its LoRA where one is set "
             "for the workflow."
         ),

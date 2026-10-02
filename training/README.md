@@ -1,17 +1,13 @@
 # Training Datasets & LoRA Training
 
-Training config templates, caption files, and dataset folders for character LoRA fine-tuning.
-
-**Source of truth for hyperparameters:** [RunComfy FLUX.2 LoRA training guide](https://www.runcomfy.com/trainer/ai-toolkit/flux-2-dev-lora-training).
+Training config templates for character LoRA fine-tuning on [AI Toolkit](https://github.com/ostris/ai-toolkit). Each template cites the sources its settings come from.
 
 ## What's in this directory
 
 **Templates (provided):**
-- `flux2_character.yaml` — FLUX.2-dev character LoRA template
+- `flux2_character_template.yaml` — FLUX.2-dev character LoRA template
+- `sdxl_character_template.yaml` — SDXL character LoRA template (any SDXL-architecture checkpoint, from a single `.safetensors`)
 - `wan22_i2v_character_template.yaml` — Wan 2.2 image-to-video character template (untested)
-
-**You create these before training:**
-- `datasets/{character_id}/` — caption files (`.txt`) per training image
 
 **Generated at runtime (do not edit):**
 - `config/` — job configs generated from templates per training run
@@ -20,10 +16,9 @@ Training config templates, caption files, and dataset folders for character LoRA
 
 ## Workflow
 
-1. Mark 30–60 training images per character in the FlixML Studio gallery (toggle "Include in training dataset").
-2. Write one caption file per image in `datasets/{character_id}/{image_stem}.txt`.
-3. Start training from the UI or via `POST /api/lora-training/start`.
-4. Monitor samples and download checkpoints when done.
+1. Put the dataset on the trainer: images plus one `.txt` caption per image, in AI Toolkit's datasets folder.
+2. Start training with `POST /api/lora-training/start`.
+3. Watch it on the LoRA Training page, then download checkpoints when done.
 
 ## Trigger word
 
@@ -65,24 +60,30 @@ POST /api/lora-training/start
 {
   "job_name": "character_v1",
   "trigger_word": "ch4rtrig",
-  "character_id": "<character uuid>"
+  "dataset": "character_v1",
+  "base_config": "sdxl_character",
+  "model_name_or_path": "<path to the checkpoint on the trainer>"
 }
 ```
 
-The backend reads captions, verifies each marked image has a caption, uploads everything to ai-toolkit, generates the job YAML from `flux2_character.yaml`, and starts the run.
+That is all a run needs. The recipe (rank, learning rate, resolution, steps, previews) comes from the template, as its sources give it. Any recipe field can still be set in the request (`steps`, `lora_rank`, `learning_rate`, `sample_prompts`, …; see `GET /openapi.json`); an unset field keeps the template's value. A template's `studio:` block sets steps from the dataset size (`steps_per_image`).
+
+`sample_prompts` are the previews: the trainer renders one image per prompt every `sample_every` steps, and the LoRA Training page shows them. `[trigger]` in a prompt becomes the trigger word. Unset, the run previews the template's prompts; the start response lists the ones it will use.
+
+The dataset (images plus a `.txt` caption per image) must already be in the trainer's datasets folder, uploaded with ai-toolkit's `POST /api/datasets/upload`. The backend generates the job YAML from the template named by `base_config`, with the trainer's own folders, and starts the run.
 
 ## Monitoring
 
 - `GET /api/lora-training/jobs` — list jobs and status
-- `GET /api/lora-training/jobs/{name}/samples` — training previews
-- `GET /api/lora-training/jobs/{name}/checkpoints` — downloadable LoRA weights
+- `GET /api/lora-training/samples?job_name={name}` — training previews
+- `GET /api/lora-training/checkpoints?job_name={name}` — downloadable LoRA weights
 
 ## Templates
 
-`flux2_character.yaml` and `wan22_i2v_character_template.yaml` follow the defaults in the RunComfy guide. Most settings should not be changed without reading the guide first.
+`flux2_character_template.yaml` and `wan22_i2v_character_template.yaml` follow the defaults in the RunComfy guide. Most settings should not be changed without reading the guide first.
 
 ## References
 
 - RunComfy guide: https://www.runcomfy.com/trainer/ai-toolkit/flux-2-dev-lora-training
 - ai-toolkit: https://github.com/ostris/ai-toolkit
-- API schema: `GET /api/openapi.json`
+- API schema: `GET /openapi.json`
