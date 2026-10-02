@@ -16,7 +16,6 @@ interface CharacterSummary {
   kind: string | null;
   loras: Record<string, unknown>[];
   source_images: string[];
-  defaults: Record<string, unknown>;
 }
 
 interface AppSidebarProps {
