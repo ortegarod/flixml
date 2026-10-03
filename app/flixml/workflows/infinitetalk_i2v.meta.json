@@ -44,8 +44,8 @@
     },
     "length": {
       "type": "int",
-      "default": 400,
-      "description": "Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 400 is Kijai's example_03 value."
+      "default": 500,
+      "description": "Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 500 is Kijai's example_03 value (its max_frames INTConstant)."
     },
     "fps": {
       "type": "int",
@@ -60,7 +60,7 @@
     "steps": {
       "type": "int",
       "default": 6,
-      "description": "Sampler steps. 6 with the lightx2v speed LoRA is the tuned default."
+      "description": "Sampler steps. 6 is Kijai's example_03 value."
     },
     "cfg": {
       "type": "float",

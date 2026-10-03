@@ -46,7 +46,7 @@
     "length": {
       "type": "int",
       "default": 1000,
-      "description": "Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value."
+      "description": "Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value (its max_frames INTConstant)."
     },
     "fps": {
       "type": "int",

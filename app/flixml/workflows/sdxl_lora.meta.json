@@ -69,9 +69,11 @@
   ],
   "example": {
     "prompt": "<lora trigger word>, seated at a café table, morning light through the window, denim jacket, medium shot, photorealistic",
-    "negative_prompt": "blurry, low quality, extra fingers, watermark",
+    "negative": "blurry, low quality, extra fingers, watermark",
     "checkpoint": "your-sdxl-checkpoint.safetensors",
-    "lora_name": "your-character-lora.safetensors",
+    "workflow_params": {
+      "lora_name": "your-character-lora.safetensors"
+    },
     "lora_strength": 0.8
   }
 }

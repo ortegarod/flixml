@@ -59,7 +59,7 @@
   ],
   "example": {
     "prompt": "lighthouse on a basalt headland, storm surf below, low grey cloud, cold blue light, wide shot, photorealistic, sharp focus",
-    "negative_prompt": "blurry, low quality, watermark, text",
+    "negative": "blurry, low quality, watermark, text",
     "checkpoint": "your-sdxl-checkpoint.safetensors",
     "width": 1216,
     "height": 832

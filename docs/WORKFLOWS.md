@@ -316,10 +316,10 @@ Audio-driven talking-head. Animates a still image to lip-sync a voice line (Wan 
   - `negative_prompt` · _str_ · default `bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards`
   - `width` · _int_ · default `640` — Resize target width (divisible by 16). Kijai's example: 640, center crop.
   - `height` · _int_ · default `640` — Resize target height (divisible by 16). Kijai's example: 640, center crop.
-  - `length` · _int_ · default `400` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 400 is Kijai's example_03 value.
+  - `length` · _int_ · default `500` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 500 is Kijai's example_03 value (its max_frames INTConstant).
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps; do not change unless you know why.
   - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
-  - `steps` · _int_ · default `6` — Sampler steps. 6 with the lightx2v speed LoRA is the tuned default.
+  - `steps` · _int_ · default `6` — Sampler steps. 6 is Kijai's example_03 value.
   - `cfg` · _float_ · default `1.0`
   - `shift` · _float_ · default `11.0`
   - `scheduler` · _str_ · default `dpm++_sde`
@@ -429,7 +429,7 @@ Audio-driven lip-sync applied on top of a driving motion clip. Loads a source vi
   - `negative_prompt` · _str_ · default `bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards`
   - `width` · _int_ · default `640` — Resize target width (divisible by 16). Kijai's example: 640, center crop.
   - `height` · _int_ · default `640` — Resize target height (divisible by 16). Kijai's example: 640, center crop.
-  - `length` · _int_ · default `1000` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value.
+  - `length` · _int_ · default `1000` — Cap on output frames (num_frames into MultiTalkWav2VecEmbeds), not an exact length: the node clamps to the audio, so the voice line sets the real length. 1000 is Kijai's V2V example_02 value (its max_frames INTConstant).
   - `fps` · _int_ · default `25` — InfiniteTalk is trained at 25fps. Also re-times the driving video to this rate (force_rate). Do not change unless you know why.
   - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
   - `steps` · _int_ · default `4` — Sampler steps. 4 is Kijai's V2V example_02 value; the sampler starts at step 2 with denoise 1.0, as in his graph, which keeps the driving clip's motion.
