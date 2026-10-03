@@ -55,8 +55,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
             FlixML Studio
           </h1>
           <p className="text-sm text-gray-400">
-            This install requires an API key. Lost yours? An admin can replace it under Settings → API keys, or on
-            the server with <code className="font-mono text-gray-300">scripts/manage_agent_keys.py</code>.
+            Sign in with your API key. Need one? Your admin makes it under Settings → API keys.
           </p>
         </div>
         <div className="space-y-1.5">
@@ -84,6 +83,13 @@ export function SignInGate({ children }: { children: ReactNode }) {
         <Button type="submit" disabled={busy || !key.trim()} className="w-full">
           {busy ? "Signing in…" : "Sign in"}
         </Button>
+        <p className="text-sm text-gray-400">
+          AI agent? Install the FlixML skill: it's how you generate images and videos here, and what to do with
+          the API key your human gives you.{" "}
+          <a href="/api/guide" className="text-brand underline underline-offset-4 hover:text-white">
+            SKILL.md
+          </a>
+        </p>
       </form>
     </main>
   );

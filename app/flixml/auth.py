@@ -34,6 +34,9 @@ from .config import get_settings
 
 SESSION_COOKIE = "flixml_key"
 SESSION_PATH = "/api/session"
+# The agent guide (SKILL.md) is open without a key: an agent needs it to learn what a key is for,
+# and it's the same file the public repo ships.
+GUIDE_PATH = "/api/guide"
 
 bearer_scheme = HTTPBearer(
     auto_error=False,
@@ -199,12 +202,12 @@ async def authorize(
     if raw_key:
         agent = await agent_for_key(raw_key)
         if agent is None:
-            if path == SESSION_PATH:
+            if path in (SESSION_PATH, GUIDE_PATH):
                 return
             raise HTTPException(status_code=401, detail="Invalid or revoked API key")
         await db.touch_agent_last_used(agent.id)
         request.state.agent = agent
-    elif path == SESSION_PATH:
+    elif path in (SESSION_PATH, GUIDE_PATH):
         return
     elif get_settings().security_config().require_api_key:
         raise HTTPException(status_code=401, detail="Missing API key")

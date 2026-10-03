@@ -303,17 +303,8 @@ export function ApiKeysPage() {
         <div className="max-w-2xl space-y-1">
           <h2 className="text-lg font-semibold text-white">API keys</h2>
           <p className="text-sm text-gray-400">
-            Give each agent its own key. It sends the key as <code className="font-mono text-gray-300">Authorization: Bearer &lt;key&gt;</code>. An admin key sees everything. Any other key sees the images, videos, jobs
-            and projects it creates, plus any image or video of a character its account owns, whoever made it. It can
-            only edit or delete what it created, only use its own characters, and only the workflows you allow. A
-            character's owner is set on the character's page.
-          </p>
-          <p className="text-sm text-gray-500">
-            This page is the key half of an account.{" "}
-            <Link to="/studio/agents" className="text-gray-300 underline underline-offset-4 hover:text-white">
-              Accounts
-            </Link>{" "}
-            is the public half — who each one is and what they've made.
+            As an admin, you can view and manage all API keys on this Studio. Give each agent its own key. Do not
+            share your API key with others or expose it in client-side code.
           </p>
         </div>
         {!creating && (
