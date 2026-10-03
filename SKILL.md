@@ -7,14 +7,31 @@ description: Use when your human asks for an image, video, edit, or movie, or me
 
 FlixML is a workbench for AI-driven image and video generation. Every stage runs on your human's own GPUs through ComfyUI.
 
-## Getting Started
+## The API
 
-If this is your first time:
-https://flixml.com/docs/getting-started/
-https://flixml.com/docs/providers/
-https://flixml.com/docs/api-keys/
+The API is at the same address that serves this guide (`/api/guide`); every path below is under it. Send your key on every request as `Authorization: Bearer <key>`. A 401 means the key is missing or revoked; a 403 or 404 on something your human can see means your key isn't scoped to it.
 
-It covers installation and setup. 
+```bash
+API=<studio-address>
+AUTH="Authorization: Bearer <key>"
+
+curl -s -H "$AUTH" "$API/api/workflows"         # what this install can run
+curl -s -H "$AUTH" "$API/api/workflows/<id>"    # one workflow's params in full
+curl -s -H "$AUTH" "$API/api/providers"         # the nodes it runs on
+
+curl -s -X POST "$API/api/image/generate" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"workflow": "<id>", "provider": "<provider-id>", "prompt": "<prompt>", "workflow_params": {"<param>": "<value>"}}'
+```
+
+The generate call queues the job and answers at once:
+
+```json
+{"ok": true, "workflow": "<id>", "prompt_id": "9f63123a-70fd-4c62-934f-ed93f670f3d0", "node_errors": null, ...}
+```
+
+`GET /api/jobs/{prompt_id}` is the job's status and, once it finishes, its outputs.
+
+`prompt` goes at the top level; the workflow's other params go in `workflow_params`. Video workflows take the same body at `POST /api/video/generate`. Every field: `GET /openapi.json` or https://flixml.com/docs/api/.
 
 ## Generate
 
@@ -34,7 +51,7 @@ Be kind to the GPUs, queue up only one generation at a time, unless explicitly a
 ### Images
 
 ```bash
-curl -s "$API/api/comfy/models/checkpoints?provider=<provider>"   # model files on that node, for workflows that need `checkpoint`
+curl -s -H "$AUTH" "$API/api/comfy/models/checkpoints?provider=<provider>"   # model files on that node, for workflows that need `checkpoint`
 ```
 
 On a multi-node install, ask the node you picked: each one has its own model files, and the `provider` you pass here is the same id you pass to the generate call (`GET /api/providers`).
@@ -48,7 +65,7 @@ One clip holds one action. `POST /api/video/last-frame` returns a finished clip'
 ### Characters
 
 ```bash
-curl -s $API/api/characters
+curl -s -H "$AUTH" "$API/api/characters"
 ```
 
 The characters your account owns: only those can be bound to your jobs, and one you create with `POST /api/characters` is yours. An admin key sees them all.
@@ -58,7 +75,7 @@ Binding a character doesn't change the workflow's settings. Its `trigger` is inj
 ### Your gallery
 
 ```bash
-curl -s "$API/api/listing?view=summary"
+curl -s -H "$AUTH" "$API/api/listing?view=summary"
 ```
 
 What your key made, plus anything of the characters you own, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files. Without `view=summary` each item carries every setting it was made with.
@@ -75,4 +92,5 @@ What your key made, plus anything of the characters you own, newest first, 60 at
 ## More Info
 
 - `README.md` in the repo (github.com/ortegarod/flixml): install, config, and core concepts.
+- Installing and setting up Studio, for your human: https://flixml.com/docs/getting-started/, https://flixml.com/docs/providers/, https://flixml.com/docs/api-keys/
 - FlixML Docs: https://flixml.com/docs/overview
