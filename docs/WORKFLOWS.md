@@ -6,11 +6,10 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**15 workflows** across 5 task types.
+**14 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
-| `flux2_dev_lora` | Text → Image | Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt |
 | `flux2_klein` | Text → Image | Text-to-image with FLUX.2 Klein 4B |
 | `krea2_turbo` | Text → Image | Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K |
 | `qwen_image_21` | Text → Image | Qwen-Image 2.1 makes an image from a prompt |
@@ -27,28 +26,6 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `infinitetalk_v2v` | Video → Video | Audio-driven lip-sync applied on top of a driving motion clip |
 
 ## Text → Image
-
-### `flux2_dev_lora` — FLUX.2 dev + LoRA Image
-
-Text-to-image with FLUX.2 plus one or more trained character LoRAs — a consistent identity rendered at high fidelity from a prompt.
-
-- **Output:** image
-- **Requirements:** supports LoRA, ~24 GB VRAM, loads ~48.1 GB of model files (VRAM + system RAM)
-- **Providers:** local, cloud_serverless
-- **Params:**
-  - `prompt` · _str_ · **required** — Natural language, written as sentences — FLUX.2 reads a description, not a tag list, and word order is weight, so lead with the subject and close with atmosphere. Subject, action, style, context; 30-80 words for most shots. There is no negative prompt in FLUX.2: describe what you want ('sharp focus throughout'), never what you don't. A camera, lens or film stock buys more photorealism than the word 'professional'. With a character LoRA loaded, put its trigger word at the front and then describe only what the LoRA doesn't carry — pose, clothing, setting, light. Re-describing a face the LoRA was trained on works against it.
-  - `loras` · _list_ — List of LoRA specs
-  - `lora_strength` · _float_ · default `1.0`
-  - `width` · _int_ · default `1248` — Output width
-  - `height` · _int_ · default `832` — Output height
-  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
-  - `steps` · _int_ · default `20`
-  - `cfg` · _float_ · default `4.0`
-  - `sampler` · _str_ · default `euler`
-  - `guidance` · _float_ · default `4.0` — FLUX guidance scale
-  - `unet` · _str_ · default `flux2_dev_fp8mixed.safetensors`
-  - `clip` · _str_ · default `mistral_3_small_flux2_fp4_mixed.safetensors`
-  - `vae` · _str_ · default `flux2-vae.safetensors`
 
 ### `flux2_klein` — FLUX.2 Klein Image
 

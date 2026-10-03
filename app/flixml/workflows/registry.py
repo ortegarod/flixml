@@ -10,7 +10,7 @@ Usage:
     registry = get_registry()
     
     # Build workflow with variables substituted
-    workflow_json = registry.build_workflow("flux2_dev_lora", {
+    workflow_json = registry.build_workflow("flux2_klein", {
         "prompt": "a beautiful sunset",
         "seed": 42,
         "width": 1248,
