@@ -44,8 +44,6 @@ in full — every param, its default, and what the value does. The `prompt` para
 
 Regardless of the workflow chosen, DO NOT wait for generation to complete, unless explicitly asked to. It lands in Studio UI.
 
-Be kind to the GPUs, queue up only one generation at a time, unless explicitly asked to generate a batch.
-
 `POST /api/jobs/{prompt_id}/cancel` stops a job your key queued: it leaves the queue if it is waiting and the GPU if it is running.
 
 ### Images
