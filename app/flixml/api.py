@@ -2958,7 +2958,11 @@ async def jobs(include_completed: bool = True, agent: Agent | None = Depends(cur
 
 @app.get("/api/jobs/{prompt_id}", response_model=JobStatusResponse)
 async def job(prompt_id: str) -> JobStatusResponse:
-    """Get status, outputs and provenance for a single job, reconciled live against its node."""
+    """Get status, outputs and provenance for a single job, reconciled live against its node.
+
+    A job whose node stays unreachable for 5 minutes is marked `failed`: a stopped or
+    restarted ComfyUI loses its queue. Failed jobs leave the gallery.
+    """
     record = await get_job(prompt_id) or {}
     provider = record.get("provider")  # _job_row flattens metadata keys to top level
     try:
