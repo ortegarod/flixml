@@ -1,19 +1,19 @@
 {
   "id": "sdxl_base",
-  "name": "SDXL Base Image",
-  "description": "Text-to-image with an SDXL checkpoint. General-purpose still generation from a prompt — no character LoRA, no source image.",
+  "name": "SDXL Image",
+  "description": "Text-to-image with an SDXL checkpoint or any SDXL finetune, with up to two LoRAs and an optional face-detail pass. General-purpose still generation from a prompt — no source image.",
   "task": "text-to-image",
   "output_type": "image",
   "requirements": {
     "vram_gb": 8,
     "workflow_type": "sdxl",
-    "supports_lora": false
+    "supports_lora": true
   },
   "params": {
     "prompt": {
       "type": "string",
       "required": true,
-      "description": "Comma-separated tags and short phrases, the way SDXL's training captions were written. A sentence still parses — it does not fail — but every article and preposition spends part of the same budget, so tags buy more control per token. Order is weight: subject, appearance, clothing, pose, setting, lighting, then medium and quality. 'young woman, short white hair, black leather jacket, standing in a rain-wet alley, neon signs, night, shallow depth of field, photorealistic, sharp focus'. Push or pull one term with `(term:1.2)` or `(term:0.8)`; bare `(term)` is 1.1. Keep it near 75 tokens — CLIP encodes the rest in a later chunk where it pulls less. Match the checkpoint: one trained on booru tags wants booru tags, one merged for realism wants photographic ones, and its model page is the authority on any trigger or quality tags it expects."
+      "description": "Comma-separated tags and short phrases, the way SDXL's training captions were written. A sentence still parses — it does not fail — but every article and preposition spends part of the same budget, so tags buy more control per token. Order is weight: subject, appearance, clothing, pose, setting, lighting, then medium and quality. 'young woman, short white hair, black leather jacket, standing in a rain-wet alley, neon signs, night, shallow depth of field, photorealistic, sharp focus'. Push or pull one term with `(term:1.2)` or `(term:0.8)`; bare `(term)` is 1.1. Keep it near 75 tokens — CLIP encodes the rest in a later chunk where it pulls less. Match the checkpoint: one trained on booru tags wants booru tags, one merged for realism wants photographic ones, and its model page is the authority on any trigger or quality tags it expects. With a LoRA loaded: most character and style LoRAs fire on a trigger word, and without it in the prompt the LoRA loads and does close to nothing — put the trigger at the front, then describe only what the LoRA does not already carry: pose, clothing, setting, light. Describing the face a character LoRA was trained on fights it. The LoRA's model page is where the trigger word is stated; there is no way to read it off the file."
     },
     "negative_prompt": {
       "type": "string",
@@ -51,7 +51,38 @@
     "checkpoint": {
       "type": "string",
       "required": true,
-      "description": "Checkpoint model filename discovered from the local ComfyUI node or supplied by the caller"
+      "description": "Checkpoint filename on the node: SDXL itself or any finetune built on it. A finetune's model page is the authority on its prompt style, trigger or quality tags, steps, CFG and sampler — send those params to match it."
+    },
+    "lora_name": {
+      "type": "string",
+      "default": "",
+      "description": "Optional LoRA file in the node's loras folder, built for SDXL or the checkpoint's own family. Leave empty and the slot is removed from the graph entirely."
+    },
+    "lora_strength": {
+      "type": "float",
+      "default": 0.8,
+      "min": 0.0,
+      "max": 2.0,
+      "description": "Weight of the first LoRA, on both the model and the text encoder. Ignored when lora_name is empty."
+    },
+    "lora_name_2": {
+      "type": "string",
+      "default": "",
+      "description": "Second LoRA, chained after the first — for stacking a concept LoRA on top of a likeness or style one."
+    },
+    "lora_strength_2": {
+      "type": "float",
+      "default": 0.8,
+      "min": 0.0,
+      "max": 2.0,
+      "description": "Weight of the second LoRA. Ignored when lora_name_2 is empty."
+    },
+    "face_denoise": {
+      "type": "float",
+      "default": 0.0,
+      "min": 0.0,
+      "max": 1.0,
+      "description": "Face-detail pass, off at 0 (the default) and left out of the graph. Above 0, faces found by the `bbox/face_yolov8m.pt` detector are redrawn at 1024 px after the render, with the same prompt, checkpoint, LoRAs and sampler — what ADetailer does in A1111, where 0.4 is the default. Higher fixes more and drifts further from the first render. Needs ComfyUI-Impact-Pack and ComfyUI-Impact-Subpack on the node, and the detector in `models/ultralytics/bbox/`."
     }
   },
   "compatible_providers": [

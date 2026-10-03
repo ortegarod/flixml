@@ -16,7 +16,7 @@ by you instead, so it never lands in a terminal log.
 
 Usage (run from the repo root, with .env's DATABASE_URL available):
     python scripts/manage_agent_keys.py create <id> <name> [--admin] \\
-        [--workflows sdxl_lora] [--max-concurrent 1] [--key-file PATH]
+        [--workflows sdxl_base] [--max-concurrent 1] [--key-file PATH]
     python scripts/manage_agent_keys.py update <id> [--admin | --no-admin] \\
         [--workflows a,b] [--max-concurrent N]   (pass "" to clear a list)
     python scripts/manage_agent_keys.py list

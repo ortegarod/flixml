@@ -6,7 +6,7 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**17 workflows** across 5 task types.
+**16 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -14,8 +14,7 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `flux2_klein` | Text → Image | Text-to-image with FLUX.2 Klein 4B |
 | `krea2_turbo` | Text → Image | Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K |
 | `qwen_image_21` | Text → Image | Qwen-Image 2.1 makes an image from a prompt |
-| `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint |
-| `sdxl_lora` | Text → Image | Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt |
+| `sdxl_base` | Text → Image | Text-to-image with an SDXL checkpoint or any SDXL finetune, with up to two LoRAs and an optional face-detail pass |
 | `text_logo` | Text → Image | Typeset exact text as a logo/wordmark using a real TTF font (ComfyUI AddLabel node) — NOT diffusion |
 | `flux2_klein_edit` | Image → Image | Generate a new image from a reference image and a plain-English instruction |
 | `qwen_image_21_edit` | Image → Image | Qwen-Image 2.1 makes a new image from one to three reference images and a plain-English instruction, such as putting the shirt from <image2> on the person in <image1> |
@@ -115,15 +114,15 @@ Qwen-Image 2.1 makes an image from a prompt. To edit from reference images, use 
   - `clip` · _str_ · default `qwen3vl_8b_int8_convrot.safetensors` — Text encoder file on the node. The default is the int8 build; qwen3vl_8b_w4a8.safetensors (6.31 GB) is a smaller one from the same repo for nodes short on system RAM.
   - `vae` · _str_ · default `qwen_image_2.1_vae_bf16.safetensors`
 
-### `sdxl_base` — SDXL Base Image
+### `sdxl_base` — SDXL Image
 
-Text-to-image with an SDXL checkpoint. General-purpose still generation from a prompt — no character LoRA, no source image.
+Text-to-image with an SDXL checkpoint or any SDXL finetune, with up to two LoRAs and an optional face-detail pass. General-purpose still generation from a prompt — no source image.
 
 - **Output:** image
-- **Requirements:** ~8 GB VRAM
+- **Requirements:** supports LoRA, ~8 GB VRAM
 - **Providers:** local
 - **Params:**
-  - `prompt` · _string_ · **required** — Comma-separated tags and short phrases, the way SDXL's training captions were written. A sentence still parses — it does not fail — but every article and preposition spends part of the same budget, so tags buy more control per token. Order is weight: subject, appearance, clothing, pose, setting, lighting, then medium and quality. 'young woman, short white hair, black leather jacket, standing in a rain-wet alley, neon signs, night, shallow depth of field, photorealistic, sharp focus'. Push or pull one term with `(term:1.2)` or `(term:0.8)`; bare `(term)` is 1.1. Keep it near 75 tokens — CLIP encodes the rest in a later chunk where it pulls less. Match the checkpoint: one trained on booru tags wants booru tags, one merged for realism wants photographic ones, and its model page is the authority on any trigger or quality tags it expects.
+  - `prompt` · _string_ · **required** — Comma-separated tags and short phrases, the way SDXL's training captions were written. A sentence still parses — it does not fail — but every article and preposition spends part of the same budget, so tags buy more control per token. Order is weight: subject, appearance, clothing, pose, setting, lighting, then medium and quality. 'young woman, short white hair, black leather jacket, standing in a rain-wet alley, neon signs, night, shallow depth of field, photorealistic, sharp focus'. Push or pull one term with `(term:1.2)` or `(term:0.8)`; bare `(term)` is 1.1. Keep it near 75 tokens — CLIP encodes the rest in a later chunk where it pulls less. Match the checkpoint: one trained on booru tags wants booru tags, one merged for realism wants photographic ones, and its model page is the authority on any trigger or quality tags it expects. With a LoRA loaded: most character and style LoRAs fire on a trigger word, and without it in the prompt the LoRA loads and does close to nothing — put the trigger at the front, then describe only what the LoRA does not already carry: pose, clothing, setting, light. Describing the face a character LoRA was trained on fights it. The LoRA's model page is where the trigger word is stated; there is no way to read it off the file.
   - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. SDXL uses this — unlike FLUX.2, which has no negative and needs the positive to say 'sharp focus' instead. Start with the defects you actually see rather than a stock wall of tags: 'blurry, low quality, extra fingers, watermark, text'. An oversized negative eats guidance and flattens the image.
   - `width` · _integer_ · default `832`
   - `height` · _integer_ · default `1216`
@@ -132,28 +131,12 @@ Text-to-image with an SDXL checkpoint. General-purpose still generation from a p
   - `cfg` · _float_ · default `5.0`
   - `sampler` · _string_ · default `dpmpp_2m`
   - `scheduler` · _string_ · default `karras`
-  - `checkpoint` · _string_ · **required** — Checkpoint model filename discovered from the local ComfyUI node or supplied by the caller
-
-### `sdxl_lora` — SDXL + LoRA Image
-
-Text-to-image with an SDXL checkpoint plus a character/style LoRA — a consistent trained identity or style rendered from a prompt.
-
-- **Output:** image
-- **Requirements:** supports LoRA, ~8 GB VRAM
-- **Providers:** local
-- **Params:**
-  - `prompt` · _string_ · **required** — Comma-separated tags and short phrases, not a sentence — same tag syntax as sdxl_base: subject first, atmosphere last, `(term:1.2)` to weight a term, roughly 75 tokens of content before the tail stops pulling. What differs here is the LoRA. Most character and style LoRAs fire on a trigger word, and without it in the prompt the LoRA loads and does close to nothing: put the trigger at the front, then describe only what the LoRA does not already carry — pose, clothing, setting, light. Describing the face a character LoRA was trained on fights it. The LoRA's model page is where the trigger word is stated; there is no way to read it off the file.
-  - `negative_prompt` · _string_ · default `` — What to steer away from, same tag syntax. Keep it to defects you actually see — 'blurry, low quality, extra fingers, watermark'. An oversized negative eats guidance and flattens the image.
-  - `width` · _integer_ · default `832`
-  - `height` · _integer_ · default `1216`
-  - `seed` · _integer_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake an image exactly: the seed a job used is in its record.
-  - `steps` · _integer_ · default `28`
-  - `cfg` · _float_ · default `7.0`
-  - `sampler` · _string_ · default `dpmpp_2m`
-  - `scheduler` · _string_ · default `karras`
-  - `checkpoint` · _string_ · **required** — SDXL checkpoint model filename
-  - `lora_name` · _string_ · **required** — LoRA filename
-  - `lora_strength` · _float_ · default `0.8` — LoRA strength (model and clip)
+  - `checkpoint` · _string_ · **required** — Checkpoint filename on the node: SDXL itself or any finetune built on it. A finetune's model page is the authority on its prompt style, trigger or quality tags, steps, CFG and sampler — send those params to match it.
+  - `lora_name` · _string_ · default `` — Optional LoRA file in the node's loras folder, built for SDXL or the checkpoint's own family. Leave empty and the slot is removed from the graph entirely.
+  - `lora_strength` · _float_ · default `0.8` — Weight of the first LoRA, on both the model and the text encoder. Ignored when lora_name is empty.
+  - `lora_name_2` · _string_ · default `` — Second LoRA, chained after the first — for stacking a concept LoRA on top of a likeness or style one.
+  - `lora_strength_2` · _float_ · default `0.8` — Weight of the second LoRA. Ignored when lora_name_2 is empty.
+  - `face_denoise` · _float_ · default `0.0` — Face-detail pass, off at 0 (the default) and left out of the graph. Above 0, faces found by the `bbox/face_yolov8m.pt` detector are redrawn at 1024 px after the render, with the same prompt, checkpoint, LoRAs and sampler — what ADetailer does in A1111, where 0.4 is the default. Higher fixes more and drifts further from the first render. Needs ComfyUI-Impact-Pack and ComfyUI-Impact-Subpack on the node, and the detector in `models/ultralytics/bbox/`.
 
 ### `text_logo` — Text Logo / Wordmark
 

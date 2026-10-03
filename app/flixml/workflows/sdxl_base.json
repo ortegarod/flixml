@@ -5,6 +5,38 @@
       "ckpt_name": "{{checkpoint}}"
     }
   },
+  "31": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ],
+      "lora_name": "{{lora_name}}",
+      "strength_model": "{{lora_strength}}",
+      "strength_clip": "{{lora_strength}}"
+    }
+  },
+  "32": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "model": [
+        "31",
+        0
+      ],
+      "clip": [
+        "31",
+        1
+      ],
+      "lora_name": "{{lora_name_2}}",
+      "strength_model": "{{lora_strength_2}}",
+      "strength_clip": "{{lora_strength_2}}"
+    }
+  },
   "5": {
     "class_type": "EmptyLatentImage",
     "inputs": {
@@ -17,14 +49,20 @@
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "{{prompt}}",
-      "clip": ["4", 1]
+      "clip": [
+        "32",
+        1
+      ]
     }
   },
   "7": {
     "class_type": "CLIPTextEncode",
     "inputs": {
       "text": "{{negative_prompt}}",
-      "clip": ["4", 1]
+      "clip": [
+        "32",
+        1
+      ]
     }
   },
   "3": {
@@ -36,24 +74,108 @@
       "sampler_name": "{{sampler}}",
       "scheduler": "{{scheduler}}",
       "denoise": 1,
-      "model": ["4", 0],
-      "positive": ["6", 0],
-      "negative": ["7", 0],
-      "latent_image": ["5", 0]
+      "model": [
+        "32",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
     }
   },
   "8": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["3", 0],
-      "vae": ["4", 2]
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    }
+  },
+  "11": {
+    "class_type": "UltralyticsDetectorProvider",
+    "inputs": {
+      "model_name": "bbox/face_yolov8m.pt"
+    }
+  },
+  "12": {
+    "class_type": "FaceDetailer",
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "model": [
+        "32",
+        0
+      ],
+      "clip": [
+        "32",
+        1
+      ],
+      "vae": [
+        "4",
+        2
+      ],
+      "guide_size": 1024,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": "{{seed}}",
+      "steps": "{{steps}}",
+      "cfg": "{{cfg}}",
+      "sampler_name": "{{sampler}}",
+      "scheduler": "{{scheduler}}",
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "denoise": "{{face_denoise}}",
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3.0,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "bbox_detector": [
+        "11",
+        0
+      ],
+      "wildcard": "",
+      "cycle": 1
     }
   },
   "9": {
     "class_type": "SaveImage",
     "inputs": {
       "filename_prefix": "{{filename_prefix}}",
-      "images": ["8", 0]
+      "images": [
+        "12",
+        0
+      ]
     }
   }
 }

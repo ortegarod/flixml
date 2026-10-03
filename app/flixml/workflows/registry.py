@@ -216,9 +216,46 @@ class WorkflowRegistry:
         workflow = json.loads(json.dumps(template))
         self._substitute(workflow, merged)
         self._drop_empty_loras(workflow)
+        self._drop_idle_face_detailers(workflow)
         self._drop_empty_images(workflow)
 
         return workflow
+
+    @staticmethod
+    def _drop_idle_face_detailers(workflow: dict[str, Any]) -> None:
+        """Remove FaceDetailer nodes whose denoise came out 0, and the detector only they used.
+
+        A face-detail pass is optional on a workflow that offers one: `face_denoise` 0
+        means off. The node goes, whatever took its image takes the image it was given,
+        and its bbox detector goes with it unless something else reads it. Without this
+        an "off" pass would still need the custom node pack that provides it.
+        """
+        for node_id, node in list(workflow.items()):
+            if not isinstance(node, dict) or node.get("class_type") != "FaceDetailer":
+                continue
+            inputs = node.get("inputs", {})
+            denoise = inputs.get("denoise")
+            unfilled = isinstance(denoise, str) and denoise.startswith("{{") and denoise.endswith("}}")
+            if not unfilled and denoise not in (None, "", 0, 0.0):
+                continue
+
+            del workflow[node_id]
+            for other in workflow.values():
+                if not isinstance(other, dict):
+                    continue
+                for key, value in other.get("inputs", {}).items():
+                    if isinstance(value, list) and value and value[0] == node_id:
+                        other["inputs"][key] = inputs.get("image")
+
+            detector = inputs.get("bbox_detector")
+            if isinstance(detector, list) and detector:
+                still_used = any(
+                    isinstance(v, list) and v and v[0] == detector[0]
+                    for other in workflow.values() if isinstance(other, dict)
+                    for v in other.get("inputs", {}).values()
+                )
+                if not still_used:
+                    workflow.pop(detector[0], None)
 
     @staticmethod
     def _drop_empty_images(workflow: dict[str, Any]) -> None:
@@ -252,7 +289,9 @@ class WorkflowRegistry:
 
         A workflow can offer more LoRA slots than a job uses. ComfyUI has no
         "off" value for lora_name, so an unused slot is an empty string here:
-        drop the node and wire whatever it fed straight to its own model input.
+        drop the node and wire whatever it fed straight to its own inputs — its
+        MODEL output (slot 0) to its model input, and on a LoraLoader its CLIP
+        output (slot 1) to its clip input.
 
         A slot whose template variable never got a value counts as unused too.
         The older single-slot templates default `{{lora_name}}` to nothing at
@@ -270,8 +309,8 @@ class WorkflowRegistry:
             if not unfilled and name not in (None, "", "none", "None"):
                 continue
 
-            upstream = node["inputs"].get("model")
-            if not isinstance(upstream, list):
+            upstream = {0: node["inputs"].get("model"), 1: node["inputs"].get("clip")}
+            if not isinstance(upstream[0], list):
                 continue
             del workflow[node_id]
 
@@ -280,7 +319,7 @@ class WorkflowRegistry:
                     continue
                 for key, value in other.get("inputs", {}).items():
                     if isinstance(value, list) and value and value[0] == node_id:
-                        other["inputs"][key] = upstream
+                        other["inputs"][key] = upstream.get(value[1] if len(value) > 1 else 0)
 
     def _substitute(self, obj: Any, params: dict[str, Any]) -> None:
         """Recursively substitute template variables in a JSON object."""
