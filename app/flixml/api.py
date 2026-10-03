@@ -976,7 +976,7 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
     comfy_job = await client.get_optional(f"/api/jobs/{prompt_id}")
     if comfy_job is not None:
         raw = comfy_job
-        outputs = _extract_outputs_from_comfy_job(comfy_job, client)
+        outputs = _extract_outputs_from_comfy_job(comfy_job)
         status = comfy_job.get("status", "unknown")
         # ComfyUI's job API names its states pending, in_progress, completed, failed and
         # cancelled (an interrupted run). Ours are pending/running/completed/failed, and an
@@ -997,7 +997,7 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
         # at all — "unknown", never "running". Reading an empty history as still-running
         # is what let dead jobs sit in the generating lane forever.
         raw = await client.get_optional(f"/history/{prompt_id}") or {}
-        outputs = _extract_outputs(raw, client)
+        outputs = _extract_outputs(raw)
         status = "completed" if outputs else "unknown"
         if status == "unknown":
             queue = await client.get("/queue")
@@ -1021,7 +1021,7 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
     # Only report completed once _persist_outputs has actually imported them.
     import_failed = False
     if status == "completed" and outputs and stored_status != "completed":
-        if not await _persist_outputs(prompt_id, outputs):
+        if not await _persist_outputs(prompt_id, outputs, client):
             logger.warning("job %s: finished on its node but no output could be imported", prompt_id)
             status = "running"
             import_failed = True
@@ -2429,9 +2429,14 @@ async def health() -> dict[str, Any]:
 
 
 @app.get("/api/nodes")
-async def nodes() -> dict[str, Any]:
-    """Return configured GPU/ComfyUI node status for the Studio Nodes tab."""
+async def nodes(agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
+    """Return configured GPU/ComfyUI node status for the Studio Nodes tab.
+
+    Node addresses go to admins only: ComfyUI has no auth, so its address is a way
+    around every key.
+    """
     settings = get_settings()
+    show_address = agent is None or agent.is_admin
     result: dict[str, Any] = {}
     for configured in settings.gpu_nodes():
         node: dict[str, Any] = {
@@ -2445,9 +2450,11 @@ async def nodes() -> dict[str, Any]:
         if configured.comfyui:
             client = comfy(configured)
             node["provider"] = f"local-{configured.id}"  # matches LocalComfyUIProvider.provider_id
-            node["url"] = configured.comfyui.normalized_url
-            node["client_id"] = configured.comfy_client_id
-            node["runtimes"]["comfyui"] = {"url": configured.comfyui.normalized_url, "client_id": configured.comfy_client_id, "online": False}
+            node["runtimes"]["comfyui"] = {"online": False}
+            if show_address:
+                node["url"] = configured.comfyui.normalized_url
+                node["client_id"] = configured.comfy_client_id
+                node["runtimes"]["comfyui"].update(url=configured.comfyui.normalized_url, client_id=configured.comfy_client_id)
             try:
                 stats = await client.get("/system_stats")
                 node["online"] = True
@@ -2637,7 +2644,7 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
     )
 
 
-def _extract_outputs(history: dict[str, Any], client: ComfyClient) -> list[JobOutput]:
+def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
     outputs: list[JobOutput] = []
     records = history.values() if isinstance(history, dict) else []
     for record in records:
@@ -2658,28 +2665,33 @@ def _extract_outputs(history: dict[str, Any], client: ComfyClient) -> list[JobOu
                     output_type = _media_type_from_path(Path(filename))
                     subfolder = item.get("subfolder", "")
                     folder_type = item.get("type", "output")
-                    outputs.append(JobOutput(
+                    output = JobOutput(
                         type=output_type,
                         filename=filename,
                         subfolder=subfolder,
                         folder_type=folder_type,
-                        url=client.view_url_sync(filename, subfolder=subfolder, folder_type=folder_type),
-                    ))
+                        url="",
+                    )
+                    # The url is Studio's own /media path, behind the caller's key. The node's
+                    # /view url went out here until 2026-10-03: it handed every key holder the
+                    # node's address, and ComfyUI has no auth of its own.
+                    output.url = f"/media/{_relative_output_path(output)}"
+                    outputs.append(output)
     return outputs
 
 
-def _extract_outputs_from_comfy_job(job: dict[str, Any], client: ComfyClient) -> list[JobOutput]:
+def _extract_outputs_from_comfy_job(job: dict[str, Any]) -> list[JobOutput]:
     outputs = job.get("outputs", {}) if isinstance(job, dict) else {}
     if not isinstance(outputs, dict):
         return []
-    return _extract_outputs({job.get("id", "job"): {"outputs": outputs}}, client)
+    return _extract_outputs({job.get("id", "job"): {"outputs": outputs}})
 
 
 def _relative_output_path(output: JobOutput) -> str:
     return f"{output.subfolder.strip('/')}/{output.filename}" if output.subfolder else output.filename
 
 
-async def _download_output_if_missing(output: JobOutput) -> Path | None:
+async def _download_output_if_missing(output: JobOutput, node: ComfyClient) -> Path | None:
     rel = _relative_output_path(output)
     target = (_OUTPUT_DIR / rel).resolve()
     output_root = _OUTPUT_DIR.resolve()
@@ -2697,7 +2709,8 @@ async def _download_output_if_missing(output: JobOutput) -> Path | None:
     tmp = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
     try:
         async with httpx.AsyncClient(timeout=get_settings().request_timeout_seconds) as client:
-            async with client.stream("GET", output.url) as response:
+            node_url = node.view_url_sync(output.filename, subfolder=output.subfolder, folder_type=output.folder_type)
+            async with client.stream("GET", node_url) as response:
                 response.raise_for_status()
                 with tmp.open("wb") as fh:
                     async for chunk in response.aiter_bytes():
@@ -2709,7 +2722,7 @@ async def _download_output_if_missing(output: JobOutput) -> Path | None:
         return target if target.is_file() else None
 
 
-async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
+async def _persist_outputs(prompt_id: str, outputs: list[JobOutput], node: ComfyClient) -> bool:
     """Download outputs from ComfyUI and persist to local storage + DB.
 
     Returns True if at least one file was successfully imported.
@@ -2726,7 +2739,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput]) -> bool:
     character_ids = request_meta.get("character_ids") if isinstance(request_meta, dict) else None
     for output in outputs:
         rel = _relative_output_path(output)
-        target = await _download_output_if_missing(output)
+        target = await _download_output_if_missing(output, node)
         if not target or not target.is_file():
             continue
         first_filename = first_filename or rel
