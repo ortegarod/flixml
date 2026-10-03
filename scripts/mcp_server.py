@@ -463,7 +463,7 @@ TOOLS = {
             "Take a clip's final frame as an image, so the next shot starts exactly "
             "where the last one ended. Use it for a new shot — a different action, "
             "angle or place — then join the clips with stitch_clips. To make one "
-            "action run longer, raise `length` on the wan22_i2v_context workflow "
+            "action run longer, raise `length` on the wan22_i2v workflow "
             "instead. Name the clip by the prompt_id of the job that made it, or by "
             "filename."
         ),
@@ -479,7 +479,7 @@ TOOLS = {
             "chaining shots with last_frame, to hand your human a single take rather "
             "than a list of clips. Name each clip by the prompt_id of the job that "
             "made it, or by filename. To make one action run longer, raise `length` "
-            "on the wan22_i2v_context workflow instead of joining clips."
+            "on the wan22_i2v workflow instead of joining clips."
         ),
         "schema": _obj({
             "clips": {

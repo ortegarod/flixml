@@ -217,9 +217,46 @@ class WorkflowRegistry:
         self._substitute(workflow, merged)
         self._drop_empty_loras(workflow)
         self._drop_idle_face_detailers(workflow)
+        self._drop_single_window_contexts(workflow, merged.get("length"))
         self._drop_empty_images(workflow)
 
         return workflow
+
+    @staticmethod
+    def _drop_single_window_contexts(workflow: dict[str, Any], length: Any) -> None:
+        """Remove ContextWindowsManual nodes when the whole clip fits in one window.
+
+        Context windows are how a video workflow goes past the model's native
+        length: the clip is sampled in overlapping windows of `context_length`
+        latent frames. A clip that fits in one window doesn't need them, so the
+        nodes go and the sampler takes the model they were given — `length` is the
+        only switch. Lengths are compared in latent frames: Wan packs 4 real
+        frames into 1, so 81 frames is 21 latent.
+        """
+        try:
+            latent_frames = (int(length) - 1) // 4 + 1
+        except (TypeError, ValueError):
+            return
+
+        for node_id, node in list(workflow.items()):
+            if not isinstance(node, dict) or node.get("class_type") != "ContextWindowsManual":
+                continue
+            inputs = node.get("inputs", {})
+            try:
+                window = int(inputs.get("context_length"))
+            except (TypeError, ValueError):
+                continue
+            if latent_frames > window:
+                continue
+
+            upstream = inputs.get("model")
+            del workflow[node_id]
+            for other in workflow.values():
+                if not isinstance(other, dict):
+                    continue
+                for key, value in other.get("inputs", {}).items():
+                    if isinstance(value, list) and value and value[0] == node_id:
+                        other["inputs"][key] = upstream
 
     @staticmethod
     def _drop_idle_face_detailers(workflow: dict[str, Any]) -> None:
