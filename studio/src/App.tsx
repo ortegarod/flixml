@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, us
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
-import { ArrowUp, BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, Sparkles, UserCircle, Users } from "lucide-react";
+import { ArrowUp, BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, UserCircle, Users } from "lucide-react";
 import { StudioView } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
 import { AgentProfileView } from "./components/AgentProfileView";
@@ -342,12 +342,13 @@ function Shell() {
               // Already on /studio? The route effect never fires, so take it to the top by hand.
               scrollToTop();
             }}
-            className="flex items-center gap-3 min-w-0 hover:opacity-80 transition"
+            // With the rail showing, the mark sits over the rail's icon column (w-12 rail, w-9 icons)
+            // and the name over the panel's px-4 content edge. A button centres text, hence text-left.
+            className={`flex items-center min-w-0 text-left hover:opacity-80 transition ${ctx.sidebarOpen ? "-ml-3.5 gap-[22px]" : "gap-3"}`}
             title="Studio home — back to the top"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-brand-soft flex items-center justify-center shadow-lg shadow-brand/25 ring-1 ring-white/10">
-              <Sparkles className="w-4 h-4 text-black" />
-            </div>
+            {/* The mark is a mask filled with --brand, so it is the brand green on every display. */}
+            <span aria-hidden className="w-9 h-9 shrink-0 bg-brand [mask:url(/logo.png)_center/contain_no-repeat]" />
             <div className="min-w-0 hidden sm:block">
               {/* The app's name, on every page. The <h1> belongs to the page itself. */}
               <p className="font-heading text-base font-bold tracking-tight leading-none">FlixML<span className="text-brand"> Studio</span></p>
