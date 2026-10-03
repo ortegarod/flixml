@@ -636,11 +636,6 @@ function AppRoutes() {
 
   const jobsQuery = useQuery({
     queryKey: jobsKey,
-    // The jobs poll must outlast a busy GPU node: /api/jobs reconciles every job
-    // against its node's /queue + /history, which crawls while that node is mid-render.
-    // A short abort (3.5s) killed every poll during generation, so in-progress cards —
-    // especially video, whose node stays saturated the whole time — never entered the
-    // cache and never rendered. Give the poll room to complete against a busy node.
     queryFn: () => fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 20000),
     refetchInterval: 5000,
   });
@@ -708,8 +703,8 @@ function AppRoutes() {
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  // Job state arrives through the /api/jobs and /api/listing polls above, which the
-  // server-side reconciler keeps current. There is no push channel to fall out of sync.
+  // Job state arrives through the /api/jobs and /api/listing polls above: database
+  // reads, which the server keeps current from each GPU node's pushes.
   useEffect(() => {
     loadRef.current();
   }, []);

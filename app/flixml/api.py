@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 import uuid
 import wave
 from datetime import UTC, datetime
@@ -23,6 +22,7 @@ from fastapi import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_change_file, can_read_file, current_agent, generate_key, hash_key, media_viewer, owner_scope, owns, set_session_cookie
+from . import node_events
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
@@ -947,17 +947,10 @@ def comfy_node_for_provider(provider: str | None) -> ComfyNode | None:
 
 logger = logging.getLogger("flixml.reconcile")
 
-_RECONCILE_TASK: asyncio.Task | None = None
-_RECONCILE_INTERVAL_SECONDS = 3.0
-# How long a job may be unknown to its node before we call it abandoned. Covers the
-# window between our DB insert and the node registering the prompt.
-_ABANDON_AFTER_SECONDS = 600
-# Jobs whose node did not answer on the last reconcile. While a node is down nothing can
-# be known about its jobs, so they keep their last status and are reported as
-# node_unreachable. When the node answers again it settles them: a restarted ComfyUI
-# has lost its queue, has no record of the job, and the abandon check fails it.
-# prompt_id -> when its node first failed to answer, cleared when it answers again.
-_NODE_UNREACHABLE: set[str] = set()
+_TRAINING_RECORD_TASK: asyncio.Task | None = None
+# How soon a job is looked at again when its node could not be read or its finished
+# outputs could not be imported. Every other change arrives as a push from the node.
+_RECONCILE_RETRY_SECONDS = 15.0
 # Node statuses that mean the GPU is on this job right now, as opposed to holding it
 # in the queue behind another one.
 _RUNNING_STATUSES = {"running", "in_progress"}
@@ -966,8 +959,8 @@ _RUNNING_STATUSES = {"running", "in_progress"}
 async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: str | None = None) -> dict[str, Any]:
     """Bring one job's DB row in line with its ComfyUI node.
 
-    The single reconciliation path in the app: both the polling loop and
-    GET /api/jobs/{prompt_id} go through here, so a job's status can only ever be
+    The single reconciliation path in the app: both a node's pushes (`_reconcile_node`)
+    and GET /api/jobs/{prompt_id} go through here, so a job's status can only ever be
     decided in one place.
 
     `stored_status` is the status already held in our DB. A job we have recorded as
@@ -985,19 +978,32 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
         raw = comfy_job
         outputs = _extract_outputs_from_comfy_job(comfy_job, client)
         status = comfy_job.get("status", "unknown")
+        # ComfyUI's job API names its states pending, in_progress, completed, failed and
+        # cancelled (an interrupted run). Ours are pending/running/completed/failed, and an
+        # unmapped name is never written: a running job read as pending, and one stopped
+        # from ComfyUI's own queue sat pending forever.
+        if status == "in_progress":
+            status = "running"
+        elif status == "cancelled":
+            status, error = "failed", CANCELLED_ERROR
         execution = comfy_job.get("execution_status") or {}
         if isinstance(execution, dict) and execution.get("status_str") == "error":
             status = "failed"
             error = "ComfyUI reported execution error"
     else:
         # Either the node has no record of this job, or it is an older build with no
-        # /api/jobs/{id} route. /history answers both: it holds the job once it has
-        # finished. Empty means the node cannot account for the job at all — "unknown",
-        # never "running". Reading an empty history as still-running is what let dead
-        # jobs sit in the generating lane forever.
+        # /api/jobs/{id} route. /history holds the job once it has finished and /queue
+        # while it waits or runs. In neither means the node cannot account for the job
+        # at all — "unknown", never "running". Reading an empty history as still-running
+        # is what let dead jobs sit in the generating lane forever.
         raw = await client.get_optional(f"/history/{prompt_id}") or {}
         outputs = _extract_outputs(raw, client)
         status = "completed" if outputs else "unknown"
+        if status == "unknown":
+            queue = await client.get("/queue")
+            for key, queued_status in (("queue_running", "running"), ("queue_pending", "pending")):
+                if any(isinstance(item, list) and len(item) > 1 and item[1] == prompt_id for item in queue.get(key) or []):
+                    status = queued_status
 
     node_started, node_finished = _run_times(comfy_job, raw.get(prompt_id) if comfy_job is None else None)
     if node_started is not None:
@@ -1005,16 +1011,20 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
     elif status in _RUNNING_STATUSES:
         # A node reports execution_start_time only once the job has finished, so a job
         # in flight has no start time at all and nothing can tell how long it has been
-        # on the GPU. Stamp the first cycle that sees it running — within the reconcile
-        # interval of the truth, and replaced by the node's exact figure when it lands.
+        # on the GPU. Stamp the first reconcile that sees it running — the node's push
+        # when it takes the job — and replace it with the node's exact figure when it lands.
         await update_job_run_times(prompt_id, datetime.now(UTC), node_finished)
     elif node_finished is not None:
         await update_job_run_times(prompt_id, None, node_finished)
 
     # ComfyUI saying "completed" means generation finished, not that we hold the files.
     # Only report completed once _persist_outputs has actually imported them.
+    import_failed = False
     if status == "completed" and outputs and stored_status != "completed":
-        status = "completed" if await _persist_outputs(prompt_id, outputs) else "running"
+        if not await _persist_outputs(prompt_id, outputs):
+            logger.warning("job %s: finished on its node but no output could be imported", prompt_id)
+            status = "running"
+            import_failed = True
 
     # A cancelled job comes back from its node as an execution error, or as unknown when
     # it was dequeued before it ran; keep the failed/"Cancelled" it was stored with.
@@ -1022,7 +1032,7 @@ async def _reconcile_job(prompt_id: str, provider: str | None, stored_status: st
         return {"status": "failed", "outputs": [], "raw": raw}
     if status in {"pending", "running", "completed", "failed"}:
         await update_job_status(prompt_id, status, error=error)
-    return {"status": status, "outputs": outputs if status == "completed" else [], "raw": raw}
+    return {"status": status, "outputs": outputs if status == "completed" else [], "raw": raw, "import_failed": import_failed}
 
 
 def _ms_to_utc(value: Any) -> datetime | None:
@@ -1040,58 +1050,68 @@ def _run_times(comfy_job: dict[str, Any] | None, history_entry: Any) -> tuple[da
     return _ms_to_utc(stamps.get("execution_start")), _ms_to_utc(finished)
 
 
-def _abandoned(job: dict[str, Any]) -> bool:
-    """True if a job the node has no record of is old enough to write off."""
-    created = job.get("created_at")
-    if not isinstance(created, datetime):
+def _job_node_id(provider: str | None) -> str:
+    """The node a job runs on: its provider's, or the default node `comfy()` falls back to."""
+    return (comfy_node_for_provider(provider) or get_settings().comfy_node_for_role("default")).id
+
+
+def _job_node_unreachable(job: dict[str, Any]) -> bool:
+    """True for an unfinished job whose node Studio holds no socket to."""
+    if job.get("status") in {"completed", "failed"}:
         return False
-    age = (datetime.now(UTC) - created).total_seconds()
-    return age > _ABANDON_AFTER_SECONDS
+    return node_events.node_unreachable(_job_node_id(job.get("provider")))
 
 
-async def _reconcile_loop() -> None:
-    """Poll every unfinished job against its node until it reaches a terminal state.
+async def _reconcile_node(node: ComfyNode) -> float | None:
+    """Settle every unfinished job on one node. Runs each time the node pushes a queue change.
 
-    This is the only thing that imports generated files. It replaced a per-node
-    WebSocket bridge: ComfyUI evicts an existing socket when a new client claims the
-    same clientId but leaves the TCP connection open, so the bridge stayed connected,
-    silently received nothing, and jobs sat at "pending" forever with no error logged
-    anywhere. A poll has no equivalent failure mode — a bad cycle is simply retried on
-    the next one, and anything that goes wrong is logged.
+    This is the only thing that imports generated files. Returns how many seconds until
+    these jobs need another look with no push to prompt it — a job that could not be read
+    or imported is retried shortly — or None when the node's next push is enough.
+
+    A job the node has no record of is failed at once. Its row was saved only after the
+    node accepted the prompt, so the node knew it; not knowing it now means the node lost
+    it, which is what a restarted ComfyUI does to its whole queue.
     """
-    while True:
+    if node_events.node_unreachable(node.id):
+        # Nothing can be read while the socket is down; reconnecting wakes this again.
+        return None
+    again: float | None = None
+
+    def look_again_in(seconds: float) -> None:
+        nonlocal again
+        again = seconds if again is None else min(again, seconds)
+
+    for job in await list_active_jobs():
+        prompt_id = job.get("prompt_id")
+        if not isinstance(prompt_id, str) or _job_node_id(job.get("provider")) != node.id:
+            continue
         try:
-            for job in await list_active_jobs():
-                prompt_id = job.get("prompt_id")
-                if not isinstance(prompt_id, str):
-                    continue
-                try:
-                    result = await _reconcile_job(prompt_id, job.get("provider"), job.get("status"))
-                except httpx.TransportError as exc:
-                    if prompt_id not in _NODE_UNREACHABLE:
-                        logger.warning("job %s: node %s unreachable (%s)", prompt_id, job.get("provider"), type(exc).__name__)
-                    _NODE_UNREACHABLE.add(prompt_id)
-                    continue
-                except Exception:
-                    logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
-                    continue
-                _NODE_UNREACHABLE.discard(prompt_id)
-                if result["status"] == "unknown" and _abandoned(job):
-                    logger.warning("job %s abandoned: node has no record of it", prompt_id)
-                    await update_job_status(
-                        prompt_id, "failed", error="Abandoned — the GPU node has no record of this job."
-                    )
-        except asyncio.CancelledError:
-            raise
+            result = await _reconcile_job(prompt_id, job.get("provider"), job.get("status"))
         except Exception:
-            logger.warning("reconcile cycle failed", exc_info=True)
+            logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
+            look_again_in(_RECONCILE_RETRY_SECONDS)
+            continue
+        if result.get("import_failed"):
+            look_again_in(_RECONCILE_RETRY_SECONDS)
+        if result["status"] == "unknown":
+            logger.warning("job %s abandoned: node has no record of it", prompt_id)
+            await update_job_status(
+                prompt_id, "failed", error="Abandoned — the GPU node has no record of this job."
+            )
+    return again
+
+
+async def _training_record_loop() -> None:
+    """Copy each finished training run's record off the trainer, every _TRAINING_RECORD_EVERY_SECONDS."""
+    while True:
         try:
             await _record_finished_training_runs()
         except asyncio.CancelledError:
             raise
         except Exception:
             _training_logger.warning("training record cycle failed", exc_info=True)
-        await asyncio.sleep(_RECONCILE_INTERVAL_SECONDS)
+        await asyncio.sleep(_TRAINING_RECORD_EVERY_SECONDS)
 
 
 def _workflow_entry(
@@ -1181,7 +1201,7 @@ async def list_registered_providers() -> list[dict]:
 
 @app.on_event("startup")
 async def start_reconciler() -> None:
-    global _RECONCILE_TASK
+    global _TRAINING_RECORD_TASK
     await init_db()
     init_default_providers()  # Register GPU providers
     init_registry(Path(__file__).parent / "workflows")  # Load workflow metadata
@@ -1190,18 +1210,20 @@ async def start_reconciler() -> None:
     # port closed for ~2.5 minutes on a 1500-file gallery, so a restart looked
     # like an outage.
     asyncio.create_task(_sync_media_catalog())
-    if _RECONCILE_TASK is None or _RECONCILE_TASK.done():
-        _RECONCILE_TASK = asyncio.create_task(_reconcile_loop())
+    node_events.start(get_settings().comfy_nodes(), _reconcile_node)
+    if _TRAINING_RECORD_TASK is None or _TRAINING_RECORD_TASK.done():
+        _TRAINING_RECORD_TASK = asyncio.create_task(_training_record_loop())
 
 
 @app.on_event("shutdown")
 async def stop_reconciler() -> None:
-    global _RECONCILE_TASK
-    if _RECONCILE_TASK:
-        _RECONCILE_TASK.cancel()
+    global _TRAINING_RECORD_TASK
+    await node_events.stop()
+    if _TRAINING_RECORD_TASK:
+        _TRAINING_RECORD_TASK.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await _RECONCILE_TASK
-        _RECONCILE_TASK = None
+            await _TRAINING_RECORD_TASK
+        _TRAINING_RECORD_TASK = None
     await close_db()
 
 
@@ -2933,7 +2955,7 @@ async def video_stitch(body: StitchRequest, agent: Agent | None = Depends(curren
 async def jobs(include_completed: bool = True, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Return jobs from durable Postgres state — a pure DB read, no live ComfyUI calls.
 
-    `_reconcile_loop` keeps these rows current in the background. This endpoint is
+    `_reconcile_node` keeps these rows current as each node pushes. This endpoint is
     polled every few seconds by the gallery to render the "generating" lane, so it must
     never call into a ComfyUI node itself: a saturated node (mid model-load) stops
     answering HTTP, and per-job round-trips would then hang the whole endpoint until it
@@ -2944,7 +2966,7 @@ async def jobs(include_completed: bool = True, agent: Agent | None = Depends(cur
     if not include_completed:
         db_jobs = [job for job in db_jobs if job.get("status") not in {"completed", "failed"}]
     for job in db_jobs:
-        job["node_unreachable"] = job.get("prompt_id") in _NODE_UNREACHABLE
+        job["node_unreachable"] = _job_node_unreachable(job)
 
     jobs_list = sorted(
         db_jobs,
@@ -3033,7 +3055,6 @@ async def cancel_job(prompt_id: str, agent: Agent | None = Depends(current_agent
         # has lost its queue anyway. The job is closed here.
         how = "node unreachable, closed in Studio only"
     await update_job_status(prompt_id, "failed", error=CANCELLED_ERROR)
-    _NODE_UNREACHABLE.discard(prompt_id)
     logger.info("job %s cancelled (%s)", prompt_id, how)
     return {"ok": True, "prompt_id": prompt_id, "status": "failed", "error": CANCELLED_ERROR}
 
@@ -3245,7 +3266,6 @@ def _aitk_settings(job_config: dict[str, Any]) -> dict[str, Any]:
 
 
 _TRAINING_RECORD_EVERY_SECONDS = 30.0
-_training_record_checked_at = 0.0
 
 
 def _downsample(points: list[dict[str, float]], keep: int = 200) -> list[dict[str, float]]:
@@ -3262,12 +3282,6 @@ async def _record_finished_training_runs() -> None:
     This copies them into the run's row (`metadata.record`) the first time the trainer
     reports it completed, errored or stopped, whether or not anyone has the page open.
     """
-    global _training_record_checked_at
-    now = time.monotonic()
-    if now - _training_record_checked_at < _TRAINING_RECORD_EVERY_SECONDS:
-        return
-    _training_record_checked_at = now
-
     for job in await list_training_jobs():
         # Keyed on the record, not the status: the page's status poll can mark a run
         # completed before this loop gets to it.

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .. import db
+from .. import db, node_events
 from ..config import get_settings
 from ..providers import (
     GPUProvider,
@@ -372,6 +372,9 @@ class GenerationService:
             workflow_json=workflow_json,
             metadata=metadata,
         )
+        # The node accepted the prompt before this row existed, so its pushes may
+        # already have come and gone.
+        node_events.wake_all()
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
         logger.info(
