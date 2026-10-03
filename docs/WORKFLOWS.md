@@ -55,7 +55,7 @@ Text-to-image with FLUX.2 Klein 4B. High-fidelity stills from a prompt, with two
 Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K. Krea 2 Community License: https://www.krea.ai/krea-2-licensing
 
 - **Output:** image
-- **Requirements:** ~12 GB VRAM, loads ~18.6 GB of model files (VRAM + system RAM)
+- **Requirements:** supports LoRA, ~12 GB VRAM, loads ~18.6 GB of model files (VRAM + system RAM)
 - **Providers:** local
 - **Params:**
   - `prompt` · _str_ · **required** — Natural language, not a tag list: Krea recommends natural-language prompts and says long, detailed ones give the best results. Name the medium (a photograph, a digital painting) along with the subject, framing, setting and light. Put any text to render in quotes.
@@ -65,6 +65,10 @@ Krea 2 Turbo makes an image from a prompt in 8 steps, 1K to 2K. Krea 2 Community
   - `steps` · _int_ · default `8` — Turbo is distilled for 8 steps, the number Krea and ComfyUI both run.
   - `sampler` · _str_ · default `euler`
   - `scheduler` · _str_ · default `simple`
+  - `lora_name` · _str_ · default `` — Optional LoRA file in the node's loras folder. Leave empty and the slot is removed from the graph entirely. Use a LoRA made for Krea 2: its authors train on Krea 2 Raw and run on Turbo.
+  - `lora_strength` · _float_ · default `1.0` — Weight of the first LoRA. The right range is the LoRA author's: some Krea 2 LoRAs want 0.01, sliders run negative, others ask for 3 to 5. Ignored when lora_name is empty.
+  - `lora_name_2` · _str_ · default `` — Second LoRA, chained after the first, for stacking one LoRA on another. Same rules as lora_name.
+  - `lora_strength_2` · _float_ · default `1.0` — Weight of the second LoRA, from its author. Ignored when lora_name_2 is empty.
   - `unet` · _str_ · default `krea2_turbo_fp8_scaled.safetensors` — Diffusion model file on the node. ComfyUI recommends the fp8 build for most users.
   - `clip` · _str_ · default `qwen3vl_4b_fp8_scaled.safetensors`
   - `vae` · _str_ · default `qwen_image_vae.safetensors`

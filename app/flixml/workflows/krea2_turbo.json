@@ -6,6 +6,28 @@
       "weight_dtype": "default"
     }
   },
+  "51": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "lora_name": "{{lora_name}}",
+      "strength_model": "{{lora_strength}}"
+    }
+  },
+  "52": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "51",
+        0
+      ],
+      "lora_name": "{{lora_name_2}}",
+      "strength_model": "{{lora_strength_2}}"
+    }
+  },
   "2": {
     "class_type": "CLIPLoader",
     "inputs": {
@@ -51,7 +73,7 @@
     "class_type": "KSampler",
     "inputs": {
       "model": [
-        "1",
+        "52",
         0
       ],
       "positive": [
