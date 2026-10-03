@@ -27,9 +27,13 @@ function ActiveJob({ job, workflows, now }: { job: JobItem; workflows: WorkflowM
             <StatusIcon status={rendering ? "running" : job.status} />
             {job.workflow ?? job.job_type ?? "job"}
             <span className="font-mono text-xs text-gray-500">{job.provider}</span>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${rendering ? "bg-brand-faint text-brand" : "bg-gray-800 text-gray-400"}`}>
-              {rendering ? "Rendering" : "Queued"}
-            </span>
+            {job.node_unreachable ? (
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-300">Node unreachable</span>
+            ) : (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${rendering ? "bg-brand-faint text-brand" : "bg-gray-800 text-gray-400"}`}>
+                {rendering ? "Rendering" : "Queued"}
+              </span>
+            )}
           </p>
           {job.prompt && <p className="mt-1 line-clamp-2 text-sm text-gray-400">{job.prompt}</p>}
         </div>

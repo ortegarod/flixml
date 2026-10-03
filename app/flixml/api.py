@@ -698,9 +698,10 @@ class ImageGenerateRequest(BaseModel):
         description="Trained LoRA checkpoint filename, path under the LoRA output dir, or 'latest'",
         json_schema_extra={"examples": ["latest"]},
     )
-    prompt: str = Field(
+    prompt: str | None = Field(
+        default=None,
         min_length=1,
-        description="Positive prompt. Character triggers are auto-injected if missing.",
+        description="Positive prompt, for every workflow whose params mark `prompt` required. Character triggers are auto-injected if missing.",
         json_schema_extra={"examples": ["portrait of a woman, natural window light, sharp focus"]},
     )
     negative: str | None = Field(default=None, json_schema_extra={"examples": ["blurry, low quality, watermark"]})
@@ -787,6 +788,7 @@ class JobStatusResponse(BaseModel):
     outputs_count: int | None = None
     outputs: list[JobOutput] = []
     raw: dict[str, Any] | None = None
+    node_unreachable: bool = Field(default=False, description="The job's node didn't answer; status is the last one known")
 
     workflow: str | None = None
     provider: str | None = None
@@ -950,14 +952,12 @@ _RECONCILE_INTERVAL_SECONDS = 3.0
 # How long a job may be unknown to its node before we call it abandoned. Covers the
 # window between our DB insert and the node registering the prompt.
 _ABANDON_AFTER_SECONDS = 600
-# How long a job's node may stay unreachable before the job is written off. A stopped
-# or restarted ComfyUI loses its whole queue, so its jobs are gone; this only rides out
-# a network blip. Before this, an offline node raised on every poll, the job never
-# reached the abandon check, and it showed "pending" forever (2026-10-02: a pose edit
-# sat 30 minutes after the pc's ComfyUI was stopped for training).
-_NODE_OFFLINE_FAIL_AFTER_SECONDS = 300
+# Jobs whose node did not answer on the last reconcile. While a node is down nothing can
+# be known about its jobs, so they keep their last status and are reported as
+# node_unreachable. When the node answers again it settles them: a restarted ComfyUI
+# has lost its queue, has no record of the job, and the abandon check fails it.
 # prompt_id -> when its node first failed to answer, cleared when it answers again.
-_NODE_UNREACHABLE_SINCE: dict[str, float] = {}
+_NODE_UNREACHABLE: set[str] = set()
 # Node statuses that mean the GPU is on this job right now, as opposed to holding it
 # in the queue behind another one.
 _RUNNING_STATUSES = {"running", "in_progress"}
@@ -1068,21 +1068,14 @@ async def _reconcile_loop() -> None:
                 try:
                     result = await _reconcile_job(prompt_id, job.get("provider"), job.get("status"))
                 except httpx.TransportError as exc:
-                    since = _NODE_UNREACHABLE_SINCE.setdefault(prompt_id, time.monotonic())
-                    offline_for = time.monotonic() - since
-                    if offline_for > _NODE_OFFLINE_FAIL_AFTER_SECONDS:
-                        logger.warning("job %s lost: node %s unreachable for %ds", prompt_id, job.get("provider"), offline_for)
-                        await update_job_status(
-                            prompt_id, "failed", error="Lost — the GPU node went offline while this job was on it."
-                        )
-                        _NODE_UNREACHABLE_SINCE.pop(prompt_id, None)
-                    else:
-                        logger.info("job %s: node %s unreachable (%s), %ds so far", prompt_id, job.get("provider"), type(exc).__name__, offline_for)
+                    if prompt_id not in _NODE_UNREACHABLE:
+                        logger.warning("job %s: node %s unreachable (%s)", prompt_id, job.get("provider"), type(exc).__name__)
+                    _NODE_UNREACHABLE.add(prompt_id)
                     continue
                 except Exception:
                     logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
                     continue
-                _NODE_UNREACHABLE_SINCE.pop(prompt_id, None)
+                _NODE_UNREACHABLE.discard(prompt_id)
                 if result["status"] == "unknown" and _abandoned(job):
                     logger.warning("job %s abandoned: node has no record of it", prompt_id)
                     await update_job_status(
@@ -1313,7 +1306,9 @@ async def _resolve_characters(character: str | None, characters: list[CharacterB
     return resolved
 
 
-def _prompt_with_character_triggers(prompt: str, records: list[dict[str, Any]]) -> str:
+def _prompt_with_character_triggers(prompt: str | None, records: list[dict[str, Any]]) -> str | None:
+    if prompt is None:
+        return None
     triggers = [record.get("trigger") for record in records if record.get("trigger")]
     missing = [trigger for trigger in triggers if trigger.lower() not in prompt.lower()]
     if not missing:
@@ -2948,6 +2943,8 @@ async def jobs(include_completed: bool = True, agent: Agent | None = Depends(cur
 
     if not include_completed:
         db_jobs = [job for job in db_jobs if job.get("status") not in {"completed", "failed"}]
+    for job in db_jobs:
+        job["node_unreachable"] = job.get("prompt_id") in _NODE_UNREACHABLE
 
     jobs_list = sorted(
         db_jobs,
@@ -2960,17 +2957,19 @@ async def jobs(include_completed: bool = True, agent: Agent | None = Depends(cur
 async def job(prompt_id: str) -> JobStatusResponse:
     """Get status, outputs and provenance for a single job, reconciled live against its node.
 
-    A job whose node stays unreachable for 5 minutes is marked `failed`: a stopped or
-    restarted ComfyUI loses its queue. Failed jobs leave the gallery.
+    While its node doesn't answer, a job keeps its last status with `node_unreachable`
+    true. When the node answers again and has no record of the job (a restarted ComfyUI
+    loses its queue), the job is marked `failed`.
     """
     record = await get_job(prompt_id) or {}
     provider = record.get("provider")  # _job_row flattens metadata keys to top level
+    unreachable = False
     try:
         result = await _reconcile_job(prompt_id, provider, record.get("status"))
     except httpx.TransportError:
-        # Node offline: answer with what we hold rather than a 500. The reconcile loop
-        # fails the job once the node has been gone long enough.
+        # Node offline: answer with what we hold rather than a 500.
         result = {"status": record.get("status") or "unknown", "outputs": [], "raw": {}}
+        unreachable = True
     status = result["status"]
     return JobStatusResponse(
         ok=True,
@@ -2997,6 +2996,7 @@ async def job(prompt_id: str) -> JobStatusResponse:
         error=record.get("error"),
         started_at=record.get("started_at"),
         finished_at=record.get("finished_at"),
+        node_unreachable=unreachable,
     )
 
 
@@ -3010,6 +3010,7 @@ async def cancel_job(prompt_id: str, agent: Agent | None = Depends(current_agent
     A queued job is deleted from the node's queue. A running one is interrupted only
     when the node reports it as the job on the GPU, since an untargeted /interrupt stops
     whatever is running, and older ComfyUI builds ignore the prompt_id it is sent with.
+    If the node doesn't answer, the job is closed in Studio only.
     """
     record = await get_job(prompt_id)
     if not record or not owns(agent, record):
@@ -3018,14 +3019,22 @@ async def cancel_job(prompt_id: str, agent: Agent | None = Depends(current_agent
         raise HTTPException(status_code=409, detail=f"Job '{prompt_id}' already {record['status']}")
 
     client = comfy(comfy_node_for_provider(record.get("provider")))
-    queue = await client.get("/queue")
-    running = {item[1] for item in queue.get("queue_running", [])}
-    if prompt_id in running:
-        await client.post("/interrupt", {"prompt_id": prompt_id})
-    else:
-        await client.post("/queue", {"delete": [prompt_id]})
+    try:
+        queue = await client.get("/queue")
+        running = {item[1] for item in queue.get("queue_running", [])}
+        if prompt_id in running:
+            await client.post("/interrupt", {"prompt_id": prompt_id})
+            how = "interrupted"
+        else:
+            await client.post("/queue", {"delete": [prompt_id]})
+            how = "dequeued"
+    except httpx.TransportError:
+        # The node is down: there is nothing to stop on it now, and a restarted ComfyUI
+        # has lost its queue anyway. The job is closed here.
+        how = "node unreachable, closed in Studio only"
     await update_job_status(prompt_id, "failed", error=CANCELLED_ERROR)
-    logger.info("job %s cancelled (%s)", prompt_id, "interrupted" if prompt_id in running else "dequeued")
+    _NODE_UNREACHABLE.discard(prompt_id)
+    logger.info("job %s cancelled (%s)", prompt_id, how)
     return {"ok": True, "prompt_id": prompt_id, "status": "failed", "error": CANCELLED_ERROR}
 
 

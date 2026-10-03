@@ -125,6 +125,8 @@ export interface JobItem {
   // Agent whose API key submitted the job.
   owner_id?: string | null;
   queue_position?: number | null;
+  // The node didn't answer on the last check; status is the last one known.
+  node_unreachable?: boolean;
   current_node?: string | null;
   step_value?: number;
   step_max?: number;

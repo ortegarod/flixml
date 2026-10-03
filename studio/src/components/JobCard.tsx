@@ -40,8 +40,8 @@ export function JobCard({ job }: JobCardProps) {
       <div className={`relative flex items-center justify-between gap-2 text-xs font-medium uppercase tracking-wide ${isFailed ? "text-red-400" : "text-amber-400"}`}>
         <span className="flex items-center gap-2">
           {isRunning && <span className="inline-block w-2 h-2 rounded-full bg-brand animate-pulse" />}
-          {statusLabel(job.status)}
-          {job.queue_position ? ` · Queue ${job.queue_position}` : ""}
+          {job.node_unreachable ? "Node unreachable" : statusLabel(job.status)}
+          {job.queue_position && !job.node_unreachable ? ` · Queue ${job.queue_position}` : ""}
         </span>
         {progress !== null && !isFailed && <span className="tabular-nums">{progress}%</span>}
       </div>

@@ -83,7 +83,7 @@ class GenerationService:
     async def generate(
         self,
         workflow: str,
-        prompt: str,
+        prompt: str | None,
         provider: str,
         # Common params (all workflows support these)
         width: int | None = None,
