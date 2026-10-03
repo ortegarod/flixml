@@ -1086,8 +1086,13 @@ async def _reconcile_node(node: ComfyNode) -> float | None:
         prompt_id = job.get("prompt_id")
         if not isinstance(prompt_id, str) or _job_node_id(job.get("provider")) != node.id:
             continue
+        # Read the row again: a cancel can land while earlier jobs in this pass are
+        # being read, and the status listed at the top would then overwrite it.
+        current = await get_job(prompt_id) or {}
+        if current.get("status") in {"completed", "failed"}:
+            continue
         try:
-            result = await _reconcile_job(prompt_id, job.get("provider"), job.get("status"))
+            result = await _reconcile_job(prompt_id, job.get("provider"), current.get("status"))
         except Exception:
             logger.warning("reconcile failed for job %s", prompt_id, exc_info=True)
             look_again_in(_RECONCILE_RETRY_SECONDS)
@@ -3735,13 +3740,9 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
     # workflow. Injected without one it is just a given name at the front of the
     # prompt, where it carries the most weight — the base model reads it as an
     # ordinary word and renders whoever it thinks that name looks like, fighting
-    # the look the prompt describes.
+    # the look the prompt describes. The triggers are added below, once the caller's
+    # own `workflow_params.loras` (which replaces this list) is applied.
     loras = _character_loras(character_records, body.workflow, bindings)
-    triggered_ids = {lora.get("character_id") for lora in loras}
-    prompt = _prompt_with_character_triggers(
-        prompt,
-        [record for record in character_records if record.get("id") in triggered_ids],
-    )
 
     checkpoint_name: str | None = None
     checkpoint_lora_name: str | None = None
@@ -3794,6 +3795,17 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         workflow_params[key] = await _ensure_comfy_input_image(reference, body.provider)
     if body.workflow_params is not None:
         workflow_params.update(body.workflow_params)
+
+    # A character's trigger goes in only when its LoRA is in the list that actually
+    # loads. A caller who sends `loras: []` turns the LoRA off, and the trigger with it.
+    loading = {l.get("name") for l in workflow_params.get("loras") or [] if isinstance(l, dict)}
+    prompt = _prompt_with_character_triggers(
+        prompt,
+        [
+            record for record in character_records
+            if any(lora.get("workflow") == body.workflow and lora.get("name") in loading for lora in record.get("loras") or [])
+        ],
+    )
 
     try:
         result = await service.generate(
