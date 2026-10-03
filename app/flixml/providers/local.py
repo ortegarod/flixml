@@ -181,7 +181,9 @@ class LocalComfyUIProvider(GPUProvider):
                     "error": str(e),
                 },
             )
-            raise ProviderUnavailableError(f"Cannot connect to ComfyUI at {self.base_url}: {e}")
+            # The address stays in the log: this message reaches the caller, and a node's
+            # address is a way around every key.
+            raise ProviderUnavailableError(f"Cannot connect to ComfyUI on {self.provider_id}")
         except httpx.HTTPStatusError as e:
             logger.error(
                 "comfy api error",

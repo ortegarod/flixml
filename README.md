@@ -111,6 +111,8 @@ A fresh install requires no key, so anyone who can reach the API or the UI has f
 3. Reload Studio and paste your key into the sign-in prompt. The browser keeps it in an HttpOnly cookie.
 4. Create a key for each agent or script under **Settings → API keys**. They send it as `Authorization: Bearer <key>`.
 
+Keys protect Studio, not your ComfyUI nodes. ComfyUI has no authentication of its own: its [security policy](https://github.com/Comfy-Org/ComfyUI/blob/master/SECURITY.md) treats anyone who can reach its URL as trusted, and leaves securing a node exposed to the network to whoever exposed it. Studio doesn't show a node's address to a non-admin key, but anyone who reaches a node directly gets around every key. Keep your nodes off the public internet: a private network such as [Tailscale](https://tailscale.com) does that, so only your own devices can reach them. To close it fully, let only the Studio host reach each node's ComfyUI port, with a firewall or Tailscale's [access rules](https://tailscale.com/docs/features/access-control/acls).
+
 | Variable | Description |
 |---|---|
 | `FLIXML_API_URL` | URL the Studio UI uses to reach the backend |
