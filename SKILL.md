@@ -76,7 +76,7 @@ Binding a character doesn't change the workflow's settings. Its `trigger` is inj
 curl -s -H "$AUTH" "$API/api/listing?view=summary"
 ```
 
-What your key made, plus anything of the characters you own, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files, `sort=match` for the closest character match first. Without `view=summary` each item carries every setting it was made with.
+What your key made, plus anything of the characters you own, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files, `sort=match` for the closest character match first, `sort=match_asc` for the furthest first. Without `view=summary` each item carries every setting it was made with.
 
 An image of one character carries `match`: `score` is how closely its face matches the rest of that character's gallery (cosine similarity, higher is closer) and `face_px` the face's width; under 150 px the score is less reliable. `match` is null for videos, images with no single character or no face, and on installs without character match.
 

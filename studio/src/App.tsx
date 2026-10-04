@@ -94,7 +94,6 @@ interface AppContextType {
   checkpoints: LoraCheckpoint[];
   trainingJobs: any[];
   deleteItem: (item: MediaItem) => Promise<void>;
-  load: () => Promise<void>;
   projectData: { project: Project; scenes: Scene[]; shots: Shot[] } | null;
   selectedSceneId: string | null;
   selectedShotId: string | null;
@@ -501,7 +500,6 @@ function StudioRoute() {
       onSortChange={ctx.setGallerySort}
       onBulkDelete={ctx.bulkDeleteItems}
       onBulkUpdateMetadata={ctx.bulkUpdateMediaMetadata}
-      onImported={ctx.load}
     />
   );
 }
@@ -625,7 +623,7 @@ function AppRoutes() {
       const trimmedTag = galleryTag.trim();
       if (trimmedTag) params.set("tag", trimmedTag);
       if (galleryTrainingDatasetOnly) params.set("training_dataset", "true");
-      if (gallerySort === "match") params.set("sort", "match");
+      if (gallerySort !== "newest") params.set("sort", gallerySort);
       return fetchJson<ListingPage>(`/api/listing?${params.toString()}`, 8000);
     },
     getNextPageParam: (lastPage) => {
@@ -936,7 +934,6 @@ function AppRoutes() {
     checkpoints,
     trainingJobs,
     deleteItem,
-    load,
     projectData,
     selectedSceneId,
     selectedShotId,

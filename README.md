@@ -176,7 +176,7 @@ install doesn't require keys.
 
 ## Character Match
 
-Optional. Every image bound to one character gets a score for how closely its face matches the rest of that character's gallery, shown on the image's card. **Filters → Sort → Best match** puts the closest first, and `GET /api/listing?sort=match` does the same through the API. The reference is the character's own gallery, so deleting the images that miss is what keeps it accurate. Studio scores in the background on the API host's CPU (one thread, under a second per image), and existing images are scored on first start.
+Optional. Every image bound to one character gets a score for how closely its face matches the rest of that character's gallery, shown on the image's card. **Sort → Best match** puts the closest first and **Sort → Lowest match** the furthest, which is where the misses collect; `GET /api/listing?sort=match` and `?sort=match_asc` do the same through the API. The reference is the character's own gallery, so deleting the images that miss is what keeps it accurate. Studio scores in the background on the API host's CPU (one thread, under a second per image), and existing images are scored on first start.
 
 It needs two things Studio doesn't install for you:
 

@@ -1293,13 +1293,16 @@ async def list_media(
     viewer: tuple[str, list[str]] | None = None,
     sort: str | None = None,
 ) -> list[dict[str, Any]]:
-    """`sort="match"` puts the closest character matches first; unscored files go last."""
+    """`sort="match"` puts the closest character matches first, `"match_asc"` the furthest;
+    unscored files go last in both."""
     where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id, viewer=viewer)
     limit_param = f"${len(params) + 1}"
     offset_param = f"${len(params) + 2}"
     order = "COALESCE(modified, created_at) DESC, filename DESC"
     if sort == "match":
         order = "match_score DESC NULLS LAST, " + order
+    elif sort == "match_asc":
+        order = "match_score ASC NULLS LAST, " + order
     # Submit and run times live on the job that produced the file. Scalar subqueries keep
     # the shared WHERE clause's unqualified column names pointing at media.
     sql = f"""

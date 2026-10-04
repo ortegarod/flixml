@@ -4186,7 +4186,8 @@ async def listing(
     character's gallery: `score` is cosine similarity (higher is closer) and `face_px` the
     width of the face it read; faces under 150 px score less reliably. It is null for
     videos, images with no single character or no face, and on installs without the
-    optional face packages. Pass `?sort=match` for the closest matches first.
+    optional face packages. Pass `?sort=match` for the closest matches first, or
+    `?sort=match_asc` for the furthest first; unscored files come last either way.
     """
     type_filter: str | None = None
     if type in {"image", "video"}:
@@ -4217,7 +4218,7 @@ async def listing(
         training_dataset=training_only if training_dataset.strip() else None,
         owner_id=owner_id,
         viewer=viewer,
-        sort="match" if sort == "match" else None,
+        sort=sort if sort in {"match", "match_asc"} else None,
     )
 
     items = []

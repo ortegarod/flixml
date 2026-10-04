@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
-import { ArrowRight, Check, Film, Image, LayoutGrid, Search, SlidersHorizontal, Table2, Upload, Video, X } from "lucide-react";
+import { ArrowDownUp, ArrowRight, Check, Film, Image, Layers, LayoutGrid, ListFilter, Search, SquareCheckBig, Table2, Video, X } from "lucide-react";
 import { PendingMediaTile } from "./PendingMediaTile";
 import { MediaTile } from "./MediaTile";
 import { GalleryTable, type GalleryEntry } from "./GalleryTable";
@@ -8,7 +8,38 @@ import type { CharacterSummary, JobItem, MediaItem, MediaMetadataPatch } from ".
 type Filter = "all" | "images" | "videos";
 type ViewSize = "compact" | "comfortable" | "large";
 type ViewMode = "grid" | "table";
-export type GallerySort = "newest" | "match";
+// The values are what GET /api/listing takes as `sort`; "newest" sends none.
+export type GallerySort = "newest" | "match" | "match_asc";
+
+const SORT_OPTIONS: [GallerySort, string, string?][] = [
+  ["newest", "Newest"],
+  ["match", "Best match", "Closest face match to the character first"],
+  ["match_asc", "Lowest match", "Furthest from the character first"],
+];
+
+// Popovers live in the top layer, outside the toolbar's layout, so each is placed under
+// its button by hand, right edges aligned and kept on screen.
+function placeUnder(buttonId: string, width: number) {
+  return (event: React.ToggleEvent<HTMLDivElement>) => {
+    const rect = document.getElementById(buttonId)?.getBoundingClientRect();
+    if (event.newState !== "open" || !rect) return;
+    event.currentTarget.style.top = `${rect.bottom + 8}px`;
+    event.currentTarget.style.left = `${Math.max(8, rect.right - width)}px`;
+  };
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <button
+      onClick={onRemove}
+      aria-label={`Remove filter: ${label}`}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-800 bg-gray-900 py-1 pl-2.5 pr-1.5 text-xs text-gray-200 transition hover:border-gray-600"
+    >
+      {label}
+      <X className="h-3 w-3 text-gray-500" aria-hidden />
+    </button>
+  );
+}
 
 const VIEW_MODE_KEY = "flixml.studio.viewMode";
 
@@ -40,7 +71,6 @@ interface StudioViewProps {
   onSortChange: (sort: GallerySort) => void;
   onBulkDelete: (items: MediaItem[]) => Promise<void>;
   onBulkUpdateMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
-  onImported?: () => Promise<void> | void;
 }
 
 function isVideo(item: MediaItem) {
@@ -75,7 +105,6 @@ export function StudioView({
   onSortChange,
   onBulkDelete,
   onBulkUpdateMetadata,
-  onImported,
 }: StudioViewProps) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -87,12 +116,8 @@ export function StudioView({
   useEffect(() => {
     localStorage.setItem(VIEW_MODE_KEY, viewMode);
   }, [viewMode]);
-  const [importOpen, setImportOpen] = useState(false);
-  const activeFilterCount = [characterFilter, tagFilter, trainingDatasetOnly ? "1" : "", sort === "match" ? "1" : ""].filter(Boolean).length;
-  const [importFiles, setImportFiles] = useState<File[]>([]);
-  const [importCharacter, setImportCharacter] = useState("");
-  const [importTags, setImportTags] = useState("reference");
-  const [importing, setImporting] = useState(false);
+  // Sort is not a filter: it reorders the gallery without hiding anything, so it never counts here.
+  const activeFilterCount = [characterFilter, tagFilter, trainingDatasetOnly ? "1" : ""].filter(Boolean).length;
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
 
@@ -182,31 +207,6 @@ export function StudioView({
   }[viewSize];
 
 
-  async function importSelectedFiles() {
-    if (importFiles.length === 0 || importing) return;
-    setImporting(true);
-    try {
-      const form = new FormData();
-      for (const file of importFiles) form.append("files", file);
-      const params = new URLSearchParams();
-      if (importCharacter) params.set("character_id", importCharacter);
-      if (importTags.trim()) params.set("tags", importTags.trim());
-      params.set("purpose", "import");
-      const response = await fetch(`/api/media/import?${params.toString()}`, { method: "POST", body: form });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data?.detail || "Import failed");
-      }
-      setImportFiles([]);
-      setImportOpen(false);
-      await onImported?.();
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Import failed");
-    } finally {
-      setImporting(false);
-    }
-  }
-
   const imageCount = counts.images;
   const videoCount = counts.videos;
 
@@ -249,13 +249,13 @@ export function StudioView({
     }
 
     // Active jobs always float to top. Items keep the server's order when sorted by
-    // match; otherwise newest first.
+    // match, either way; otherwise newest first.
     const newestFirst = (a: GalleryEntry, b: GalleryEntry) => {
       const aTime = a.kind === "job" ? Date.parse(a.job.created_at || "0") || 0 : a.item.mtime * 1000;
       const bTime = b.kind === "job" ? Date.parse(b.job.created_at || "0") || 0 : b.item.mtime * 1000;
       return bTime - aTime;
     };
-    if (sort === "match") {
+    if (sort !== "newest") {
       return [
         ...entries.filter((entry) => entry.kind === "job").sort(newestFirst),
         ...entries.filter((entry) => entry.kind === "item"),
@@ -353,13 +353,14 @@ export function StudioView({
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder="Search gallery"
+                aria-label="Search gallery"
                 className="w-full rounded-lg border border-gray-800 bg-black/40 py-2 pl-8 pr-2.5 text-xs text-gray-200 placeholder:text-gray-700 focus:border-brand focus:outline-none"
               />
             </label>
 
             <div className="flex shrink-0 gap-1">
               {([
-                ["all", "All", SlidersHorizontal],
+                ["all", "All", Layers],
                 ["images", "Images", Image],
                 ["videos", "Videos", Video],
               ] as const).map(([id, label, Icon]) => (
@@ -367,6 +368,7 @@ export function StudioView({
                   key={id}
                   onClick={() => onFilterChange(id as Filter)}
                   title={label}
+                  aria-pressed={filter === id}
                   className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
                     filter === id ? "bg-brand text-brand-foreground" : "bg-gray-900 text-gray-500 hover:text-gray-200"
                   }`}
@@ -379,60 +381,100 @@ export function StudioView({
 
             <button
               type="button"
+              popoverTarget="gallery-sort"
+              id="gallery-sort-button"
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
+                sort !== "newest" ? "bg-gray-800 text-white" : "bg-gray-900 text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              <ArrowDownUp className="h-3.5 w-3.5" aria-hidden />
+              <span><span className="hidden text-gray-500 sm:inline">Sort: </span>{SORT_OPTIONS.find(([value]) => value === sort)?.[1]}</span>
+            </button>
+
+            <button
+              type="button"
               popoverTarget="gallery-filters"
               id="gallery-filters-button"
-              className={`shrink-0 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
                 activeFilterCount > 0 ? "bg-gray-800 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"
               }`}
             >
+              <ListFilter className="h-3.5 w-3.5" aria-hidden />
               Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
             </button>
 
-            <div className="flex shrink-0 rounded-lg border border-gray-800 bg-black/30 p-0.5">
-              {([
-                ["grid", "Grid", LayoutGrid],
-                ["table", "Table", Table2],
-              ] as const).map(([mode, label, Icon]) => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  title={label}
-                  aria-pressed={viewMode === mode}
-                  className={`rounded-md px-2 py-1 transition ${viewMode === mode ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
-                >
-                  <Icon className="h-3.5 w-3.5" aria-hidden />
-                </button>
-              ))}
-            </div>
-
             <button
-              onClick={() => setImportOpen((value) => !value)}
-              title="Import media"
-              className={`shrink-0 rounded-lg px-2.5 py-2 text-xs font-medium transition ${importOpen ? "bg-gray-800 text-white" : "bg-gray-900 text-gray-500 hover:text-gray-200"}`}
+              type="button"
+              popoverTarget="gallery-view"
+              id="gallery-view-button"
+              title="View"
+              aria-label="View"
+              className="inline-flex shrink-0 items-center rounded-lg bg-gray-900 px-2.5 py-2 text-gray-500 transition hover:text-gray-200"
             >
-              <Upload className="inline h-3.5 w-3.5 sm:mr-1.5" aria-hidden />
-              <span className="hidden sm:inline">Import</span>
+              {viewMode === "grid" ? <LayoutGrid className="h-3.5 w-3.5" aria-hidden /> : <Table2 className="h-3.5 w-3.5" aria-hidden />}
             </button>
 
             <button
               onClick={() => setSelectionMode(true)}
-              className="shrink-0 rounded-lg bg-gray-900 px-2.5 py-2 text-xs font-medium text-gray-500 transition hover:text-gray-200"
+              title="Select"
+              aria-label="Select"
+              className="inline-flex shrink-0 items-center rounded-lg bg-gray-900 px-2.5 py-2 text-xs font-medium text-gray-500 transition hover:text-gray-200"
             >
-              Select
+              <SquareCheckBig className="h-3.5 w-3.5 sm:hidden" aria-hidden />
+              <span className="hidden sm:inline">Select</span>
             </button>
           </div>
         )}
 
-        {/* Occasional controls: character, tag, dataset, density */}
+        {/* What's narrowing the gallery, readable and removable without opening Filters. */}
+        {!selectionMode && activeFilterCount > 0 && (
+          <div className="mt-2 flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none]">
+            {characterFilter && (
+              <FilterChip
+                label={characterFilter === "__unassigned__" ? "Unassigned" : characters.find((character) => character.id === characterFilter)?.name ?? "Character"}
+                onRemove={() => onCharacterFilterChange("")}
+              />
+            )}
+            {tagFilter && <FilterChip label={`Tag: ${tagFilter}`} onRemove={() => onTagFilterChange("")} />}
+            {trainingDatasetOnly && <FilterChip label="Training dataset" onRemove={() => onTrainingDatasetOnlyChange(false)} />}
+            <button
+              onClick={() => { onCharacterFilterChange(""); onTagFilterChange(""); onTrainingDatasetOnlyChange(false); }}
+              className="shrink-0 px-1.5 py-1 text-xs text-gray-500 transition hover:text-white"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
+        <div
+          id="gallery-sort"
+          popover="auto"
+          onBeforeToggle={placeUnder("gallery-sort-button", 224)}
+          className="fixed m-0 w-56 [inset:auto] rounded-2xl border border-gray-800 bg-gray-950 p-1.5 text-white shadow-2xl shadow-black/60"
+        >
+          {SORT_OPTIONS.map(([value, label, hint]) => (
+            <button
+              key={value}
+              aria-pressed={sort === value}
+              onClick={(event) => {
+                onSortChange(value);
+                event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover();
+              }}
+              className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-gray-900"
+            >
+              <Check className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-brand ${sort === value ? "" : "invisible"}`} aria-hidden />
+              <span>
+                <span className="block text-xs text-gray-200">{label}</span>
+                {hint && <span className="block text-[11px] text-gray-500">{hint}</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+
         <div
           id="gallery-filters"
           popover="auto"
-          onBeforeToggle={(event) => {
-            const rect = document.getElementById("gallery-filters-button")?.getBoundingClientRect();
-            if (event.newState !== "open" || !rect) return;
-            event.currentTarget.style.top = `${rect.bottom + 8}px`;
-            event.currentTarget.style.left = `${Math.max(8, rect.right - 288)}px`;
-          }}
+          onBeforeToggle={placeUnder("gallery-filters-button", 288)}
           className="fixed m-0 w-72 [inset:auto] space-y-3 rounded-2xl border border-gray-800 bg-gray-950 p-3 text-white shadow-2xl shadow-black/60"
         >
           <label className="block space-y-1">
@@ -460,30 +502,41 @@ export function StudioView({
             />
           </label>
 
-          <div className="space-y-1">
-            <span className="text-[11px] font-medium text-gray-400">Sort</span>
-            <div className="flex rounded-lg border border-gray-800 bg-black/30 p-0.5">
-              {([["newest", "Newest"], ["match", "Best match"]] as [GallerySort, string][]).map(([value, label]) => (
-                <button
-                  key={value}
-                  onClick={() => onSortChange(value)}
-                  title={value === "match" ? "Closest face match to the character first" : undefined}
-                  className={`flex-1 rounded-md px-2 py-1 text-xs transition ${sort === value ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <button
             onClick={() => onTrainingDatasetOnlyChange(!trainingDatasetOnly)}
+            aria-pressed={trainingDatasetOnly}
             className="flex w-full items-center justify-between rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white"
             title="Show only images marked for a LoRA training dataset"
           >
             Training dataset only
             {trainingDatasetOnly && <Check className="h-3.5 w-3.5 text-brand" aria-hidden />}
           </button>
+        </div>
+
+        <div
+          id="gallery-view"
+          popover="auto"
+          onBeforeToggle={placeUnder("gallery-view-button", 240)}
+          className="fixed m-0 w-60 [inset:auto] space-y-3 rounded-2xl border border-gray-800 bg-gray-950 p-3 text-white shadow-2xl shadow-black/60"
+        >
+          <div className="space-y-1">
+            <span className="text-[11px] font-medium text-gray-400">Layout</span>
+            <div className="flex rounded-lg border border-gray-800 bg-black/30 p-0.5">
+              {([
+                ["grid", "Grid", LayoutGrid],
+                ["table", "Table", Table2],
+              ] as const).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  aria-pressed={viewMode === mode}
+                  className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs transition ${viewMode === mode ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
+                >
+                  <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {viewMode === "grid" && (
             <div className="space-y-1">
@@ -493,6 +546,7 @@ export function StudioView({
                   <button
                     key={size}
                     onClick={() => setViewSize(size)}
+                    aria-pressed={viewSize === size}
                     className={`flex-1 rounded-md px-2 py-1 text-xs capitalize transition ${viewSize === size ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
                   >
                     {size}
@@ -501,62 +555,9 @@ export function StudioView({
               </div>
             </div>
           )}
-
-          {activeFilterCount > 0 && (
-            <button
-              onClick={() => { onCharacterFilterChange(""); onTagFilterChange(""); onTrainingDatasetOnlyChange(false); onSortChange("newest"); }}
-              className="w-full rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-400 transition hover:text-white"
-            >
-              Clear filters
-            </button>
-          )}
         </div>
         </div>
       </section>
-
-      {importOpen && (
-        <section className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-gray-100">Import media into gallery</p>
-              <p className="text-xs text-gray-500 mt-1">Files are stored under images/imports and indexed with character/tags.</p>
-            </div>
-            <span className="text-xs text-gray-500">{importFiles.length} selected</span>
-          </div>
-          <div className="grid gap-2 lg:grid-cols-[1fr_180px_1fr_auto]">
-            <input
-              type="file"
-              multiple
-              accept="image/*,video/mp4,video/webm"
-              onChange={(event) => setImportFiles(Array.from(event.target.files || []))}
-              className="rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-800 file:px-3 file:py-1.5 file:text-xs file:text-gray-200"
-            />
-            <select
-              value={importCharacter}
-              onChange={(event) => setImportCharacter(event.target.value)}
-              className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-brand"
-            >
-              <option value="">No character</option>
-              {characters.map((character) => (
-                <option key={character.id} value={character.id}>{character.name}</option>
-              ))}
-            </select>
-            <input
-              value={importTags}
-              onChange={(event) => setImportTags(event.target.value)}
-              placeholder="tags: reference, training-candidate"
-              className="rounded-xl bg-black/40 border border-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-brand placeholder:text-gray-700"
-            />
-            <button
-              onClick={importSelectedFiles}
-              disabled={importing || importFiles.length === 0}
-              className="rounded-xl bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:brightness-110 disabled:bg-gray-800 disabled:text-gray-500 transition"
-            >
-              {importing ? "Importing…" : "Import"}
-            </button>
-          </div>
-        </section>
-      )}
 
       {loading && items.length === 0 && jobs.length === 0 ? (
         <p className="text-gray-500">Loading...</p>
