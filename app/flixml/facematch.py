@@ -1,8 +1,9 @@
 """Character match: how closely the face in each character image matches that character.
 
-Every image bound to exactly one character gets a face fingerprint. A character's
-reference is the average fingerprint of its own gallery, so deleting the takes that
-miss is what keeps the reference honest. Each image is scored against the average
+Every image bound to exactly one character gets a face fingerprint: the face closest
+to the character's current reference when the picture holds several, else the largest.
+A character's reference is the average fingerprint of its own gallery, so deleting the
+takes that miss is what keeps the reference honest. Each image is scored against the average
 of the others (cosine similarity, about -1..1; higher is closer).
 
 Optional. It needs the packages in `requirements-face.txt` and an InsightFace model
@@ -77,8 +78,15 @@ def _load_models() -> tuple[Any, Any]:
     return found["detection"], found["recognition"]
 
 
-def _fingerprint(path: Path) -> tuple[list[float] | None, float | None]:
-    """The largest face's normalized embedding and its width, or (None, None)."""
+def _fingerprint(path: Path, reference: Any | None) -> tuple[list[float] | None, float | None]:
+    """One face's normalized embedding and its width, or (None, None).
+
+    With several faces and a `reference` (the character's unit mean embedding), every
+    face is embedded and the closest one kept: a picture of the character beside someone
+    else is about the character, whichever face is bigger. Without a reference yet, the
+    largest face. InsightFace's PrivateFrame and DeepFace's verify pick a person out of
+    several faces the same way, by comparing every face against the reference.
+    """
     import cv2
     import numpy as np
     from insightface.app.common import Face
@@ -92,10 +100,29 @@ def _fingerprint(path: Path) -> tuple[list[float] | None, float | None]:
     if boxes is None or len(boxes) == 0:
         return None, None
     widths = boxes[:, 2] - boxes[:, 0]
-    largest = int(np.argmax(widths * (boxes[:, 3] - boxes[:, 1])))
-    face = Face(bbox=boxes[largest, :4], kps=landmarks[largest], det_score=boxes[largest, 4])
-    recognizer.get(image, face)
-    return face.normed_embedding.astype(float).tolist(), float(widths[largest])
+    if reference is None or len(boxes) == 1:
+        candidates = [int(np.argmax(widths * (boxes[:, 3] - boxes[:, 1])))]
+    else:
+        candidates = range(len(boxes))
+    best: tuple[float, Any, float] | None = None
+    for index in candidates:
+        face = Face(bbox=boxes[index, :4], kps=landmarks[index], det_score=boxes[index, 4])
+        recognizer.get(image, face)
+        similarity = float(face.normed_embedding @ reference) if reference is not None else 0.0
+        if best is None or similarity > best[0]:
+            best = (similarity, face.normed_embedding, float(widths[index]))
+    return best[1].astype(float).tolist(), best[2]
+
+
+def _reference(rows: list[dict[str, Any]]) -> Any | None:
+    """The character's unit mean embedding over its usable faces, or None if too few."""
+    import numpy as np
+
+    usable = [row["embedding"] for row in rows if (row["face_px"] or 0) >= MIN_REFERENCE_FACE_PX]
+    if len(usable) < MIN_REFERENCE_FACES:
+        return None
+    total = np.sum(usable, axis=0)
+    return total / np.linalg.norm(total)
 
 
 def _scores(rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -126,9 +153,13 @@ async def _fingerprint_batch() -> set[str]:
             _models = await asyncio.to_thread(_load_models)
             logger.info("face models loaded", extra={"event": "facematch.models_loaded", "path": str(_model_dir())})
     output_dir = Path(get_settings().output_dir)
+    references: dict[str, Any] = {}
     for row in rows:
+        character_id = row["character_id"]
+        if character_id not in references:
+            references[character_id] = _reference(await db.face_fingerprints(character_id))
         try:
-            embedding, face_px = await asyncio.to_thread(_fingerprint, output_dir / row["filename"])
+            embedding, face_px = await asyncio.to_thread(_fingerprint, output_dir / row["filename"], references[character_id])
         except Exception:
             logger.warning("fingerprint failed", extra={"event": "facematch.fingerprint_failed", "filename": row["filename"]}, exc_info=True)
             embedding, face_px = None, None
