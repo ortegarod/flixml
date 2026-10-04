@@ -1276,10 +1276,15 @@ async def list_media(
     training_dataset: bool | None = None,
     owner_id: str | None = None,
     viewer: tuple[str, list[str]] | None = None,
+    sort: str | None = None,
 ) -> list[dict[str, Any]]:
+    """`sort="match"` puts the closest character matches first; unscored files go last."""
     where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id, viewer=viewer)
     limit_param = f"${len(params) + 1}"
     offset_param = f"${len(params) + 2}"
+    order = "COALESCE(modified, created_at) DESC, filename DESC"
+    if sort == "match":
+        order = "match_score DESC NULLS LAST, " + order
     # Submit and run times live on the job that produced the file. Scalar subqueries keep
     # the shared WHERE clause's unqualified column names pointing at media.
     sql = f"""
@@ -1288,10 +1293,12 @@ async def list_media(
                (SELECT started_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_started_at,
                (SELECT finished_at FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_finished_at,
                (SELECT workflow_json FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow_json,
-               (SELECT metadata->>'workflow' FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow
+               (SELECT metadata->>'workflow' FROM jobs WHERE jobs.prompt_id = media.prompt_id) AS job_workflow,
+               (SELECT score FROM face_matches WHERE face_matches.filename = media.filename) AS match_score,
+               (SELECT face_px FROM face_matches WHERE face_matches.filename = media.filename) AS match_face_px
         FROM media
         WHERE {where}
-        ORDER BY COALESCE(modified, created_at) DESC, filename DESC
+        ORDER BY {order}
         LIMIT {limit_param} OFFSET {offset_param}
     """
     rows = await get_pool().fetch(sql, *params, limit, offset)
@@ -1441,6 +1448,79 @@ async def delete_media_rows(files: list[str]) -> None:
     if not files:
         return
     await get_pool().execute("DELETE FROM media WHERE filename = ANY($1::text[])", files)
+
+
+async def media_without_face_match(limit: int) -> list[dict[str, Any]]:
+    """Images bound to exactly one character that have no face fingerprint yet, newest first."""
+    rows = await get_pool().fetch(
+        f"""
+        SELECT filename, character_ids[1] AS character_id
+        FROM media
+        WHERE type = 'image' AND NOT {_VIDEO_PREDICATE} AND cardinality(character_ids) = 1
+          AND NOT EXISTS (SELECT 1 FROM face_matches f WHERE f.filename = media.filename)
+        ORDER BY created_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    return [dict(row) for row in rows]
+
+
+async def save_face_fingerprint(filename: str, embedding: list[float] | None, face_px: float | None) -> None:
+    await get_pool().execute(
+        """
+        INSERT INTO face_matches (filename, embedding, face_px) VALUES ($1, $2::real[], $3)
+        ON CONFLICT (filename) DO UPDATE SET embedding = EXCLUDED.embedding, face_px = EXCLUDED.face_px
+        """,
+        filename, embedding, face_px,
+    )
+
+
+async def face_fingerprints(character_id: str) -> list[dict[str, Any]]:
+    """Every face fingerprint of one character's single-character images."""
+    rows = await get_pool().fetch(
+        """
+        SELECT f.filename, f.embedding, f.face_px
+        FROM face_matches f JOIN media m ON m.filename = f.filename
+        WHERE m.character_ids = ARRAY[$1]::text[] AND f.embedding IS NOT NULL
+        """,
+        character_id,
+    )
+    return [dict(row) for row in rows]
+
+
+async def face_fingerprint_counts() -> dict[str, int]:
+    """How many face fingerprints each character has right now."""
+    rows = await get_pool().fetch(
+        """
+        SELECT m.character_ids[1] AS character_id, COUNT(*) AS n
+        FROM face_matches f JOIN media m ON m.filename = f.filename
+        WHERE cardinality(m.character_ids) = 1 AND f.embedding IS NOT NULL
+        GROUP BY 1
+        """
+    )
+    return {row["character_id"]: int(row["n"]) for row in rows}
+
+
+async def save_face_scores(character_id: str, scores: dict[str, float]) -> None:
+    """Replace one character's scores; its images missing from `scores` go back to unscored."""
+    async with get_pool().acquire() as conn, conn.transaction():
+        await conn.execute(
+            """
+            UPDATE face_matches f SET score = NULL
+            FROM media m WHERE m.filename = f.filename AND m.character_ids = ARRAY[$1]::text[]
+            """,
+            character_id,
+        )
+        if scores:
+            await conn.execute(
+                """
+                UPDATE face_matches f SET score = s.score
+                FROM unnest($1::text[], $2::real[]) AS s(filename, score)
+                WHERE f.filename = s.filename
+                """,
+                list(scores), list(scores.values()),
+            )
 
 
 async def delete_project_shot_versions_by_files(files: list[str]) -> None:

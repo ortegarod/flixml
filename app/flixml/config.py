@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     aitk_api_url: str | None = Field(default=None, validation_alias="AITK_API_URL")
     elevenlabs_api_key: str | None = Field(default=None, validation_alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str | None = Field(default=None, validation_alias="ELEVENLABS_VOICE_ID")
+    # InsightFace model pack for character match; unset means ~/.insightface/models/buffalo_l.
+    face_model_dir: str | None = Field(default=None, validation_alias="FLIXML_FACE_MODEL_DIR")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

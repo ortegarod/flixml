@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQue
 import { Toaster, toast } from "sonner";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { ArrowUp, BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, UserCircle, Users } from "lucide-react";
-import { StudioView } from "./components/GalleryView";
+import { StudioView, type GallerySort } from "./components/GalleryView";
 import { CharacterProfileView } from "./components/CharacterProfileView";
 import { AgentProfileView } from "./components/AgentProfileView";
 import { AccountsView } from "./components/AccountsView";
@@ -121,6 +121,8 @@ interface AppContextType {
   setGalleryTag: (tag: string) => void;
   galleryTrainingDatasetOnly: boolean;
   setGalleryTrainingDatasetOnly: (enabled: boolean) => void;
+  gallerySort: GallerySort;
+  setGallerySort: (sort: GallerySort) => void;
   updateMediaMetadata: (item: MediaItem, patch: MediaMetadataPatch) => Promise<void>;
   bulkDeleteItems: (items: MediaItem[]) => Promise<void>;
   bulkUpdateMediaMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
@@ -495,6 +497,8 @@ function StudioRoute() {
       onTagFilterChange={ctx.setGalleryTag}
       trainingDatasetOnly={ctx.galleryTrainingDatasetOnly}
       onTrainingDatasetOnlyChange={ctx.setGalleryTrainingDatasetOnly}
+      sort={ctx.gallerySort}
+      onSortChange={ctx.setGallerySort}
       onBulkDelete={ctx.bulkDeleteItems}
       onBulkUpdateMetadata={ctx.bulkUpdateMediaMetadata}
       onImported={ctx.load}
@@ -599,10 +603,11 @@ function AppRoutes() {
   const [galleryCharacter, setGalleryCharacter] = useState("");
   const [galleryTag, setGalleryTag] = useState("");
   const [galleryTrainingDatasetOnly, setGalleryTrainingDatasetOnly] = useState(false);
+  const [gallerySort, setGallerySort] = useState<GallerySort>("newest");
 
   const listingKey = useMemo(
-    () => [...listingKeyBase, galleryFilter, gallerySearch, galleryCharacter, galleryTag, galleryTrainingDatasetOnly] as const,
-    [galleryFilter, gallerySearch, galleryCharacter, galleryTag, galleryTrainingDatasetOnly]
+    () => [...listingKeyBase, galleryFilter, gallerySearch, galleryCharacter, galleryTag, galleryTrainingDatasetOnly, gallerySort] as const,
+    [galleryFilter, gallerySearch, galleryCharacter, galleryTag, galleryTrainingDatasetOnly, gallerySort]
   );
 
   const listingQuery = useInfiniteQuery({
@@ -620,6 +625,7 @@ function AppRoutes() {
       const trimmedTag = galleryTag.trim();
       if (trimmedTag) params.set("tag", trimmedTag);
       if (galleryTrainingDatasetOnly) params.set("training_dataset", "true");
+      if (gallerySort === "match") params.set("sort", "match");
       return fetchJson<ListingPage>(`/api/listing?${params.toString()}`, 8000);
     },
     getNextPageParam: (lastPage) => {
@@ -956,6 +962,8 @@ function AppRoutes() {
     setGalleryTag,
     galleryTrainingDatasetOnly,
     setGalleryTrainingDatasetOnly,
+    gallerySort,
+    setGallerySort,
     updateMediaMetadata,
     bulkDeleteItems,
     bulkUpdateMediaMetadata,

@@ -8,6 +8,7 @@ import type { CharacterSummary, JobItem, MediaItem, MediaMetadataPatch } from ".
 type Filter = "all" | "images" | "videos";
 type ViewSize = "compact" | "comfortable" | "large";
 type ViewMode = "grid" | "table";
+export type GallerySort = "newest" | "match";
 
 const VIEW_MODE_KEY = "flixml.studio.viewMode";
 
@@ -35,6 +36,8 @@ interface StudioViewProps {
   onTagFilterChange: (tag: string) => void;
   trainingDatasetOnly: boolean;
   onTrainingDatasetOnlyChange: (enabled: boolean) => void;
+  sort: GallerySort;
+  onSortChange: (sort: GallerySort) => void;
   onBulkDelete: (items: MediaItem[]) => Promise<void>;
   onBulkUpdateMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
   onImported?: () => Promise<void> | void;
@@ -68,6 +71,8 @@ export function StudioView({
   onTagFilterChange,
   trainingDatasetOnly,
   onTrainingDatasetOnlyChange,
+  sort,
+  onSortChange,
   onBulkDelete,
   onBulkUpdateMetadata,
   onImported,
@@ -83,7 +88,7 @@ export function StudioView({
     localStorage.setItem(VIEW_MODE_KEY, viewMode);
   }, [viewMode]);
   const [importOpen, setImportOpen] = useState(false);
-  const activeFilterCount = [characterFilter, tagFilter, trainingDatasetOnly ? "1" : ""].filter(Boolean).length;
+  const activeFilterCount = [characterFilter, tagFilter, trainingDatasetOnly ? "1" : "", sort === "match" ? "1" : ""].filter(Boolean).length;
   const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importCharacter, setImportCharacter] = useState("");
   const [importTags, setImportTags] = useState("reference");
@@ -243,15 +248,23 @@ export function StudioView({
       entries.push({ kind: "item", item });
     }
 
-    // Sort by recency: active jobs always float to top, then items by mtime
-    entries.sort((a, b) => {
+    // Active jobs always float to top. Items keep the server's order when sorted by
+    // match; otherwise newest first.
+    const newestFirst = (a: GalleryEntry, b: GalleryEntry) => {
       const aTime = a.kind === "job" ? Date.parse(a.job.created_at || "0") || 0 : a.item.mtime * 1000;
       const bTime = b.kind === "job" ? Date.parse(b.job.created_at || "0") || 0 : b.item.mtime * 1000;
       return bTime - aTime;
-    });
+    };
+    if (sort === "match") {
+      return [
+        ...entries.filter((entry) => entry.kind === "job").sort(newestFirst),
+        ...entries.filter((entry) => entry.kind === "item"),
+      ];
+    }
+    entries.sort(newestFirst);
 
     return entries;
-  }, [jobs, items, filter, query]);
+  }, [jobs, items, filter, query, sort]);
 
   useEffect(() => {
     const node = loadMoreRef.current;
@@ -447,6 +460,22 @@ export function StudioView({
             />
           </label>
 
+          <div className="space-y-1">
+            <span className="text-[11px] font-medium text-gray-400">Sort</span>
+            <div className="flex rounded-lg border border-gray-800 bg-black/30 p-0.5">
+              {([["newest", "Newest"], ["match", "Best match"]] as [GallerySort, string][]).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => onSortChange(value)}
+                  title={value === "match" ? "Closest face match to the character first" : undefined}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs transition ${sort === value ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-200"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
             onClick={() => onTrainingDatasetOnlyChange(!trainingDatasetOnly)}
             className="flex w-full items-center justify-between rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white"
@@ -475,7 +504,7 @@ export function StudioView({
 
           {activeFilterCount > 0 && (
             <button
-              onClick={() => { onCharacterFilterChange(""); onTagFilterChange(""); onTrainingDatasetOnlyChange(false); }}
+              onClick={() => { onCharacterFilterChange(""); onTagFilterChange(""); onTrainingDatasetOnlyChange(false); onSortChange("newest"); }}
               className="w-full rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-400 transition hover:text-white"
             >
               Clear filters

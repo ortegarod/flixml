@@ -36,6 +36,9 @@ export interface MediaItem {
   // What the node actually ran with, read back from the submitted graph. Params the
   // caller left at a default are missing from `metadata` but present here.
   settings?: GraphSettings | null;
+  // How closely the face matches the rest of its character's gallery (cosine, higher is
+  // closer) and the face's width in pixels. Null with no single character or no face.
+  match?: { score: number; face_px: number } | null;
 }
 
 // The human-authored fields of an asset, as PATCH /api/media/{path}/metadata takes

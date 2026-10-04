@@ -22,7 +22,7 @@ from fastapi import Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_change_file, can_read_file, current_agent, generate_key, hash_key, media_viewer, owner_scope, owns, set_session_cookie
-from . import node_events
+from . import facematch, node_events
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
@@ -1218,12 +1218,14 @@ async def start_reconciler() -> None:
     node_events.start(get_settings().comfy_nodes(), _reconcile_node)
     if _TRAINING_RECORD_TASK is None or _TRAINING_RECORD_TASK.done():
         _TRAINING_RECORD_TASK = asyncio.create_task(_training_record_loop())
+    facematch.start()
 
 
 @app.on_event("shutdown")
 async def stop_reconciler() -> None:
     global _TRAINING_RECORD_TASK
     await node_events.stop()
+    await facematch.stop()
     if _TRAINING_RECORD_TASK:
         _TRAINING_RECORD_TASK.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -4145,7 +4147,7 @@ async def lora_training_preview_sources(job_name: str) -> dict[str, Any]:
     return {"job_name": job_name, "dataset": dataset, "sources": sources}
 
 
-_LISTING_SUMMARY_FIELDS = ("filename", "type", "workflow", "description", "tags", "prompt", "submitted_at")
+_LISTING_SUMMARY_FIELDS = ("filename", "type", "workflow", "description", "tags", "prompt", "submitted_at", "match")
 
 
 @app.get("/api/listing")
@@ -4159,6 +4161,7 @@ async def listing(
     training_dataset: str = "",
     owner: str = "",
     view: str | None = None,
+    sort: str = "",
     agent: Agent | None = Depends(current_agent),
 ) -> dict[str, Any]:
     """List generated media from the media table.
@@ -4176,8 +4179,14 @@ async def listing(
     match in all.
 
     Pass `?view=summary` to get only what telling items apart needs — `filename`,
-    `type`, `workflow`, `description`, `tags`, `prompt`, `submitted_at` — at about a quarter
-    of the size. Without it each item carries everything the gallery shows.
+    `type`, `workflow`, `description`, `tags`, `prompt`, `submitted_at`, `match` — at about a
+    quarter of the size. Without it each item carries everything the gallery shows.
+
+    `match` is how closely the face in an image of one character matches the rest of that
+    character's gallery: `score` is cosine similarity (higher is closer) and `face_px` the
+    width of the face it read; faces under 150 px score less reliably. It is null for
+    videos, images with no single character or no face, and on installs without the
+    optional face packages. Pass `?sort=match` for the closest matches first.
     """
     type_filter: str | None = None
     if type in {"image", "video"}:
@@ -4208,6 +4217,7 @@ async def listing(
         training_dataset=training_only if training_dataset.strip() else None,
         owner_id=owner_id,
         viewer=viewer,
+        sort="match" if sort == "match" else None,
     )
 
     items = []
@@ -4253,6 +4263,12 @@ async def listing(
             # What the node actually ran with. The metadata blob only records what the
             # caller passed, so every param left at a default reads back null there.
             "settings": db.graph_settings(row.get("job_workflow_json")),
+            # A score is against one character's gallery; a file re-tagged to several keeps
+            # its old row until it is single-character again, so it shows nothing meanwhile.
+            "match": None if row.get("match_score") is None or len(row.get("character_ids") or []) != 1 else {
+                "score": round(row["match_score"], 3),
+                "face_px": round(row["match_face_px"] or 0),
+            },
         })
 
     if view == "summary":

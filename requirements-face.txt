@@ -1,0 +1,5 @@
+# Optional: character match scores in the gallery. Studio runs without these.
+# The InsightFace code is MIT; its pretrained models are for non-commercial research
+# only, so Studio never downloads them. See README, "Character match".
+insightface==2.1
+onnxruntime==1.30.0

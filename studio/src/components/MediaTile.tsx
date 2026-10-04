@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { Trash2, X, Expand, Check, Bot } from "lucide-react";
+import { Trash2, X, Expand, Check, Bot, ScanFace } from "lucide-react";
 import type { MediaItem } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
 import { MediaPreview } from "./MediaPreview";
@@ -210,6 +210,19 @@ export function MediaTile({ item, onOpen, onDelete, onRemoveFromDataset, selecti
           <p className="text-[10px] text-gray-400 font-mono truncate mt-0.5">{item.filename}</p>
         )}
       </div>
+
+      {/* Character match — how close this face is to the rest of the character's gallery. */}
+      {item.match && !selectionMode && (
+        <div
+          title={item.match.face_px < 150
+            ? `Face match ${item.match.score.toFixed(2)} — small face (${item.match.face_px}px), less reliable`
+            : `Face match ${item.match.score.toFixed(2)} to this character's gallery`}
+          className={`absolute bottom-2 right-2 z-10 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-medium backdrop-blur-sm ${item.match.face_px < 150 ? "text-white/45" : "text-white/85"}`}
+        >
+          <ScanFace className="h-3 w-3" aria-hidden />
+          {item.match.score.toFixed(2)}
+        </div>
+      )}
 
       {/* Workflow badge — which workflow made this, or where the file came from when none did. */}
       {!selectionMode && (

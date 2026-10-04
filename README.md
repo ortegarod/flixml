@@ -174,6 +174,20 @@ Python standard library only — no install step, nothing to add to your environ
 config. `FLIXML_API_KEY` works too if you'd rather set it inline. Omit both if your
 install doesn't require keys.
 
+## Character Match
+
+Optional. Every image bound to one character gets a score for how closely its face matches the rest of that character's gallery, shown on the image's card. **Filters → Sort → Best match** puts the closest first, and `GET /api/listing?sort=match` does the same through the API. The reference is the character's own gallery, so deleting the images that miss is what keeps it accurate. Studio scores in the background on the API host's CPU (one thread, under a second per image), and existing images are scored on first start.
+
+It needs two things Studio doesn't install for you:
+
+```bash
+pip install -r requirements-face.txt
+```
+
+and an [InsightFace](https://github.com/deepinsight/insightface) model pack: a folder holding a face detection and a face recognition `.onnx`, by default `~/.insightface/models/buffalo_l`, or wherever `FLIXML_FACE_MODEL_DIR` points. Studio never downloads the models. InsightFace's code is MIT, but its pretrained models are licensed for non-commercial research only, so whether you can use them is your call. Without the packages or the models, Studio runs exactly as before and images carry no score. Loaded, the models take about half a gigabyte of RAM.
+
+Scores are cosine similarity, higher is closer. Faces narrower than 150 px score less reliably and show dimmed. A character needs 5 images with a clear face before its images get a score.
+
 ## LoRA Training
 
 Start training, watch it, collect checkpoints — all through the API. The LoRA Training page shows the same runs live. The examples below use `<your-api-url>` as a placeholder for your Studio API base URL.
