@@ -188,6 +188,8 @@ and an [InsightFace](https://github.com/deepinsight/insightface) model pack: a f
 
 Scores are cosine similarity, higher is closer. Faces narrower than 150 px score less reliably and show dimmed. A character needs 5 images with a clear face before its images get a score.
 
+Deleting a scored image keeps its face fingerprint (512 numbers), face width, score and the time of the delete on the job that made it, in the `jobs` table under `metadata.deleted_faces`, keyed by filename. Your deletes become a record of which takes you cut. API responses leave it out.
+
 ## LoRA Training
 
 Start training, watch it, collect checkpoints — all through the API. The LoRA Training page shows the same runs live. The examples below use `<your-api-url>` as a placeholder for your Studio API base URL.

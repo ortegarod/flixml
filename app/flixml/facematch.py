@@ -4,7 +4,8 @@ Every image bound to exactly one character gets a face fingerprint: the face clo
 to the character's current reference when the picture holds several, else the largest.
 A character's reference is the average fingerprint of its own gallery, so deleting the
 takes that miss is what keeps the reference honest. Each image is scored against the average
-of the others (cosine similarity, about -1..1; higher is closer).
+of the others (cosine similarity, about -1..1; higher is closer). Deleting an image keeps
+its fingerprint and score on the job that made it, under `jobs.metadata.deleted_faces`.
 
 Optional. It needs the packages in `requirements-face.txt` and an InsightFace model
 pack (a folder holding a detection and a recognition `.onnx`) that the user installs
