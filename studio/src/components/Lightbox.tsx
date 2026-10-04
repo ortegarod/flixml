@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { X, ChevronDown, ChevronLeft, ChevronRight, Trash2, Copy, Check, Download, Plus, Pencil } from "lucide-react";
 import type { GraphSettings, MediaItem, MediaMetadataPatch, SamplerPass } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
+import { DeleteDialog } from "./DeleteDialog";
 
 // Minimal shape of the /api/workflows entries we surface as remix options.
 interface WorkflowMeta {
@@ -350,7 +350,7 @@ interface LightboxProps {
   onClose: () => void;
   onSelect: (url: string | null) => void;
   onUpdateMetadata: (item: MediaItem, patch: MediaMetadataPatch) => Promise<void>;
-  onDelete: (item: MediaItem) => Promise<void>;
+  onDelete: (item: MediaItem, reason?: string) => Promise<void>;
   // Open the profile of the account that submitted this job. The lightbox stays
   // router-free; App closes it and navigates, the same way the sidebar does.
   onOpenOwner: (ownerId: string) => void;
@@ -514,12 +514,12 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
   const identifier = current?.filename || current?.name;
   const displayName = identifier ? identifier.split("/").pop() : null;
 
-  async function deleteCurrent() {
+  async function deleteCurrent(reason: string) {
     if (!current || deleting) return;
     setDeleting(true);
     const nextUrl = hasNext ? items[currentIndex + 1]?.url : hasPrev ? items[currentIndex - 1]?.url : null;
     try {
-      await onDelete(current);
+      await onDelete(current, reason);
       setDeleteOpen(false);
       onSelect(nextUrl || null);
       if (!nextUrl) onClose();
@@ -960,43 +960,14 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
 
       {/* Delete confirmation — the same dialog the gallery tiles use, so deleting
           from the rail asks the same question it asks from the grid. */}
-      <AlertDialog.Root open={deleteOpen} onOpenChange={(open) => !deleting && setDeleteOpen(open)}>
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
-          <AlertDialog.Content
-            onClick={(event) => event.stopPropagation()}
-            className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-800 bg-gray-950 p-5 shadow-2xl shadow-black/60 focus:outline-none"
-          >
-            <AlertDialog.Title className="text-base font-semibold text-white">
-              {deleting ? "Deleting…" : `Delete this ${isVideo ? "video" : "image"}?`}
-            </AlertDialog.Title>
-            <AlertDialog.Description className="mt-2 text-sm text-gray-400 leading-relaxed">
-              Permanently delete <span className="text-gray-200">{displayName || "this file"}</span>?
-              This cannot be undone.
-            </AlertDialog.Description>
-            <div className="mt-5 flex justify-end gap-2">
-              <AlertDialog.Cancel asChild>
-                <button
-                  disabled={deleting}
-                  className="inline-flex items-center gap-2 rounded-xl border border-gray-800 bg-gray-900 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition"
-                >
-                  <X className="w-4 h-4" />
-                  Cancel
-                </button>
-              </AlertDialog.Cancel>
-              <AlertDialog.Action asChild>
-                <button
-                  onClick={(event) => { event.preventDefault(); deleteCurrent(); }}
-                  disabled={deleting}
-                  className="rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed transition"
-                >
-                  {deleting ? "Deleting…" : "Delete"}
-                </button>
-              </AlertDialog.Action>
-            </div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+      <DeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        deleting={deleting}
+        title={`Delete this ${isVideo ? "video" : "image"}?`}
+        target={displayName || "this file"}
+        onConfirm={deleteCurrent}
+      />
 
     </div>
   );

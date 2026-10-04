@@ -2,6 +2,7 @@ import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { ArrowDownUp, ArrowRight, Check, Film, Image, Layers, LayoutGrid, ListFilter, Search, SquareCheckBig, Table2, Video, X } from "lucide-react";
 import { PendingMediaTile } from "./PendingMediaTile";
 import { MediaTile } from "./MediaTile";
+import { DeleteDialog } from "./DeleteDialog";
 import { GalleryTable, type GalleryEntry } from "./GalleryTable";
 import type { CharacterSummary, JobItem, MediaItem, MediaMetadataPatch } from "../types";
 
@@ -49,7 +50,7 @@ interface StudioViewProps {
   loading: boolean;
   error: string | null;
   onOpen: (url: string) => void;
-  onDelete: (item: MediaItem) => Promise<void> | void;
+  onDelete: (item: MediaItem, reason?: string) => Promise<void> | void;
   onOpenProjects?: () => void;
   filter: Filter;
   onFilterChange: (filter: Filter) => void;
@@ -69,7 +70,7 @@ interface StudioViewProps {
   onTrainingDatasetOnlyChange: (enabled: boolean) => void;
   sort: GallerySort;
   onSortChange: (sort: GallerySort) => void;
-  onBulkDelete: (items: MediaItem[]) => Promise<void>;
+  onBulkDelete: (items: MediaItem[], reason?: string) => Promise<void>;
   onBulkUpdateMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
 }
 
@@ -109,6 +110,7 @@ export function StudioView({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [viewSize, setViewSize] = useState<ViewSize>("large");
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     localStorage.getItem(VIEW_MODE_KEY) === "table" ? "table" : "grid"
@@ -149,15 +151,15 @@ export function StudioView({
     setSelectionMode(true);
   }, [items, itemKey]);
 
-  async function bulkDeleteSelected() {
+  async function bulkDeleteSelected(reason: string) {
     if (selectedItems.length === 0 || bulkBusy) return;
-    if (!window.confirm(`Delete ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
     setBulkBusy(true);
     try {
-      await onBulkDelete(selectedItems);
+      await onBulkDelete(selectedItems, reason);
       clearSelection();
     } finally {
       setBulkBusy(false);
+      setBulkDeleteOpen(false);
     }
   }
 
@@ -335,7 +337,15 @@ export function StudioView({
                 <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(true)} className="rounded-lg bg-brand px-2.5 py-2 text-xs font-medium text-brand-foreground transition hover:brightness-110 disabled:bg-gray-800 disabled:text-gray-500">Include in dataset</button>
                 <button disabled={bulkBusy} onClick={() => bulkSetTrainingDataset(false)} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white disabled:opacity-50">Remove from dataset</button>
                 <button disabled={bulkBusy} onClick={bulkAddTags} className="rounded-lg bg-gray-900 px-2.5 py-2 text-xs text-gray-300 transition hover:text-white disabled:opacity-50">Add tags</button>
-                <button disabled={bulkBusy} onClick={bulkDeleteSelected} className="rounded-lg bg-red-600 px-2.5 py-2 text-xs font-medium text-white transition hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-500">Delete</button>
+                <button disabled={bulkBusy} onClick={() => setBulkDeleteOpen(true)} className="rounded-lg bg-red-600 px-2.5 py-2 text-xs font-medium text-white transition hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-500">Delete</button>
+                <DeleteDialog
+                  open={bulkDeleteOpen}
+                  onOpenChange={setBulkDeleteOpen}
+                  deleting={bulkBusy}
+                  title={`Delete ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}?`}
+                  target={`${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`}
+                  onConfirm={bulkDeleteSelected}
+                />
               </>
             )}
             <button

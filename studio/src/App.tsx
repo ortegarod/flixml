@@ -93,7 +93,7 @@ interface AppContextType {
   training: LoraTrainingStatus | null;
   checkpoints: LoraCheckpoint[];
   trainingJobs: any[];
-  deleteItem: (item: MediaItem) => Promise<void>;
+  deleteItem: (item: MediaItem, reason?: string) => Promise<void>;
   projectData: { project: Project; scenes: Scene[]; shots: Shot[] } | null;
   selectedSceneId: string | null;
   selectedShotId: string | null;
@@ -123,7 +123,7 @@ interface AppContextType {
   gallerySort: GallerySort;
   setGallerySort: (sort: GallerySort) => void;
   updateMediaMetadata: (item: MediaItem, patch: MediaMetadataPatch) => Promise<void>;
-  bulkDeleteItems: (items: MediaItem[]) => Promise<void>;
+  bulkDeleteItems: (items: MediaItem[], reason?: string) => Promise<void>;
   bulkUpdateMediaMetadata: (items: MediaItem[], patcher: (item: MediaItem) => MediaMetadataPatch) => Promise<void>;
 }
 
@@ -780,12 +780,12 @@ function AppRoutes() {
   }, [projectId, projectData, selectedShotId, loadProject]);
 
   const deleteMutation = useMutation({
-    mutationFn: async (item: MediaItem) => {
+    mutationFn: async ({ item, reason }: { item: MediaItem; reason?: string }) => {
       const filename = item.filename || item.url.replace(/^\/media\//, "");
       const response = await fetch("/api/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: [filename] }),
+        body: JSON.stringify({ files: [filename], reason: reason || undefined }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -797,7 +797,7 @@ function AppRoutes() {
       }
       return { item, filename };
     },
-    onMutate: async (item) => {
+    onMutate: async ({ item }) => {
       await queryClient.cancelQueries({ queryKey: listingKeyBase });
       const key = (it: MediaItem) => it.filename || it.url;
       const targetKey = key(item);
@@ -819,7 +819,7 @@ function AppRoutes() {
       if (selected === item.url) setSelected(null);
       return { snapshots };
     },
-    onError: (err, _item, context) => {
+    onError: (err, _vars, context) => {
       if (context?.snapshots) {
         for (const [qKey, data] of context.snapshots) {
           queryClient.setQueryData(qKey, data);
@@ -837,8 +837,8 @@ function AppRoutes() {
   });
 
   const deleteItem = useCallback(
-    async (item: MediaItem) => {
-      await deleteMutation.mutateAsync(item);
+    async (item: MediaItem, reason?: string) => {
+      await deleteMutation.mutateAsync({ item, reason });
     },
     [deleteMutation]
   );
@@ -874,13 +874,13 @@ function AppRoutes() {
     [metadataMutation]
   );
 
-  const bulkDeleteItems = useCallback(async (itemsToDelete: MediaItem[]) => {
+  const bulkDeleteItems = useCallback(async (itemsToDelete: MediaItem[], reason?: string) => {
     if (itemsToDelete.length === 0) return;
     const files = itemsToDelete.map((item) => item.filename || item.url.replace(/^\/media\//, ""));
     const response = await fetch("/api/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files }),
+      body: JSON.stringify({ files, reason: reason || undefined }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {

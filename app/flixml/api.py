@@ -4433,10 +4433,18 @@ async def update_media(
 
 @app.post("/api/delete")
 async def delete_media(body: dict[str, Any], agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
-    """Delete generated files by relative path and remove their DB records."""
+    """Delete generated files by relative path and remove their DB records.
+
+    An optional `reason` (a short note on why, up to 500 characters) is kept with the
+    deletion record on each file's job.
+    """
     files = body.get("files", [])
     if not isinstance(files, list):
         raise HTTPException(status_code=400, detail="files must be a list")
+    reason = body.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise HTTPException(status_code=400, detail="reason must be a string")
+    reason = (reason or "").strip()[:500] or None
 
     deleted: list[str] = []
     failed: list[dict[str, str]] = []
@@ -4460,7 +4468,7 @@ async def delete_media(body: dict[str, Any], agent: Agent | None = Depends(curre
             failed.append({"file": item, "error": str(exc)})
 
     if deleted:
-        await delete_media_rows(deleted)
+        await delete_media_rows(deleted, reason)
         await delete_project_shot_versions_by_files(deleted)
     return {"ok": not failed, "deleted": deleted, "failed": failed}
 

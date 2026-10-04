@@ -4,11 +4,12 @@ import { Trash2, X, Expand, Check, Bot, ScanFace } from "lucide-react";
 import type { MediaItem } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
 import { MediaPreview } from "./MediaPreview";
+import { DeleteDialog } from "./DeleteDialog";
 
 interface MediaTileProps {
   item: MediaItem;
   onOpen: () => void;
-  onDelete: (item: MediaItem) => Promise<void> | void;
+  onDelete: (item: MediaItem, reason?: string) => Promise<void> | void;
   onRemoveFromDataset?: (item: MediaItem) => Promise<void> | void;
   selectionMode?: boolean;
   selected?: boolean;
@@ -40,12 +41,11 @@ export function MediaTile({ item, onOpen, onDelete, onRemoveFromDataset, selecti
     }
   }
 
-  async function confirm(event: React.MouseEvent) {
-    event.stopPropagation();
+  async function confirm(reason: string) {
     if (deleting) return;
     setDeleting(true);
     try {
-      await onDelete(item);
+      await onDelete(item, reason);
     } finally {
       setDeleting(false);
       setDeleteOpen(false);
@@ -153,54 +153,23 @@ export function MediaTile({ item, onOpen, onDelete, onRemoveFromDataset, selecti
         >
           <Expand className="w-4 h-4" />
         </button>
-        <AlertDialog.Root open={deleteOpen} onOpenChange={(open) => !deleting && setDeleteOpen(open)}>
-          {!deleteOpen && (
-            <AlertDialog.Trigger asChild>
-              <button
-                onClick={(event) => event.stopPropagation()}
-                className="w-8 h-8 rounded-lg bg-black/60 text-white/80 backdrop-blur-sm flex items-center justify-center hover:bg-red-600 hover:text-white transition-all"
-                title="Delete"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </AlertDialog.Trigger>
-          )}
-          <AlertDialog.Portal>
-            <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
-            <AlertDialog.Content
-              onClick={(event) => event.stopPropagation()}
-              className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-800 bg-gray-950 p-5 shadow-2xl shadow-black/60 focus:outline-none"
-            >
-              <AlertDialog.Title className="text-base font-semibold text-white">
-                {deleting ? "Deleting…" : "Delete this image?"}
-              </AlertDialog.Title>
-              <AlertDialog.Description className="mt-2 text-sm text-gray-400 leading-relaxed">
-                Permanently delete <span className="text-gray-200">{item.name || item.filename || "this file"}</span>?
-                This cannot be undone.
-              </AlertDialog.Description>
-              <div className="mt-5 flex justify-end gap-2">
-                <AlertDialog.Cancel asChild>
-                  <button
-                    disabled={deleting}
-                    className="inline-flex items-center gap-2 rounded-xl border border-gray-800 bg-gray-900 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition"
-                  >
-                    <X className="w-4 h-4" />
-                    Cancel
-                  </button>
-                </AlertDialog.Cancel>
-                <AlertDialog.Action asChild>
-                  <button
-                    onClick={confirm}
-                    disabled={deleting}
-                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed transition"
-                  >
-                    {deleting ? "Deleting…" : "Delete"}
-                  </button>
-                </AlertDialog.Action>
-              </div>
-            </AlertDialog.Content>
-          </AlertDialog.Portal>
-        </AlertDialog.Root>
+        {!deleteOpen && (
+          <button
+            onClick={(event) => { event.stopPropagation(); setDeleteOpen(true); }}
+            className="w-8 h-8 rounded-lg bg-black/60 text-white/80 backdrop-blur-sm flex items-center justify-center hover:bg-red-600 hover:text-white transition-all"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+        <DeleteDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          deleting={deleting}
+          title="Delete this image?"
+          target={item.name || item.filename || "this file"}
+          onConfirm={confirm}
+        />
       </div>
 
       {/* Bottom info bar */}

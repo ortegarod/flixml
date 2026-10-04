@@ -50,7 +50,7 @@ interface FormState {
 interface CharacterProfileViewProps {
   characterId: string;
   onOpen: (url: string) => void;
-  onDelete: (item: MediaItem) => Promise<void> | void;
+  onDelete: (item: MediaItem, reason?: string) => Promise<void> | void;
   onGenerate: () => void;
   onSaved?: () => void;
 }

@@ -30,7 +30,7 @@ interface ListingResponse {
 interface AgentProfileViewProps {
   agentId: string;
   onOpen: (url: string) => void;
-  onDelete: (item: MediaItem) => Promise<void> | void;
+  onDelete: (item: MediaItem, reason?: string) => Promise<void> | void;
   // Lend the lightbox this page's list while it's open. Without it the rail only
   // finds assets that happen to be in the gallery's first page, and everything
   // deeper opens as a bare image with no record beside it.

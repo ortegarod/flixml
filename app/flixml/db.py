@@ -12,8 +12,8 @@ from .config import get_settings
 
 _pool: asyncpg.Pool | None = None
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
-# jobs.metadata key holding the face fingerprints of the job's deleted images.
-DELETED_FACES_KEY = "deleted_faces"
+# jobs.metadata key recording the job's deleted files: when, why, and the face fingerprint.
+DELETED_KEY = "deleted"
 
 
 def get_pool() -> asyncpg.Pool:
@@ -279,9 +279,9 @@ def _job_row(row: asyncpg.Record) -> dict[str, Any]:
     if isinstance(metadata, str):
         with contextlib.suppress(json.JSONDecodeError):
             metadata = json.loads(metadata)
-    if isinstance(metadata, dict) and DELETED_FACES_KEY in metadata:
+    if isinstance(metadata, dict) and DELETED_KEY in metadata:
         # Kilobytes of fingerprints per deleted image; the polled jobs list doesn't carry them.
-        metadata = {key: value for key, value in metadata.items() if key != DELETED_FACES_KEY}
+        metadata = {key: value for key, value in metadata.items() if key != DELETED_KEY}
         data["metadata"] = json.dumps(metadata)
     if isinstance(metadata, dict):
         for key, value in metadata.items():
@@ -1470,31 +1470,33 @@ async def media_catalog_fingerprints() -> dict[str, tuple[int | None, Any, int |
     return {r["filename"]: (r["size"], r["modified"], r["width"], r["height"]) for r in rows}
 
 
-async def delete_media_rows(files: list[str]) -> None:
+async def delete_media_rows(files: list[str], reason: str | None = None) -> None:
     if not files:
         return
     async with get_pool().acquire() as conn, conn.transaction():
-        # A face fingerprint dies with its media row. Keep it, with the score the image
-        # had when it was deleted, on the job that made the image: a delete is a judgement
-        # a later scorer can learn from. updated_at stays put so the jobs list keeps its order.
+        # A deleted file is a judgement a later scorer can learn from, so record it on the
+        # job that made it: when, the optional reason, and the face fingerprint with the
+        # score it had, which otherwise die with the media row. updated_at stays put so the
+        # jobs list keeps its order.
         await conn.execute(
             """
             UPDATE jobs j
             SET metadata = jsonb_set(
                 COALESCE(j.metadata, '{}'::jsonb), ARRAY[$2::text],
-                COALESCE(j.metadata->$2, '{}'::jsonb) || d.faces)
+                COALESCE(j.metadata->$2, '{}'::jsonb) || d.files)
             FROM (
-                SELECT m.prompt_id, jsonb_object_agg(f.filename, jsonb_build_object(
-                    'embedding', to_jsonb(f.embedding), 'face_px', f.face_px,
-                    'score', f.score, 'deleted_at', NOW())) AS faces
-                FROM face_matches f JOIN media m ON m.filename = f.filename
-                WHERE f.filename = ANY($1::text[]) AND f.embedding IS NOT NULL AND m.prompt_id IS NOT NULL
+                SELECT m.prompt_id, jsonb_object_agg(m.filename, jsonb_strip_nulls(jsonb_build_object(
+                    'deleted_at', NOW(), 'reason', $3::text, 'embedding', to_jsonb(f.embedding),
+                    'face_px', f.face_px, 'score', f.score))) AS files
+                FROM media m LEFT JOIN face_matches f ON f.filename = m.filename
+                WHERE m.filename = ANY($1::text[]) AND m.prompt_id IS NOT NULL
                 GROUP BY m.prompt_id
             ) d
             WHERE j.prompt_id = d.prompt_id
             """,
             files,
-            DELETED_FACES_KEY,
+            DELETED_KEY,
+            reason,
         )
         await conn.execute("DELETE FROM media WHERE filename = ANY($1::text[])", files)
     _media_changed()
