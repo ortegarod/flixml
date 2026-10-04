@@ -4,7 +4,7 @@ import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import asyncpg
 
@@ -1151,6 +1151,21 @@ async def upsert_media(row: dict[str, Any]) -> None:
             row.get("metadata"),
             row.get("description"),
         )
+    _media_changed()
+
+
+# Called after every write that can change which images a character has: a new file,
+# a re-tag, a deletion. Features subscribe here so the writes don't import them.
+_media_change_listeners: list[Callable[[], None]] = []
+
+
+def on_media_change(listener: Callable[[], None]) -> None:
+    _media_change_listeners.append(listener)
+
+
+def _media_changed() -> None:
+    for listener in _media_change_listeners:
+        listener()
 
 
 _VIDEO_PREDICATE = (
@@ -1404,6 +1419,8 @@ async def update_media_metadata(
         RETURNING *
     """
     row = await get_pool().fetchrow(sql, *params)
+    if character_ids is not None:
+        _media_changed()
     return dict(row) if row else None
 
 
@@ -1448,6 +1465,7 @@ async def delete_media_rows(files: list[str]) -> None:
     if not files:
         return
     await get_pool().execute("DELETE FROM media WHERE filename = ANY($1::text[])", files)
+    _media_changed()
 
 
 async def media_without_face_match(limit: int) -> list[dict[str, Any]]:

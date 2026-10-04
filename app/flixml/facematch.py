@@ -28,9 +28,10 @@ MIN_REFERENCE_FACE_PX = 150
 # A character needs this many usable faces before its images get a score.
 MIN_REFERENCE_FACES = 5
 _BATCH = 16
-_IDLE_SECONDS = 15.0
 
 _task: asyncio.Task | None = None
+# Set by every media write (db.on_media_change); the loop sleeps on it.
+_wake = asyncio.Event()
 _models: tuple[Any, Any] | None = None
 _model_lock = asyncio.Lock()
 
@@ -114,8 +115,8 @@ def _scores(rows: list[dict[str, Any]]) -> dict[str, float]:
     return scores
 
 
-async def _fingerprint_new() -> set[str]:
-    """Fingerprint a batch of unscored character images; return the characters touched."""
+async def _fingerprint_batch() -> set[str]:
+    """Fingerprint the newest character images that have none yet; return their characters."""
     global _models
     rows = await db.media_without_face_match(_BATCH)
     if not rows:
@@ -143,26 +144,35 @@ async def rescore(character_id: str) -> int:
     return len(scores)
 
 
+async def _rescore_logged(character_id: str) -> None:
+    scored = await rescore(character_id)
+    logger.info("character rescored", extra={"event": "facematch.rescored", "character_id": character_id, "scored": scored})
+
+
 async def _loop() -> None:
+    """Wake on a media write, fingerprint what's new, rescore the characters that changed."""
     reference_sizes: dict[str, int] = {}
     while True:
+        await _wake.wait()
+        _wake.clear()
         try:
-            touched = await _fingerprint_new()
-            # A deletion or a re-tag changes a character's reference without adding a
-            # fingerprint; a changed count is how this loop notices.
+            # Rescore after every batch, so a new image shows its score within one batch
+            # even while a long backfill is still running behind it.
+            while touched := await _fingerprint_batch():
+                for character_id in touched:
+                    await _rescore_logged(character_id)
+            # A deletion or a re-tag adds no fingerprint; a character whose count moved
+            # lost or gained an image. Most writes (a file already scored) change neither.
             sizes = await db.face_fingerprint_counts()
-            touched |= {cid for cid, count in sizes.items() if reference_sizes.get(cid) != count}
+            changed = {cid for cid in sizes.keys() | reference_sizes.keys() if sizes.get(cid) != reference_sizes.get(cid)}
             reference_sizes = sizes
-            for character_id in touched:
-                scored = await rescore(character_id)
-                logger.info("character rescored", extra={"event": "facematch.rescored", "character_id": character_id, "scored": scored})
-            if not touched:
-                await asyncio.sleep(_IDLE_SECONDS)
+            for character_id in changed:
+                await _rescore_logged(character_id)
         except asyncio.CancelledError:
             raise
         except Exception:
+            # Left for the next write to retry; nothing here runs on a timer.
             logger.warning("face match cycle failed", extra={"event": "facematch.cycle_failed"}, exc_info=True)
-            await asyncio.sleep(_IDLE_SECONDS)
 
 
 def start() -> None:
@@ -172,6 +182,9 @@ def start() -> None:
         logger.info("character match off", extra={"event": "facematch.off", "reason": reason})
         return
     if _task is None or _task.done():
+        if _wake.set not in db._media_change_listeners:
+            db.on_media_change(_wake.set)
+        _wake.set()  # first pass scores whatever arrived while Studio was off
         _task = asyncio.create_task(_loop())
         logger.info("character match on", extra={"event": "facematch.on", "path": str(_model_dir())})
 
