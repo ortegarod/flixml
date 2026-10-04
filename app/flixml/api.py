@@ -4463,6 +4463,9 @@ async def delete_media(body: dict[str, Any], agent: Agent | None = Depends(curre
         try:
             if target.is_file():
                 target.unlink()
+            # The gallery's cached preview goes with it (see _thumb_file).
+            rel = target.resolve().relative_to(_OUTPUT_DIR.resolve())
+            (_THUMB_DIR / rel.with_suffix(rel.suffix + ".jpg")).unlink(missing_ok=True)
             deleted.append(item)
         except Exception as exc:  # noqa: BLE001
             failed.append({"file": item, "error": str(exc)})
