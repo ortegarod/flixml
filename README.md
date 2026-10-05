@@ -256,9 +256,6 @@ modified version as a network service, you have to publish your modifications
 under the same license. Self-hosting FlixML as-is for yourself, your team, or your
 clients requires nothing of you.
 
-If you want to build on FlixML without publishing your changes, a commercial
-license is available — open an issue.
-
 ---
 
 *Built for creators who want to work with ideas, not node graphs.*
