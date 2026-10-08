@@ -6,7 +6,7 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**14 workflows** across 5 task types.
+**15 workflows** across 5 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -24,6 +24,7 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `infinitetalk_i2v` | Image → Video | Audio-driven talking-head |
 | `wan22_i2v` | Image → Video | Image-to-video with Wan 2.2 — animate a still into a clip, with a motion prompt driving the movement |
 | `infinitetalk_v2v` | Video → Video | Audio-driven lip-sync applied on top of a driving motion clip |
+| `sam3_video_mask` | Video → Video | Cuts one subject out of a video as a mask: the subject white, everything else black, same frame count and frame rate as the clip |
 
 ## Text → Image
 
@@ -374,4 +375,18 @@ Audio-driven lip-sync applied on top of a driving motion clip. Loads a source vi
   - `speed_lora` · _str_ · default `WanVideo\Lightx2v\lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors`
   - `speed_lora_strength` · _float_ · default `1.0`
   - `filename_prefix` · _str_ · default `infinitetalk_v2v`
+
+### `sam3_video_mask` — SAM 3 Video Mask
+
+Cuts one subject out of a video as a mask: the subject white, everything else black, same frame count and frame rate as the clip. SAM 3 finds what the prompt names and tracks it through every frame. For motion-capture nodes that take a person mask video alongside the clip. Uses ComfyUI's core SAM 3 nodes, the same tracking step as its SAM 3D Body template. SAM License: https://github.com/facebookresearch/sam3/blob/main/LICENSE
+
+- **Output:** video
+- **Requirements:** needs video, ~8 GB VRAM, loads ~1.7 GB of model files (VRAM + system RAM)
+- **Providers:** local
+- **Params:**
+  - `prompt` · _str_ · **required** · default `person` — What SAM 3 tracks, in a word or two. With more than one person in frame, name the one you want ("man", "mannequin", "woman in red").
+  - `video` · _str_ · **required** — The clip to mask, as a ComfyUI input filename.
+  - `max_objects` · _int_ · default `1` — Most matches SAM 3 tracks. 1 keeps only the best match for the prompt.
+  - `sam3_model` · _str_ · default `sam3.1_multiplex_fp16.safetensors` — models/checkpoints. https://huggingface.co/Comfy-Org/sam3.1
+  - `filename_prefix` · _str_ · default `videos/sam3_video_mask`
 

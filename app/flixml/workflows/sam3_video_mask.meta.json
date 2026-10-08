@@ -1,0 +1,44 @@
+{
+  "id": "sam3_video_mask",
+  "name": "SAM 3 Video Mask",
+  "description": "Cuts one subject out of a video as a mask: the subject white, everything else black, same frame count and frame rate as the clip. SAM 3 finds what the prompt names and tracks it through every frame. For motion-capture nodes that take a person mask video alongside the clip. Uses ComfyUI's core SAM 3 nodes, the same tracking step as its SAM 3D Body template. SAM License: https://github.com/facebookresearch/sam3/blob/main/LICENSE",
+  "task": "video-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 8,
+    "model_files_gb": 1.7,
+    "workflow_type": "sam3",
+    "supports_lora": false,
+    "requires_video": true
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "default": "person",
+      "description": "What SAM 3 tracks, in a word or two. With more than one person in frame, name the one you want (\"man\", \"mannequin\", \"woman in red\")."
+    },
+    "video": {
+      "type": "str",
+      "required": true,
+      "description": "The clip to mask, as a ComfyUI input filename."
+    },
+    "max_objects": {
+      "type": "int",
+      "default": 1,
+      "description": "Most matches SAM 3 tracks. 1 keeps only the best match for the prompt."
+    },
+    "sam3_model": {
+      "type": "str",
+      "default": "sam3.1_multiplex_fp16.safetensors",
+      "description": "models/checkpoints. https://huggingface.co/Comfy-Org/sam3.1"
+    },
+    "filename_prefix": {
+      "type": "str",
+      "default": "videos/sam3_video_mask"
+    }
+  }
+}
