@@ -378,6 +378,8 @@ function jobMeta(job: JobItem): Record<string, any> {
 export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetadata, onDelete, onOpenOwner, jobs = [] }: LightboxProps) {
   const [detail, setDetail] = useState<ImageDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Files the asset's job wrote alongside it (an FBX, a GLB): downloads, never shown.
+  const [jobFiles, setJobFiles] = useState<{ filename: string; url: string }[]>([]);
   const [tagsDraft, setTagsDraft] = useState("");
   const [editingTags, setEditingTags] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
@@ -548,6 +550,23 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
       .catch(() => setDetail(null))
       .finally(() => setDetailLoading(false));
   }, [current?.prompt_id, current?.filename, current?.name, current?.metadata]);
+
+  useEffect(() => {
+    setJobFiles([]);
+    if (!current?.prompt_id) return;
+    let cancelled = false;
+    fetch(`/api/jobs/${current.prompt_id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const outputs: { type: string; filename: string; url: string }[] = data.outputs || [];
+        setJobFiles(outputs.filter((o) => o.type === "file"));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.prompt_id]);
 
   if (!selectedUrl) return null;
 
@@ -935,6 +954,22 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
           >
             <Download className="w-4 h-4" />
           </a>
+          {jobFiles.map((file) => {
+            const name = file.filename.split("/").pop() || file.filename;
+            const ext = name.includes(".") ? name.split(".").pop()!.toUpperCase() : "FILE";
+            return (
+              <a
+                key={file.url}
+                href={file.url}
+                download={name}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition"
+                title={`Download ${name}`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                {ext}
+              </a>
+            );
+          })}
           <button
             onClick={() => setDeleteOpen(true)}
             disabled={!current || deleting}

@@ -438,6 +438,15 @@ async def _require_readable(agent: Agent | None, filename: str | None) -> None:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
 
+async def _require_own_project(agent: Agent | None, project_id: str | None) -> None:
+    """Reject filing a job into a project the caller doesn't own. Members read, they don't add."""
+    if not project_id:
+        return
+    project = await get_project(project_id)
+    if project is None or (owner_scope(agent) is not None and not owns(agent, project.get("metadata"))):
+        raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+
+
 @app.get("/api/guide")
 async def guide() -> Response:
     """Return SKILL.md as raw plain text for AI agents."""
@@ -624,6 +633,10 @@ class VideoGenerateRequest(BaseModel):
         ),
     )
 
+    project_id: str | None = Field(
+        default=None,
+        description="File the job into one of your projects. Members of that project can read the job and download its outputs.",
+    )
     provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-gpu-1"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
 
@@ -754,6 +767,10 @@ class ImageGenerateRequest(BaseModel):
     workflow_params: dict[str, Any] | None = Field(
         default=None,
         description="Passthrough for workflow-specific params (e.g. faceid_weight, denoise, scheduler). Overrides built-in defaults.",
+    )
+    project_id: str | None = Field(
+        default=None,
+        description="File the job into one of your projects. Members of that project can read the job and download its outputs.",
     )
     provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-gpu-1"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
@@ -1273,8 +1290,15 @@ def _is_media_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in _ALLOW_EXT
 
 
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+
+
 def _media_type_from_path(path: Path) -> str:
-    return "video" if path.suffix.lower() in {".mp4", ".webm", ".gif"} else "image"
+    """video or image by extension; anything else a workflow writes (an FBX, a GLB) is a `file`."""
+    suffix = path.suffix.lower()
+    if suffix in {".mp4", ".webm", ".gif"}:
+        return "video"
+    return "image" if suffix in _IMAGE_SUFFIXES else "file"
 
 
 def _parse_jsonb(value: Any) -> Any:
@@ -2593,6 +2617,7 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
         await agent.require_capacity()
     for reference in (body.image, body.video, body.audio):
         await _require_readable(agent, reference)
+    await _require_own_project(agent, body.project_id)
 
     image = body.image
     if image:
@@ -2640,6 +2665,17 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
     # neutralize workflow LoRAs (e.g. Lightning speed LoRA) per request without a new workflow.
     if body.workflow_params is not None:
         workflow_params.update(body.workflow_params)
+        # A second clip in the params (a person mask beside the video, say) is a gallery
+        # file too: stage it to the run node the way the main video is staged.
+        for key, value in body.workflow_params.items():
+            if (
+                key != "video"
+                and isinstance(value, str)
+                and Path(value).suffix.lower() in _VIDEO_SUFFIXES
+                and _resolve_output_file(value) is not None
+            ):
+                await _require_readable(agent, value)
+                workflow_params[key] = await _ensure_comfy_input_video(value, body.provider)
 
     try:
         result = await service.generate(
@@ -2680,14 +2716,25 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
 
 def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
     outputs: list[JobOutput] = []
+    seen: set[str] = set()
     records = history.values() if isinstance(history, dict) else []
     for record in records:
         node_outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
         for node_output in node_outputs.values():
             if not isinstance(node_output, dict):
                 continue
-            for key in ("video", "videos", "gifs", "images"):
-                for item in node_output.get(key, []) or []:
+            for key, items in node_output.items():
+                if not isinstance(items, list):
+                    continue
+                media_key = key in ("video", "videos", "gifs", "images")
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    # Outside the media slots a node names a file it wrote the same way
+                    # (HYMotionRetargetFBX reports `fbx: [{filename, subfolder, type}]`);
+                    # there only a saved output counts.
+                    if not media_key and item.get("type") != "output":
+                        continue
                     filename = item.get("filename")
                     if not filename:
                         continue
@@ -2697,9 +2744,7 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                         continue
                     # Type is determined solely by the file extension — the
                     # ComfyUI output slot name is NOT trusted (e.g. SaveVideo
-                    # returns .mp4 under the "images" slot). No fallback: an
-                    # unrecognized extension is labeled by _media_type_from_path
-                    # as-is, so any mismatch surfaces loudly instead of hiding.
+                    # returns .mp4 under the "images" slot).
                     output_type = _media_type_from_path(Path(filename))
                     subfolder = item.get("subfolder", "")
                     folder_type = item.get("type", "output")
@@ -2713,7 +2758,14 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                     # The url is Studio's own /media path, behind the caller's key. The node's
                     # /view url went out here until 2026-10-03: it handed every key holder the
                     # node's address, and ComfyUI has no auth of its own.
-                    output.url = f"/media/{_relative_output_path(output)}"
+                    rel = _relative_output_path(output)
+                    # ComfyUI's job API can name one file twice (HYMotionRetargetFBX's
+                    # `fbx` entry and its `fbx_url` echo, with the subfolder folded into
+                    # the filename), so a file is kept once per path.
+                    if rel in seen:
+                        continue
+                    seen.add(rel)
+                    output.url = f"/media/{rel}"
                     outputs.append(output)
     return outputs
 
@@ -2775,13 +2827,20 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput], node: Comfy
     # The characters the job was bound to become the file's subjects, so each
     # character's gallery holds it whoever made it.
     character_ids = request_meta.get("character_ids") if isinstance(request_meta, dict) else None
+    first_file: str | None = None
     for output in outputs:
         rel = _relative_output_path(output)
         target = await _download_output_if_missing(output, node)
         if not target or not target.is_file():
             continue
-        first_filename = first_filename or rel
-        width, height = _read_dimensions(target)
+        # The job's card shows its picture or video; a file (FBX, GLB) rides along with it
+        # and is the job's output only when the job made nothing to show.
+        if output.type == "file":
+            first_file = first_file or rel
+            width, height = 0, 0
+        else:
+            first_filename = first_filename or rel
+            width, height = _read_dimensions(target)
         stat = target.stat()
         await upsert_media({
             "filename": rel,
@@ -2806,6 +2865,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput], node: Comfy
             "description": description,
             "character_ids": character_ids if isinstance(character_ids, list) else [],
         })
+    first_filename = first_filename or first_file
     if first_filename:
         await update_job_status(prompt_id, "completed", output_filename=first_filename)
         project_id = job_meta.get("project_id")
@@ -3778,6 +3838,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         agent.require_characters([r.get("id") for r in character_records if r.get("id")])
         await agent.require_capacity()
     await _require_readable(agent, body.image)
+    await _require_own_project(agent, body.project_id)
 
     # An edit workflow without its image would reach ComfyUI and fail there;
     # say so here, where the caller can still fix the request.
@@ -3888,6 +3949,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
             owner_id=agent.id if agent else None,
             extra_metadata={
                 **({"description": body.description} if body.description else {}),
+                **({"project_id": body.project_id} if body.project_id else {}),
                 "character_ids": [record.get("id") for record in character_records if record.get("id")],
             },
             submit=body.submit,

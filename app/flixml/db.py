@@ -610,12 +610,16 @@ def _shot_version_row(row: asyncpg.Record) -> dict[str, Any]:
 
 
 async def list_projects(limit: int = 100, owner_id: str | None = None) -> list[dict[str, Any]]:
-    """List projects, newest first. `owner_id` limits them to one agent's projects."""
+    """List projects, newest first. `owner_id` limits them to one agent's projects and the
+    ones it's a member of."""
     if owner_id is None:
         rows = await get_pool().fetch("SELECT * FROM projects ORDER BY updated_at DESC LIMIT $1", limit)
     else:
         rows = await get_pool().fetch(
-            "SELECT * FROM projects WHERE metadata->>'owner_id' = $2 ORDER BY updated_at DESC LIMIT $1", limit, owner_id
+            "SELECT * FROM projects WHERE metadata->>'owner_id' = $2 OR metadata->'members' ? $2 "
+            "ORDER BY updated_at DESC LIMIT $1",
+            limit,
+            owner_id,
         )
     return [_project_row(row) for row in rows]
 
@@ -1068,7 +1072,8 @@ async def get_agent(agent_id: str) -> dict[str, Any] | None:
 
 async def get_agent_by_key_hash(key_hash: str) -> dict[str, Any] | None:
     row = await get_pool().fetchrow(
-        "SELECT a.*, ARRAY(SELECT c.id FROM characters c WHERE c.owner_id = a.id ORDER BY c.id) AS characters "
+        "SELECT a.*, ARRAY(SELECT c.id FROM characters c WHERE c.owner_id = a.id ORDER BY c.id) AS characters, "
+        "ARRAY(SELECT p.id FROM projects p WHERE p.metadata->'members' ? a.id ORDER BY p.id) AS projects "
         "FROM agents a WHERE a.key_hash=$1",
         key_hash,
     )
@@ -1203,7 +1208,7 @@ def _media_where(
     training_dataset: bool | None = None,
     start_param: int = 1,
     owner_id: str | None = None,
-    viewer: tuple[str, list[str]] | None = None,
+    viewer: tuple[str, list[str], list[str]] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a shared WHERE clause + params for media listing/count queries.
 
@@ -1217,8 +1222,9 @@ def _media_where(
     clauses = [
         "workflow_type IS DISTINCT FROM 'project_render'",
         "NOT (filename LIKE 'projects/%' AND filename LIKE '%render-%')",
-        # TTS lines are catalogued so their owner can reference them, not to be shown.
-        "type <> 'audio'",
+        # TTS lines are catalogued so their owner can reference them, not to be shown;
+        # a file a workflow wrote (FBX, GLB) is downloaded from its job, not shown either.
+        "type NOT IN ('audio', 'file')",
     ]
     params: list[Any] = []
 
@@ -1288,12 +1294,17 @@ def _media_where(
         clauses.append(f"metadata->>'owner_id' = {token}")
 
     if viewer is not None:
-        viewer_id, viewer_characters = viewer
+        viewer_id, viewer_characters, viewer_projects = viewer
         id_token = _next()
         params.append(viewer_id)
         chars_token = _next()
         params.append(list(viewer_characters))
-        clauses.append(f"(metadata->>'owner_id' = {id_token} OR character_ids && {chars_token}::text[])")
+        projects_token = _next()
+        params.append(list(viewer_projects))
+        clauses.append(
+            f"(metadata->>'owner_id' = {id_token} OR character_ids && {chars_token}::text[] "
+            f"OR metadata->>'project_id' = ANY({projects_token}::text[]))"
+        )
 
     return " AND ".join(clauses), params
 
@@ -1308,7 +1319,7 @@ async def list_media(
     tag: str | None = None,
     training_dataset: bool | None = None,
     owner_id: str | None = None,
-    viewer: tuple[str, list[str]] | None = None,
+    viewer: tuple[str, list[str], list[str]] | None = None,
     sort: str | None = None,
 ) -> list[dict[str, Any]]:
     """`sort="match"` puts the closest character matches first, `"match_asc"` the furthest;
@@ -1349,7 +1360,7 @@ async def media_count(
     tag: str | None = None,
     training_dataset: bool | None = None,
     owner_id: str | None = None,
-    viewer: tuple[str, list[str]] | None = None,
+    viewer: tuple[str, list[str], list[str]] | None = None,
 ) -> int:
     where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id, viewer=viewer)
     sql = f"SELECT COUNT(*) FROM media WHERE {where}"

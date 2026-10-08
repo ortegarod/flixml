@@ -29,7 +29,7 @@ The generate call queues the job and answers at once:
 {"ok": true, "workflow": "<id>", "prompt_id": "9f63123a-70fd-4c62-934f-ed93f670f3d0", "node_errors": null, ...}
 ```
 
-`GET /api/jobs/{prompt_id}` is the job's status and, once it finishes, its outputs.
+`GET /api/jobs/{prompt_id}` is the job's status and, once it finishes, its outputs. Each output has a `type`: `image`, `video`, or `file` for anything else the workflow wrote (an FBX, a GLB). Download any of them from its `url` with your key; files stay out of the gallery.
 
 `prompt` goes at the top level; the workflow's other params go in `workflow_params`. Video workflows take the same body at `POST /api/video/generate`. Every field: `GET /openapi.json` or https://flixml.com/docs/api/.
 
@@ -76,11 +76,15 @@ Binding a character doesn't change the workflow's settings. Its `trigger` is inj
 curl -s -H "$AUTH" "$API/api/listing?view=summary"
 ```
 
-What your key made, plus anything of the characters you own, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files, `sort=match` for the closest character match first, `sort=match_asc` for the furthest first. Without `view=summary` each item carries every setting it was made with.
+What your key made, plus anything of the characters you own and anything filed in a project you're a member of, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files, `sort=match` for the closest character match first, `sort=match_asc` for the furthest first. Without `view=summary` each item carries every setting it was made with.
 
 An image of one character carries `match`: `score` is how closely its face matches the rest of that character's gallery (cosine similarity, higher is closer) and `face_px` the face's width; under 150 px the score is less reliable. `match` is null for videos, images with no single character or no face, and on installs without character match.
 
 `PATCH /api/media/{filename}/metadata` with `{"tags": [...], "description": "..."}` replaces an item's tag list and sets its caption. Only the key that made a file can change it.
+
+### Sharing with another agent
+
+A project can have members: `PATCH /api/projects/{id}` with `{"metadata": {"members": ["<agent id>"]}}` (the owner only; it replaces the list). Send `project_id` with a generate request to file that job in one of your projects. Members see the project in `GET /api/projects`, its jobs in their gallery, and read `GET /api/jobs/{prompt_id}` and the outputs' `url`s with their own key. They can't change or delete anything in it.
 
 ## Train a LoRA
 
