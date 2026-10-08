@@ -375,11 +375,25 @@ function jobMeta(job: JobItem): Record<string, any> {
   return job as Record<string, any>;
 }
 
+function fileExt(name: string): string {
+  return name.includes(".") ? name.split(".").pop()!.toUpperCase() : "";
+}
+
+// What a job's extra file is, in words, for the download menu.
+function fileKind(name: string): string {
+  const ext = fileExt(name);
+  if (ext === "FBX" || ext === "BVH") return "Animation";
+  if (ext === "GLB" || ext === "GLTF" || ext === "OBJ") return "3D model";
+  return "File";
+}
+
 export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetadata, onDelete, onOpenOwner, jobs = [] }: LightboxProps) {
   const [detail, setDetail] = useState<ImageDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   // Files the asset's job wrote alongside it (an FBX, a GLB): downloads, never shown.
   const [jobFiles, setJobFiles] = useState<{ filename: string; url: string }[]>([]);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  useEffect(() => setDownloadOpen(false), [selectedUrl]);
   const [tagsDraft, setTagsDraft] = useState("");
   const [editingTags, setEditingTags] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
@@ -946,30 +960,54 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
       {/* No file to download or delete until the job finishes. */}
       {!pendingId && (
         <>
-          <a
-            href={selectedUrl}
-            download={displayName || undefined}
-            className="p-1 rounded text-gray-500 hover:bg-gray-800 hover:text-white transition"
-            title="Download"
-          >
-            <Download className="w-4 h-4" />
-          </a>
-          {jobFiles.map((file) => {
-            const name = file.filename.split("/").pop() || file.filename;
-            const ext = name.includes(".") ? name.split(".").pop()!.toUpperCase() : "FILE";
-            return (
-              <a
-                key={file.url}
-                href={file.url}
-                download={name}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition"
-                title={`Download ${name}`}
+          {jobFiles.length === 0 ? (
+            <a
+              href={selectedUrl}
+              download={displayName || undefined}
+              className="p-1 rounded text-gray-500 hover:bg-gray-800 hover:text-white transition"
+              title="Download"
+            >
+              <Download className="w-4 h-4" />
+            </a>
+          ) : (
+            // One download button. When the job also wrote files (an FBX), it opens a
+            // menu that names each download, instead of a second unexplained icon.
+            <div className="relative">
+              <button
+                onClick={() => setDownloadOpen((open) => !open)}
+                className="p-1 rounded text-gray-500 hover:bg-gray-800 hover:text-white transition"
+                title="Download"
               >
-                <Download className="w-3.5 h-3.5" />
-                {ext}
-              </a>
-            );
-          })}
+                <Download className="w-4 h-4" />
+              </button>
+              {downloadOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setDownloadOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 min-w-[13rem] rounded-lg border border-gray-800 bg-gray-950 py-1 shadow-xl">
+                    {[
+                      { url: selectedUrl, name: displayName || "", label: isVideo ? "Video" : "Image" },
+                      ...jobFiles.map((file) => {
+                        const name = file.filename.split("/").pop() || file.filename;
+                        return { url: file.url, name, label: fileKind(name) };
+                      }),
+                    ].map((entry) => (
+                      <a
+                        key={entry.url}
+                        href={entry.url}
+                        download={entry.name || undefined}
+                        onClick={() => setDownloadOpen(false)}
+                        className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition"
+                        title={entry.name}
+                      >
+                        <span>{entry.label}</span>
+                        <span className="font-mono text-[10px] text-gray-500">{fileExt(entry.name)}</span>
+                      </a>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <button
             onClick={() => setDeleteOpen(true)}
             disabled={!current || deleting}
