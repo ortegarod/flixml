@@ -2747,6 +2747,10 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                     # That's the job's input, not something it made.
                     if item.get("type") == "input":
                         continue
+                    # A preview node (PreviewImage) writes to ComfyUI's temp dir, marked
+                    # "temp": something to look at inside the graph, not a result.
+                    if item.get("type") == "temp":
+                        continue
                     # Type is determined solely by the file extension — the
                     # ComfyUI output slot name is NOT trusted (e.g. SaveVideo
                     # returns .mp4 under the "images" slot).
