@@ -5,6 +5,9 @@ import { useJobProgress, useWorkflowRunTimes } from "../lib/jobProgress";
 
 interface PendingMediaTileProps {
   job: JobItem;
+  // Opens the job in the lightbox. Left out where the tile is itself the lightbox's
+  // stand-in for a file that doesn't exist yet.
+  onOpen?: () => void;
 }
 
 // Strip a staged path down to its filename for compact display.
@@ -26,7 +29,7 @@ function MetaChip({ icon, value, title }: { icon: string; value: string; title?:
   );
 }
 
-export function PendingMediaTile({ job }: PendingMediaTileProps) {
+export function PendingMediaTile({ job, onOpen }: PendingMediaTileProps) {
   const isFailed = job.status === "failed";
   const isCompleted = job.status === "completed";
 
@@ -56,10 +59,16 @@ export function PendingMediaTile({ job }: PendingMediaTileProps) {
 
   return (
     <div
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      aria-label={onOpen ? `Open ${statusText.toLowerCase()} job ${job.prompt_id}` : undefined}
+      onClick={onOpen}
+      onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } } : undefined}
       className={`
         relative aspect-[3/4] rounded-xl overflow-hidden border flex flex-col
         transition-all duration-300
         ${isFailed ? "border-red-800/40 bg-red-950/20" : "border-gray-800/60 bg-[#0d0d0d]"}
+        ${onOpen ? "cursor-pointer hover:border-gray-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" : ""}
       `}
     >
       {/* Animated shimmer background */}

@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { X, ChevronDown, ChevronLeft, ChevronRight, Trash2, Copy, Check, Download, Plus, Pencil } from "lucide-react";
-import type { GraphSettings, MediaItem, MediaMetadataPatch, SamplerPass } from "../types";
+import type { GraphSettings, JobItem, MediaItem, MediaMetadataPatch, SamplerPass } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
 import { DeleteDialog } from "./DeleteDialog";
+import { PendingMediaTile } from "./PendingMediaTile";
+import { selectedJobId } from "../lib/jobSelection";
 
 // Minimal shape of the /api/workflows entries we surface as remix options.
 interface WorkflowMeta {
@@ -354,9 +356,26 @@ interface LightboxProps {
   // Open the profile of the account that submitted this job. The lightbox stays
   // router-free; App closes it and navigates, the same way the sidebar does.
   onOpenOwner: (ownerId: string) => void;
+  // Jobs that may have no file yet. Selecting `job:<prompt_id>` opens one of these.
+  jobs?: JobItem[];
 }
 
-export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetadata, onDelete, onOpenOwner }: LightboxProps) {
+// A job row's saved metadata. /api/jobs sends it as a JSON string.
+function jobMeta(job: JobItem): Record<string, any> {
+  const raw = job.metadata;
+  if (raw && typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      // fall through to the flattened row
+    }
+  }
+  return job as Record<string, any>;
+}
+
+export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetadata, onDelete, onOpenOwner, jobs = [] }: LightboxProps) {
   const [detail, setDetail] = useState<ImageDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [tagsDraft, setTagsDraft] = useState("");
@@ -417,7 +436,30 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
   const currentIndex = items.findIndex((i) => i.url === selectedUrl || i.thumb === selectedUrl);
   const current = currentIndex >= 0 ? items[currentIndex] : null;
   const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < items.length - 1;
+  const hasNext = currentIndex >= 0 && currentIndex < items.length - 1;
+
+  // A job opened before its file exists. The jobs list is refetched on every server
+  // push, so this record stays live; the last copy is kept if the job drops off it.
+  const pendingId = selectedJobId(selectedUrl);
+  const liveJob = pendingId ? jobs.find((job) => job.prompt_id === pendingId) ?? null : null;
+  const lastJob = useRef<JobItem | null>(null);
+  if (liveJob) lastJob.current = liveJob;
+  const pendingJob = liveJob ?? (pendingId && lastJob.current?.prompt_id === pendingId ? lastJob.current : null);
+  const pendingDetail = useMemo<ImageDetail | null>(
+    () => (pendingJob ? { meta: jobMeta(pendingJob), completed_at: null } : null),
+    [pendingJob],
+  );
+  // The graph read-back a finished asset carries on the item, taken from the job row.
+  const pendingAsItem = pendingJob
+    ? ({ settings: pendingJob.settings, models: pendingJob.models, width: 0, height: 0 } as unknown as MediaItem)
+    : null;
+
+  // When the render lands, show the file in the same lightbox.
+  useEffect(() => {
+    if (!pendingId) return;
+    const output = items.find((item) => item.prompt_id === pendingId);
+    if (output) onSelect(output.url);
+  }, [pendingId, items, onSelect]);
 
   const goTo = useCallback((index: number) => {
     const target = items[index];
@@ -509,7 +551,19 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
 
   if (!selectedUrl) return null;
 
-  const isVideo = current?.type === "video" || selectedUrl.endsWith(".mp4") || selectedUrl.endsWith(".webm");
+  const isVideo = pendingId
+    ? pendingJob?.output_type === "video"
+    : current?.type === "video" || selectedUrl.endsWith(".mp4") || selectedUrl.endsWith(".webm");
+  const shownDetail = pendingId ? pendingDetail : detail;
+  const pendingStatus = !pendingJob
+    ? null
+    : pendingJob.status === "failed"
+      ? "Failed"
+      : pendingJob.status === "completed"
+        ? "Done"
+        : pendingJob.started_at
+          ? "Rendering"
+          : "Queued";
 
   const identifier = current?.filename || current?.name;
   const displayName = identifier ? identifier.split("/").pop() : null;
@@ -599,13 +653,13 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
           instruction: `Use this ${isVideo ? "video" : "image"} as the input to the "${w.name}" workflow (${w.task}). ${REMIX_INTENT[w.task]}`,
         }));
 
-  const ownerId: string | null = (detail?.meta?.owner_id as string) || null;
+  const ownerId: string | null = (shownDetail?.meta?.owner_id as string) || null;
   // The image this job started from. Video jobs record it at the top level;
   // image-to-image workflows pass it through as a graph param, so both places
   // have to be read or an edit looks like it came from nothing.
   const sourcePath: string | null =
-    (detail?.meta?.image as string) ||
-    ((detail?.meta?.workflow_params as Record<string, any>)?.image as string) ||
+    (shownDetail?.meta?.image as string) ||
+    ((shownDetail?.meta?.workflow_params as Record<string, any>)?.image as string) ||
     null;
   // An edit's input is a reference; a clip's input is the frame it starts on.
   const sourceLabel = isVideo ? "From this image" : "Reference image";
@@ -688,7 +742,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         </div>
       )}
 
-      <div className="mt-1.5 mb-4 flex flex-wrap items-center gap-1">
+      {current && <div className="mt-1.5 mb-4 flex flex-wrap items-center gap-1">
         {tags.map((tag) => (
           <span key={tag} className="rounded-full border border-gray-800 bg-black/30 px-2 py-0.5 text-[10px] text-gray-300">
             {tag}
@@ -701,7 +755,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         >
           <Plus className="h-3 w-3" />
         </button>
-      </div>
+      </div>}
 
       {editingTags && (
         <div className="mb-4 grid grid-cols-[1fr_auto] gap-1.5">
@@ -733,6 +787,17 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
           <Fact label="Time taken" value={elapsedLabel(current)} />
         </div>
       )}
+      {pendingJob && (
+        <div className="mb-4 space-y-0">
+          <Fact label="Status" value={pendingStatus} />
+          <Fact label="Workflow" value={pendingJob.workflow || pendingJob.job_type || null} />
+          <Fact label="Type" value={isVideo ? "Video" : "Image"} />
+          <Fact label="Node" value={pendingJob.provider || null} />
+          <Fact label="Submitted" value={formatStamp(pendingJob.created_at)} />
+          <Fact label="Started" value={formatStamp(pendingJob.started_at)} />
+          <Fact label="Error" value={pendingJob.error || null} />
+        </div>
+      )}
 
       {sourcePath && (
         <button
@@ -762,10 +827,10 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
       )}
 
       {detailLoading && <p className="text-xs text-gray-600 animate-pulse">Loading...</p>}
-      {!detailLoading && !detail && <p className="text-xs text-gray-600">No metadata available</p>}
-      {detail && (() => {
-        const promptText = detail.meta?.prompt || current?.prompt || null;
-        const groups = buildRecordGroups(detail, current);
+      {!detailLoading && !shownDetail && <p className="text-xs text-gray-600">No metadata available</p>}
+      {shownDetail && (() => {
+        const promptText = shownDetail.meta?.prompt || current?.prompt || pendingJob?.prompt || null;
+        const groups = buildRecordGroups(shownDetail, current ?? pendingAsItem);
         const fieldCount = groups.reduce((sum, group) => sum + group.rows.length, 0);
         return (
           <>
@@ -797,7 +862,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
               </summary>
               <div className="mt-2">
                 <MetaRow label="File" value={identifier || "none"} />
-                <MetaRow label="ID" value={current?.prompt_id || "none"} />
+                <MetaRow label="ID" value={current?.prompt_id || pendingId || "none"} />
                 {groups.map((group) => (
                   <div key={group.title}>
                     <p className="pt-3 pb-1 text-[10px] uppercase tracking-wider text-gray-600">{group.title}</p>
@@ -859,22 +924,27 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
           {copiedKey === "__context__" ? <Check className="w-4 h-4 text-brand" /> : <Copy className="w-4 h-4" />}
         </button>
       )}
-      <a
-        href={selectedUrl}
-        download={displayName || undefined}
-        className="p-1 rounded text-gray-500 hover:bg-gray-800 hover:text-white transition"
-        title="Download"
-      >
-        <Download className="w-4 h-4" />
-      </a>
-      <button
-        onClick={() => setDeleteOpen(true)}
-        disabled={!current || deleting}
-        className="p-1 rounded text-red-400 hover:bg-red-950/70 hover:text-red-200 disabled:opacity-30 transition"
-        title="Delete"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
+      {/* No file to download or delete until the job finishes. */}
+      {!pendingId && (
+        <>
+          <a
+            href={selectedUrl}
+            download={displayName || undefined}
+            className="p-1 rounded text-gray-500 hover:bg-gray-800 hover:text-white transition"
+            title="Download"
+          >
+            <Download className="w-4 h-4" />
+          </a>
+          <button
+            onClick={() => setDeleteOpen(true)}
+            disabled={!current || deleting}
+            className="p-1 rounded text-red-400 hover:bg-red-950/70 hover:text-red-200 disabled:opacity-30 transition"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </>
+      )}
       <button onClick={onClose} className="p-1 rounded text-gray-500 hover:bg-gray-800 hover:text-white transition" title="Close">
         <X className="w-4 h-4" />
       </button>
@@ -896,7 +966,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
-          <span className="text-xs text-gray-400 font-medium">{currentIndex + 1} / {items.length}</span>
+          <span className="text-xs text-gray-400 font-medium">{pendingId ? pendingStatus ?? "Job" : `${currentIndex + 1} / ${items.length}`}</span>
           <div className="flex items-center gap-1.5">
             {headerActions}
           </div>
@@ -904,7 +974,9 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
 
         {/* Image — natural size. Swipe left/right to navigate. */}
         <div className="w-full bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-          {isVideo ? (
+          {pendingId ? (
+            pendingJob && <div className="mx-auto w-full max-w-xs p-4"><PendingMediaTile job={pendingJob} /></div>
+          ) : isVideo ? (
             !isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline onLoadedMetadata={onVideoMetadata} className="w-full max-h-[68vh]" />
           ) : (
             <img src={selectedUrl} alt="" className="w-full max-h-[68vh] object-contain" />
@@ -929,7 +1001,9 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
 
         {/* Image */}
         <div className="flex-1 flex items-center justify-center py-6 min-w-0">
-          {isVideo ? (
+          {pendingId ? (
+            pendingJob && <div className="w-80"><PendingMediaTile job={pendingJob} /></div>
+          ) : isVideo ? (
             isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline onLoadedMetadata={onVideoMetadata} className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" />
           ) : (
             <img src={selectedUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
@@ -947,7 +1021,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         {/* Metadata sidebar */}
         <div className="shrink-0 w-72 border-l border-gray-800 bg-gray-950 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-            <span className="text-xs font-medium text-white">{currentIndex + 1} / {items.length}</span>
+            <span className="text-xs font-medium text-white">{pendingId ? pendingStatus ?? "Job" : `${currentIndex + 1} / ${items.length}`}</span>
             <div className="flex items-center gap-1">
               {headerActions}
             </div>

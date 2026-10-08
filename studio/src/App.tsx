@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerEvents } from "./lib/serverEvents";
 import { Toaster, toast } from "sonner";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { ArrowUp, BookOpen, Code2, LogOut, Menu, Settings, ShieldCheck, UserCircle, Users } from "lucide-react";
@@ -39,12 +40,9 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 2_000,
       retry: 1,
-      // React Query pauses every refetchInterval while the tab is hidden, so a render
-      // that finishes while the user is in another window lands on disk and in /api/listing
-      // but never reaches the open Studio tab. Refetching on focus is what closes that gap:
-      // without it the tab also waits out the rest of the 5s tick after the user returns.
-      // Background polling stays off — a hidden tab has no one to show the result to.
-      refetchOnWindowFocus: true,
+      // Fresh data arrives by push (useServerEvents), hidden tab or not, so a focus
+      // change has nothing to catch up on.
+      refetchOnWindowFocus: false,
     },
   },
 });
@@ -453,6 +451,7 @@ function Shell() {
       {/* Lightbox */}
       <Lightbox
         items={ctx.lightboxItems ?? ctx.items}
+        jobs={ctx.jobs}
         selectedUrl={ctx.selected}
         onClose={() => ctx.setSelected(null)}
         onSelect={ctx.setSelected}
@@ -630,19 +629,16 @@ function AppRoutes() {
       const next = lastPage.offset + lastPage.items.length;
       return next < lastPage.total && lastPage.items.length > 0 ? next : undefined;
     },
-    refetchInterval: 5000,
   });
 
   const countsQuery = useQuery({
     queryKey: countsKey,
     queryFn: () => fetchJson<ListingCounts>("/api/listing/counts", 3500),
-    refetchInterval: 10000,
   });
 
   const jobsQuery = useQuery({
     queryKey: jobsKey,
     queryFn: () => fetchJson<{ jobs?: JobItem[] }>("/api/jobs", 20000),
-    refetchInterval: 5000,
   });
 
   const charactersQuery = useQuery({
@@ -704,12 +700,12 @@ function AppRoutes() {
       setTrainingJobs(trainingJobsResult.value.jobs || []);
   }, [queryClient]);
 
-  // Stable polling — uses refs to avoid dependency churn
+  // A ref, so the mount effect below runs load once without depending on it
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  // Job state arrives through the /api/jobs and /api/listing polls above: database
-  // reads, which the server keeps current from each GPU node's pushes.
+  // Job and gallery state: the queries above refetch when the server pushes a change.
+  useServerEvents(queryClient);
   useEffect(() => {
     loadRef.current();
   }, []);

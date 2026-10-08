@@ -150,6 +150,11 @@ export interface JobItem {
   image?: string | null;
   video?: string | null;
   audio?: string | null;
+  // The record a finished asset carries — graph read-back and the metadata saved at
+  // submit time — so the lightbox can show it while the job runs. /api/jobs sends
+  // metadata as a JSON string.
+  settings?: GraphSettings | null;
+  metadata?: string | Record<string, any> | null;
 }
 
 export interface Project {

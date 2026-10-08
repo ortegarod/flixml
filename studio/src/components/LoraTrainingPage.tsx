@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ChevronDown, Download } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useApp } from "../App";
+import { onServerEvent } from "../lib/serverEvents";
 import { captionBody, TrainingDatasetSection } from "./TrainingDataset";
 
 interface Sample {
@@ -41,44 +42,44 @@ function formatDate(iso: string | undefined | null): string {
 export function LoraTrainingPage() {
   const ctx = useApp();
 
-  // App loads training state once at startup; while this page is open it asks
-  // the API again every 5 s so the step count, time left and samples move.
-  const [polledJobs, setPolledJobs] = useState<any[] | null>(null);
-  const [polledLive, setPolledLive] = useState<any>(undefined);
+  // App loads training state once at startup; while this page is open it reads it
+  // again on every `training` push, so the step count, time left and samples move.
+  const [liveJobs, setLiveJobs] = useState<any[] | null>(null);
+  const [liveStatus, setLiveStatus] = useState<any>(undefined);
   useEffect(() => {
     let cancelled = false;
-    const poll = async () => {
+    const load = async () => {
       try {
         const [jobsRes, statusRes] = await Promise.all([
           fetch("/api/lora-training/jobs"),
           fetch("/api/lora-training/status"),
         ]);
         if (cancelled) return;
-        if (jobsRes.ok) setPolledJobs((await jobsRes.json()).jobs || []);
+        if (jobsRes.ok) setLiveJobs((await jobsRes.json()).jobs || []);
         if (statusRes.ok) {
           const status = await statusRes.json();
-          setPolledLive(status.ok ? status : null);
+          setLiveStatus(status.ok ? status : null);
         }
       } catch {
         // keep the last state shown
       }
     };
-    poll();
-    const timer = setInterval(poll, 5000);
+    load();
+    const off = onServerEvent("training", load);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      off();
     };
   }, []);
-  const jobs = polledJobs ?? ctx.trainingJobs ?? [];
-  const live = polledLive === undefined ? ctx.training : polledLive;
+  const jobs = liveJobs ?? ctx.trainingJobs ?? [];
+  const live = liveStatus === undefined ? ctx.training : liveStatus;
 
-  // Live status of the latest job, polled by App from /api/lora-training/status.
+  // Live status of the latest job, from /api/lora-training/status.
   const effectiveLive = live;
 
   const mergedJobs = jobs.map((job: any) => {
     // The jobs list already carries the trainer's status for active jobs
-    // (server-side). The polled status adds total_steps for the latest one.
+    // (server-side). The live status adds total_steps for the latest one.
     if (effectiveLive && effectiveLive.job_name === job.job_name && (effectiveLive.status === "running" || effectiveLive.status === "training")) {
       return { ...job, ...effectiveLive, _live: true };
     }
@@ -102,7 +103,7 @@ export function LoraTrainingPage() {
             Training runs <span className="ml-1 text-gray-500 tabular-nums">{jobs.length}</span>
           </h2>
 
-          {polledJobs === null ? null : jobs.length === 0 ? (
+          {liveJobs === null ? null : jobs.length === 0 ? (
             <p className="text-sm text-gray-500 py-12 text-center">No training runs yet.</p>
           ) : (
             <div className="rounded-xl border border-gray-800/70 bg-gray-950 divide-y divide-gray-800/70">
@@ -239,10 +240,10 @@ function RunFacts({ job, active }: { job: any; active: boolean }) {
       }
     };
     load();
-    const timer = active ? setInterval(load, 10000) : null;
+    const off = active ? onServerEvent("training", load) : null;
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      off?.();
     };
   }, [job.job_name, active]);
 
@@ -354,10 +355,10 @@ function JobOutputs({ jobName, active }: { jobName: string; active: boolean }) {
       }
     };
     load();
-    const timer = active ? setInterval(load, 30000) : null;
+    const off = active ? onServerEvent("training", load) : null;
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      off?.();
     };
   }, [jobName, active]);
 

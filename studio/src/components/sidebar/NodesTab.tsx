@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useServerEvent } from "../../lib/serverEvents";
 
 type RuntimeMap = {
   comfyui?: { url: string; client_id?: string; online?: boolean; error?: string };
@@ -43,28 +44,25 @@ export function NodesTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setError(null);
-        const response = await fetch("/api/nodes");
-        if (!response.ok) throw new Error(`/api/nodes returned ${response.status}`);
-        const data = await response.json();
-        if (!cancelled) setNodes(data.nodes || {});
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const response = await fetch("/api/nodes");
+      if (!response.ok) throw new Error(`/api/nodes returned ${response.status}`);
+      const data = await response.json();
+      setNodes(data.nodes || {});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
     }
-    load();
-    const id = window.setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
   }, []);
+
+  // Reread when a node connects, drops, or its queue moves (the server pushes `nodes`).
+  useEffect(() => {
+    load();
+  }, [load]);
+  useServerEvent("nodes", load);
 
   const entries = Object.entries(nodes);
 

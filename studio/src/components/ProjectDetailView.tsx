@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { onServerEvent } from "../lib/serverEvents";
 import { Link } from "react-router-dom";
 import { Film, Image as ImageIcon, Video, Wand2, Plus, Save, Layers, Sparkles, Edit3, Play, ArrowLeft, Trash2, Clapperboard, Loader2, CheckCircle2, AlertTriangle, X, Download } from "lucide-react";
 import type { JobItem, Project, Scene, Shot, ShotVersion, ProjectPhase } from "../types";
@@ -48,7 +49,6 @@ export function ProjectDetailView({
     const v = project.metadata?.final_video;
     return typeof v === "string" ? `/media/${v}` : null;
   });
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     setRenderStatus(String(project.metadata?.render_status ?? "none"));
@@ -56,15 +56,14 @@ export function ProjectDetailView({
     setFinalVideoUrl(typeof v === "string" ? `/media/${v}` : null);
   }, [project.metadata]);
 
+  // While a render runs, reread its status each time the server pushes `projects`.
   useEffect(() => {
-    if (renderStatus !== "rendering") {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-      return;
-    }
-    pollRef.current = setInterval(async () => {
+    if (renderStatus !== "rendering") return;
+    let cancelled = false;
+    const load = async () => {
       try {
         const res = await fetch(`/api/projects/${project.id}/render`);
-        if (!res.ok) return;
+        if (!res.ok || cancelled) return;
         const data = await res.json();
         setRenderStatus(data.status ?? "none");
         if (data.final_video_url) setFinalVideoUrl(data.final_video_url);
@@ -74,13 +73,11 @@ export function ProjectDetailView({
             setActiveRenderId(data.renders[0].id);
           }
         }
-        if (data.status !== "rendering") {
-          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          if (data.status === "failed") setError(`Render failed: ${data.render_error ?? "unknown error"}`);
-        }
+        if (data.status === "failed") setError(`Render failed: ${data.render_error ?? "unknown error"}`);
       } catch { /* ignore */ }
-    }, 3000);
-    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+    };
+    const off = onServerEvent("projects", load);
+    return () => { cancelled = true; off(); };
   }, [project.id, renderStatus]);
 
   async function handleRender() {

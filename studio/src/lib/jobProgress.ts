@@ -41,9 +41,8 @@ export function typicalSeconds(
  * of its run time yet, so it gets no clock at all — an elapsed number next to a job
  * the node hasn't touched is a number it never earned, whatever the label says.
  *
- * The jobs list reports "pending" until a job is reconciled, and `started_at` is
- * written by that same reconcile, so the single-job route below is what turns the
- * clock on.
+ * `started_at` is written when the node's push reconciles the job; the `jobs` event
+ * that change sends refetches the single-job route below, which turns the clock on.
  */
 export function useJobProgress(job: JobItem, now: number, workflows: WorkflowMeta[]) {
   const { data: live } = useQuery({
@@ -54,7 +53,7 @@ export function useJobProgress(job: JobItem, now: number, workflows: WorkflowMet
       const data = await res.json();
       return (data.job ?? data) as JobItem;
     },
-    refetchInterval: 5000,
+    // Refetched on each `jobs` push (useServerEvents), not on a timer.
     enabled: isActive(job),
   });
 

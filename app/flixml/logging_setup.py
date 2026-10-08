@@ -63,6 +63,30 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(obj, ensure_ascii=False, default=str)
 
 
+class _AccessFilter(logging.Filter):
+    """Give uvicorn's access lines fields, and drop the successful ones nobody reads.
+
+    uvicorn logs each request as `%s - "%s %s HTTP/%s" %d` with args (client, method,
+    path, http_version, status). A read of a path in SUPPRESS_ACCESS_LOG_PATHS that
+    succeeded is dropped; one that failed still logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not (isinstance(args, tuple) and len(args) == 5):
+            return True
+        client, method, full_path, _, status = args
+        path = str(full_path).split("?", 1)[0]
+        if isinstance(status, int) and status < 400 and path in SUPPRESS_ACCESS_LOG_PATHS:
+            return False
+        record.event = "http.request"
+        record.method = method
+        record.path = path
+        record.status = status
+        record.client = client
+        return True
+
+
 _CONFIGURED = False
 
 
@@ -83,12 +107,13 @@ def setup_logging(level: str = "INFO") -> None:
     handler.setFormatter(JsonFormatter())
     root.addHandler(handler)
     root.setLevel(level.upper())
+    # Python warnings (a library's DeprecationWarning) as log lines too, not raw stderr.
+    logging.captureWarnings(True)
 
     # Quiet noisy third-party loggers — keep WARNING+ from them.
     for noisy in (
         "httpx",
         "httpcore",
-        "uvicorn.access",     # we do our own request logging in middleware
         "websockets",
         "asyncio",
         "watchfiles",
@@ -104,6 +129,10 @@ def setup_logging(level: str = "INFO") -> None:
         lg.propagate = True
     logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    access = logging.getLogger("uvicorn.access")
+    access.setLevel(logging.INFO)
+    if not any(isinstance(f, _AccessFilter) for f in access.filters):
+        access.addFilter(_AccessFilter())
 
     _CONFIGURED = True
     logging.getLogger("flixml").info(
@@ -112,10 +141,11 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-# Paths whose access logs would drown the journal. Skipped by middleware.
+# Reads the Studio tab repeats on every push or page change; a successful one is not logged.
 SUPPRESS_ACCESS_LOG_PATHS: frozenset[str] = frozenset({
     "/api/jobs",
     "/api/listing",
+    "/api/listing/counts",
     "/api/nodes",
     "/api/projects",
     "/api/characters",

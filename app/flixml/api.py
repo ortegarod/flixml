@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -19,10 +20,11 @@ import httpx
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi import Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_change_file, can_read_file, current_agent, generate_key, hash_key, media_viewer, owner_scope, owns, set_session_cookie
-from . import facematch, node_events
+from . import events, facematch, node_events
 from .comfy import ComfyClient
 from .config import ComfyNode, get_settings
 from . import db
@@ -30,6 +32,10 @@ from .db import close_db, delete_character, delete_media_rows, delete_project, d
 from .workflows.registry import WorkflowMetadata, init_registry, get_registry
 from .providers import init_default_providers, list_providers
 from .services import GenerationService, GenerationError, MissingParamsError, ProviderNotFoundError, WorkflowNotFoundError
+from .logging_setup import setup_logging
+
+# Before anything logs: every flixml.* logger, and uvicorn's own, goes out as one JSON line.
+setup_logging(os.environ.get("LOG_LEVEL") or "INFO")
 
 
 async def _generate_tts(
@@ -1107,16 +1113,40 @@ async def _reconcile_node(node: ComfyNode) -> float | None:
     return again
 
 
+async def _training_snapshot() -> tuple[list[Any], bool]:
+    """What the training page shows, reduced to compare: every run's row state, plus the
+    trainer's status, step and info for runs in progress. Also whether any is in progress."""
+    jobs = await list_training_jobs()
+    active = [job for job in jobs if job.get("status") in _ACTIVE_TRAINING_STATUSES]
+    lookups = await asyncio.gather(*(_aitk_lookup(job["job_name"]) for job in active))
+    snapshot: list[Any] = [(job["job_name"], job.get("status"), "record" in (job.get("metadata") or {})) for job in jobs]
+    for job, (aitk_job, reachable) in zip(active, lookups):
+        aitk_job = aitk_job or {}
+        snapshot.append((job["job_name"], aitk_job.get("status"), aitk_job.get("step"), aitk_job.get("info"), reachable))
+    return snapshot, bool(active)
+
+
 async def _training_record_loop() -> None:
-    """Copy each finished training run's record off the trainer, every _TRAINING_RECORD_EVERY_SECONDS."""
+    """Record finished runs, and push `training` to open tabs when the trainer's answer changes.
+
+    The trainer has no push of its own (ai-toolkit's UI polls its /api/jobs too), so this
+    is the one place Studio asks it: every _TRAINING_ACTIVE_EVERY_SECONDS while a run is in
+    progress, every _TRAINING_RECORD_EVERY_SECONDS otherwise. Browsers never ask it on a timer.
+    """
+    last: list[Any] | None = None
     while True:
+        active = False
         try:
             await _record_finished_training_runs()
+            snapshot, active = await _training_snapshot()
+            if last is not None and snapshot != last:
+                events.publish("training")
+            last = snapshot
         except asyncio.CancelledError:
             raise
         except Exception:
             _training_logger.warning("training record cycle failed", exc_info=True)
-        await asyncio.sleep(_TRAINING_RECORD_EVERY_SECONDS)
+        await asyncio.sleep(_TRAINING_ACTIVE_EVERY_SECONDS if active else _TRAINING_RECORD_EVERY_SECONDS)
 
 
 def _workflow_entry(
@@ -1219,6 +1249,7 @@ async def start_reconciler() -> None:
     if _TRAINING_RECORD_TASK is None or _TRAINING_RECORD_TASK.done():
         _TRAINING_RECORD_TASK = asyncio.create_task(_training_record_loop())
     facematch.start()
+    events.close_streams_on_exit()
 
 
 @app.on_event("shutdown")
@@ -1994,6 +2025,7 @@ async def _set_render_status(project_id: str, status: str, error: str | None = N
             "final_video": final_video,
             "error_message": error,
         })
+    events.publish("projects")
 
 
 async def _probe_duration(path: Path) -> float:
@@ -2971,12 +3003,28 @@ async def video_stitch(body: StitchRequest, agent: Agent | None = Depends(curren
     }
 
 
+@app.get("/api/events")
+async def server_events() -> StreamingResponse:
+    """A Server-Sent Events stream naming what just changed.
+
+    Each event carries a topic only, and the client refetches it: `jobs` → `/api/jobs`,
+    `media` → `/api/listing`, `nodes` → `/api/nodes`, `projects` →
+    `/api/projects/{id}/render`, `training` → `/api/lora-training/jobs`.
+    The stream stays open; the browser's EventSource reconnects on its own after a drop.
+    """
+    return StreamingResponse(
+        events.stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/jobs")
 async def jobs(include_completed: bool = True, agent: Agent | None = Depends(current_agent)) -> dict[str, Any]:
     """Return jobs from durable Postgres state — a pure DB read, no live ComfyUI calls.
 
-    `_reconcile_node` keeps these rows current as each node pushes. This endpoint is
-    polled every few seconds by the gallery to render the "generating" lane, so it must
+    `_reconcile_node` keeps these rows current as each node pushes, and the gallery
+    refetches this on every `jobs` event to render the "generating" lane, so it must
     never call into a ComfyUI node itself: a saturated node (mid model-load) stops
     answering HTTP, and per-job round-trips would then hang the whole endpoint until it
     times out — blanking the lane even though jobs are actively running.
@@ -3286,6 +3334,7 @@ def _aitk_settings(job_config: dict[str, Any]) -> dict[str, Any]:
 
 
 _TRAINING_RECORD_EVERY_SECONDS = 30.0
+_TRAINING_ACTIVE_EVERY_SECONDS = 10.0
 
 
 def _downsample(points: list[dict[str, float]], keep: int = 200) -> list[dict[str, float]]:

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Copy, Maximize2, Video } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { copyText } from "../lib/agentContext";
+import { jobSelection } from "../lib/jobSelection";
 import type { JobItem, MediaItem } from "../types";
 
 export type GalleryEntry = { kind: "job"; job: JobItem } | { kind: "item"; item: MediaItem };
@@ -211,14 +212,14 @@ function RowDetail({ row, onOpen, indent }: { row: Row; onOpen: (url: string) =>
             <p className="text-gray-400">No prompt recorded.</p>
           )}
           {row.negative && <PromptBlock title="Negative prompt" text={row.negative} tone="text-gray-300" />}
-          {row.item && (
+          {(row.item || row.status) && (
             <button
               type="button"
-              onClick={() => onOpen(row.item!.url)}
+              onClick={() => onOpen(row.item ? row.item.url : jobSelection(row.key))}
               className="inline-flex items-center gap-1.5 rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs text-gray-100 transition hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
             >
               <Maximize2 className="h-3.5 w-3.5" />
-              Open {row.item.type === "video" ? "video" : "image"}
+              {row.item ? `Open ${row.item.type === "video" ? "video" : "image"}` : "Open details"}
             </button>
           )}
         </div>
@@ -347,11 +348,19 @@ export function GalleryTable({ entries, onOpen, selectionMode, isSelected, onTog
                         {item.type === "video" && <Video className="absolute bottom-0.5 right-0.5 h-3 w-3 text-white drop-shadow" />}
                       </button>
                     ) : (
-                      <div className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-900">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpen(jobSelection(row.key));
+                        }}
+                        aria-label={`Open job ${row.key}`}
+                        className="flex h-12 w-12 items-center justify-center rounded-md bg-gray-900 transition hover:bg-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+                      >
                         <span className={`rounded px-1 py-0.5 text-[9px] font-medium capitalize ${statusClass[row.status || ""] || "bg-gray-800 text-gray-300"}`}>
                           {row.status}
                         </span>
-                      </div>
+                      </button>
                     )}
                   </TableCell>
                   {/* Two-stage video workflows load a high- and a low-noise model; the first names the family. */}

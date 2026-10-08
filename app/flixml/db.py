@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 import asyncpg
 
+from . import events
 from .config import get_settings
 
 _pool: asyncpg.Pool | None = None
@@ -329,23 +330,30 @@ async def save_job(
             _json(metadata),
             error,
         )
+    events.publish("jobs")
 
 
 async def update_job_status(prompt_id: str, status: str, *, error: str | None = None, output_filename: str | None = None) -> None:
     completed = status in {"completed", "failed"}
     async with get_pool().acquire() as conn:
-        await conn.execute(
+        # Reconcile re-writes a finished job's status on every /api/jobs/{id} read, so the
+        # row is compared with its own pre-update copy and only a real change is pushed;
+        # pushing every write would have each tab's refetch trigger the next push.
+        changed = await conn.fetchval(
             """
             UPDATE jobs
             SET status=$2,
                 error=$3,
-                output_filename=COALESCE($4, output_filename),
+                output_filename=COALESCE($4, jobs.output_filename),
                 updated_at=NOW(),
                 -- Stamp once. _reconcile_job re-runs for a finished job on every
                 -- /api/jobs/{id} read, and an unguarded NOW() walked completed_at
                 -- forward on each one, inflating every run time derived from it.
-                completed_at=CASE WHEN $5 AND completed_at IS NULL THEN NOW() ELSE completed_at END
-            WHERE prompt_id=$1
+                completed_at=CASE WHEN $5 AND jobs.completed_at IS NULL THEN NOW() ELSE jobs.completed_at END
+            FROM (SELECT status, error, output_filename FROM jobs WHERE prompt_id=$1) old
+            WHERE jobs.prompt_id=$1
+            RETURNING (old.status, old.error, old.output_filename)
+                IS DISTINCT FROM (jobs.status, jobs.error, jobs.output_filename)
             """,
             prompt_id,
             status,
@@ -353,6 +361,8 @@ async def update_job_status(prompt_id: str, status: str, *, error: str | None = 
             output_filename,
             completed,
         )
+    if changed:
+        events.publish("jobs")
 
 
 async def update_job_metadata(prompt_id: str, metadata: dict[str, Any]) -> None:
@@ -490,6 +500,7 @@ async def save_training_job(
             job_name, status, config_path, log_path, output_dir,
             dataset, trigger_word, model, _json(metadata),
         )
+    events.publish("training")
 
 
 async def update_training_job_status(
@@ -1170,6 +1181,7 @@ def on_media_change(listener: Callable[[], None]) -> None:
 
 
 def _media_changed() -> None:
+    events.publish("media")
     for listener in _media_change_listeners:
         listener()
 
@@ -1430,6 +1442,8 @@ async def update_media_metadata(
     row = await get_pool().fetchrow(sql, *params)
     if character_ids is not None:
         _media_changed()
+    else:
+        events.publish("media")
     return dict(row) if row else None
 
 
@@ -1573,6 +1587,7 @@ async def save_face_scores(character_id: str, scores: dict[str, float]) -> None:
                 """,
                 list(scores), list(scores.values()),
             )
+    events.publish("media")
 
 
 async def delete_project_shot_versions_by_files(files: list[str]) -> None:

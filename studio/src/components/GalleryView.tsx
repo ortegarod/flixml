@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { ArrowDownUp, ArrowRight, Check, Film, Image, Layers, LayoutGrid, ListFilter, Search, SquareCheckBig, Table2, Video, X } from "lucide-react";
 import { PendingMediaTile } from "./PendingMediaTile";
+import { jobSelection } from "../lib/jobSelection";
 import { MediaTile } from "./MediaTile";
 import { DeleteDialog } from "./DeleteDialog";
 import { GalleryTable, type GalleryEntry } from "./GalleryTable";
@@ -596,7 +597,7 @@ export function StudioView({
           <div className={gridClass}>
           {merged.map((entry) => {
             if (entry.kind === "job") {
-              return <PendingMediaTile key={entry.job.prompt_id} job={entry.job} />;
+              return <PendingMediaTile key={entry.job.prompt_id} job={entry.job} onOpen={() => onOpen(jobSelection(entry.job.prompt_id))} />;
             }
             const item = entry.item;
             return (

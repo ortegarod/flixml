@@ -28,6 +28,7 @@ from collections.abc import Awaitable, Callable
 from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
+from . import events
 from .config import ComfyNode
 
 logger = logging.getLogger("flixml.node_events")
@@ -122,6 +123,9 @@ async def _listen(node: ComfyNode) -> None:
             ) as socket:
                 logger.info("node %s: socket open, jobs follow its pushes", node.id)
                 _unreachable.discard(node.id)
+                # Online again, and its jobs' `node_unreachable` flips back.
+                events.publish("nodes")
+                events.publish("jobs")
                 reported_down = False
                 delay = 1.0
                 # A node that restarted while we were away has lost its queue; this
@@ -136,6 +140,8 @@ async def _listen(node: ComfyNode) -> None:
                         continue
                     if kind == "status":
                         wake(node.id)
+                        # Its queue moved, and with it the VRAM the Nodes tab shows.
+                        events.publish("nodes")
             reason = "closed by node"
         except asyncio.CancelledError:
             raise
@@ -143,6 +149,8 @@ async def _listen(node: ComfyNode) -> None:
             reason = f"{type(exc).__name__}: {exc}"
         _unreachable.add(node.id)
         if not reported_down:
+            events.publish("nodes")
+            events.publish("jobs")
             logger.warning("node %s: no socket (%s); its jobs are unreachable until it reconnects", node.id, reason)
             reported_down = True
         await asyncio.sleep(delay)

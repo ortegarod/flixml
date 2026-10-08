@@ -123,6 +123,11 @@ Keys protect Studio, not your ComfyUI nodes. ComfyUI has no authentication of it
 | `FLIXML_COMFY_LORA_DIR` | Required. ComfyUI `models/loras` folder trained LoRAs are copied to |
 | `ELEVENLABS_API_KEY` | Optional. Lists ElevenLabs voices at `/api/tts/voices` and speaks lines at `/api/tts/generate`. |
 | `ELEVENLABS_VOICE_ID` | Optional. Default voice for `/api/tts/generate` when the request names none. |
+| `LOG_LEVEL` | Optional. `DEBUG`, `INFO` (default), `WARNING` or `ERROR`. |
+
+### Logs
+
+The API writes one JSON object per line to stdout: its own events and each request it serves. Successful reads the Studio UI repeats, such as `/api/jobs` and `/api/listing`, are left out; a failed one still shows. Under systemd, read them with `journalctl -u <your-service> -o cat | jq .`
 
 ## Quick API Example
 
