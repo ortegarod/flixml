@@ -2691,6 +2691,10 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                     filename = item.get("filename")
                     if not filename:
                         continue
+                    # A loader node (LoadVideo) reports the file it read, marked "input".
+                    # That's the job's input, not something it made.
+                    if item.get("type") == "input":
+                        continue
                     # Type is determined solely by the file extension — the
                     # ComfyUI output slot name is NOT trusted (e.g. SaveVideo
                     # returns .mp4 under the "images" slot). No fallback: an
