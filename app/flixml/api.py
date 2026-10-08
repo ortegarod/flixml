@@ -438,13 +438,16 @@ async def _require_readable(agent: Agent | None, filename: str | None) -> None:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
 
-async def _require_own_project(agent: Agent | None, project_id: str | None) -> None:
-    """Reject filing a job into a project the caller doesn't own. Members read, they don't add."""
-    if not project_id:
-        return
-    project = await get_project(project_id)
-    if project is None or (owner_scope(agent) is not None and not owns(agent, project.get("metadata"))):
-        raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+async def _share_accounts(share_with: list[str] | None) -> list[str] | None:
+    """The accounts in a `share_with` list, deduplicated; an id that isn't an account is
+    rejected rather than dropped, so nothing is shared with a typo."""
+    if share_with is None:
+        return None
+    ids = list(dict.fromkeys(item.strip() for item in share_with if item.strip()))
+    for account_id in ids:
+        if await db.get_agent(account_id) is None:
+            raise HTTPException(status_code=400, detail=f"No account '{account_id}'")
+    return ids
 
 
 @app.get("/api/guide")
@@ -633,9 +636,10 @@ class VideoGenerateRequest(BaseModel):
         ),
     )
 
-    project_id: str | None = Field(
+    share_with: list[str] | None = Field(
         default=None,
-        description="File the job into one of your projects. Members of that project can read the job and download its outputs.",
+        description="Account ids to share the job with. They see its outputs in their gallery and download them with their own key; they can't change or delete them.",
+        json_schema_extra={"examples": [["studio-guest"]]},
     )
     provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-gpu-1"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
@@ -768,9 +772,10 @@ class ImageGenerateRequest(BaseModel):
         default=None,
         description="Passthrough for workflow-specific params (e.g. faceid_weight, denoise, scheduler). Overrides built-in defaults.",
     )
-    project_id: str | None = Field(
+    share_with: list[str] | None = Field(
         default=None,
-        description="File the job into one of your projects. Members of that project can read the job and download its outputs.",
+        description="Account ids to share the job with. They see its outputs in their gallery and download them with their own key; they can't change or delete them.",
+        json_schema_extra={"examples": [["studio-guest"]]},
     )
     provider: str = Field(description="Provider id (see GET /api/providers)", json_schema_extra={"examples": ["local-gpu-1"]})
     submit: bool = Field(default=True, description="false returns workflow JSON without queueing")
@@ -2617,7 +2622,7 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
         await agent.require_capacity()
     for reference in (body.image, body.video, body.audio):
         await _require_readable(agent, reference)
-    await _require_own_project(agent, body.project_id)
+    body.share_with = await _share_accounts(body.share_with)
 
     image = body.image
     if image:
@@ -3838,7 +3843,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
         agent.require_characters([r.get("id") for r in character_records if r.get("id")])
         await agent.require_capacity()
     await _require_readable(agent, body.image)
-    await _require_own_project(agent, body.project_id)
+    share_with = await _share_accounts(body.share_with)
 
     # An edit workflow without its image would reach ComfyUI and fail there;
     # say so here, where the caller can still fix the request.
@@ -3949,7 +3954,7 @@ async def generate_image(body: ImageGenerateRequest, agent: Agent | None = Depen
             owner_id=agent.id if agent else None,
             extra_metadata={
                 **({"description": body.description} if body.description else {}),
-                **({"project_id": body.project_id} if body.project_id else {}),
+                **({"share_with": share_with} if share_with else {}),
                 "character_ids": [record.get("id") for record in character_records if record.get("id")],
             },
             submit=body.submit,
@@ -4504,6 +4509,11 @@ class MediaMetadataPatch(BaseModel):
     tags: list[str] | None = Field(default=None, json_schema_extra={"examples": [["keeper", "portrait"]]})
     character_ids: list[str] | None = None
     included_in_training_dataset: bool | None = None
+    share_with: list[str] | None = Field(
+        default=None,
+        description="Account ids to share the asset with; replaces the list, empty unshares. Applies to every output of its job.",
+        json_schema_extra={"examples": [["studio-guest"]]},
+    )
 
 
 @app.patch("/api/media/{path:path}/metadata")
@@ -4512,7 +4522,7 @@ async def update_media(
     body: MediaMetadataPatch,
     agent: Agent | None = Depends(current_agent),
 ) -> dict[str, Any]:
-    """Edit an asset's human-authored fields: caption, tags, subjects, training flag."""
+    """Edit an asset's human-authored fields: caption, tags, subjects, training flag, sharing."""
     if not _safe_output_path(path):
         raise HTTPException(status_code=403, detail="Access denied")
     # A row the caller can't see reads as absent rather than forbidden, so one
@@ -4526,6 +4536,9 @@ async def update_media(
     # the same permission as generating with the character.
     if agent is not None and owner_scope(agent) is not None and body.character_ids:
         agent.require_characters(body.character_ids)
+    share_with = await _share_accounts(body.share_with)
+    if share_with is not None:
+        await db.set_media_share_with(path, share_with)
 
     row = await db.update_media_metadata(
         path,
@@ -4543,6 +4556,7 @@ async def update_media(
         "tags": row.get("tags") or [],
         "character_ids": row.get("character_ids") or [],
         "included_in_training_dataset": row.get("included_in_training_dataset", False),
+        "share_with": (_parse_jsonb(row.get("metadata")) or {}).get("share_with") or [],
     }
 
 

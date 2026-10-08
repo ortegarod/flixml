@@ -610,16 +610,12 @@ def _shot_version_row(row: asyncpg.Record) -> dict[str, Any]:
 
 
 async def list_projects(limit: int = 100, owner_id: str | None = None) -> list[dict[str, Any]]:
-    """List projects, newest first. `owner_id` limits them to one agent's projects and the
-    ones it's a member of."""
+    """List projects, newest first. `owner_id` limits them to one agent's projects."""
     if owner_id is None:
         rows = await get_pool().fetch("SELECT * FROM projects ORDER BY updated_at DESC LIMIT $1", limit)
     else:
         rows = await get_pool().fetch(
-            "SELECT * FROM projects WHERE metadata->>'owner_id' = $2 OR metadata->'members' ? $2 "
-            "ORDER BY updated_at DESC LIMIT $1",
-            limit,
-            owner_id,
+            "SELECT * FROM projects WHERE metadata->>'owner_id' = $2 ORDER BY updated_at DESC LIMIT $1", limit, owner_id
         )
     return [_project_row(row) for row in rows]
 
@@ -1072,8 +1068,7 @@ async def get_agent(agent_id: str) -> dict[str, Any] | None:
 
 async def get_agent_by_key_hash(key_hash: str) -> dict[str, Any] | None:
     row = await get_pool().fetchrow(
-        "SELECT a.*, ARRAY(SELECT c.id FROM characters c WHERE c.owner_id = a.id ORDER BY c.id) AS characters, "
-        "ARRAY(SELECT p.id FROM projects p WHERE p.metadata->'members' ? a.id ORDER BY p.id) AS projects "
+        "SELECT a.*, ARRAY(SELECT c.id FROM characters c WHERE c.owner_id = a.id ORDER BY c.id) AS characters "
         "FROM agents a WHERE a.key_hash=$1",
         key_hash,
     )
@@ -1208,7 +1203,7 @@ def _media_where(
     training_dataset: bool | None = None,
     start_param: int = 1,
     owner_id: str | None = None,
-    viewer: tuple[str, list[str], list[str]] | None = None,
+    viewer: tuple[str, list[str]] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a shared WHERE clause + params for media listing/count queries.
 
@@ -1294,16 +1289,15 @@ def _media_where(
         clauses.append(f"metadata->>'owner_id' = {token}")
 
     if viewer is not None:
-        viewer_id, viewer_characters, viewer_projects = viewer
+        viewer_id, viewer_characters = viewer
         id_token = _next()
         params.append(viewer_id)
         chars_token = _next()
         params.append(list(viewer_characters))
-        projects_token = _next()
-        params.append(list(viewer_projects))
+        # Its own files, its characters', and what another account shared with it.
         clauses.append(
             f"(metadata->>'owner_id' = {id_token} OR character_ids && {chars_token}::text[] "
-            f"OR metadata->>'project_id' = ANY({projects_token}::text[]))"
+            f"OR metadata->'share_with' ? {id_token})"
         )
 
     return " AND ".join(clauses), params
@@ -1319,7 +1313,7 @@ async def list_media(
     tag: str | None = None,
     training_dataset: bool | None = None,
     owner_id: str | None = None,
-    viewer: tuple[str, list[str], list[str]] | None = None,
+    viewer: tuple[str, list[str]] | None = None,
     sort: str | None = None,
 ) -> list[dict[str, Any]]:
     """`sort="match"` puts the closest character matches first, `"match_asc"` the furthest;
@@ -1360,7 +1354,7 @@ async def media_count(
     tag: str | None = None,
     training_dataset: bool | None = None,
     owner_id: str | None = None,
-    viewer: tuple[str, list[str], list[str]] | None = None,
+    viewer: tuple[str, list[str]] | None = None,
 ) -> int:
     where, params = _media_where(type_filter, search, dir_prefix, character_id, tag, training_dataset, start_param=1, owner_id=owner_id, viewer=viewer)
     sql = f"SELECT COUNT(*) FROM media WHERE {where}"
@@ -1456,6 +1450,38 @@ async def update_media_metadata(
     else:
         events.publish("media")
     return dict(row) if row else None
+
+
+async def set_media_share_with(filename: str, share_with: list[str]) -> None:
+    """Set who an asset is shared with. A job's outputs go together (its video and the FBX
+    it wrote), so every file of the job and the job itself get the same list."""
+    value = _json(_text_list(share_with))
+    async with get_pool().acquire() as conn:
+        async with conn.transaction():
+            prompt_id = await conn.fetchval("SELECT prompt_id FROM media WHERE filename=$1", filename)
+            await conn.execute(
+                """
+                UPDATE media
+                SET metadata=jsonb_set(COALESCE(metadata, '{}'::jsonb), '{share_with}', $2::jsonb),
+                    updated_at=NOW()
+                WHERE filename=$1 OR ($3::text IS NOT NULL AND prompt_id=$3)
+                """,
+                filename,
+                value,
+                prompt_id,
+            )
+            if prompt_id:
+                await conn.execute(
+                    """
+                    UPDATE jobs
+                    SET metadata=jsonb_set(COALESCE(metadata, '{}'::jsonb), '{share_with}', $2::jsonb),
+                        updated_at=NOW()
+                    WHERE prompt_id=$1
+                    """,
+                    prompt_id,
+                    value,
+                )
+    events.publish("media")
 
 
 async def get_media_by_filename(filename: str) -> dict[str, Any] | None:

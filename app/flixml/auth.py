@@ -84,9 +84,6 @@ class Agent:
         self.avatar: str | None = row.get("avatar")
         # The characters this account owns, loaded with the key (`db.get_agent_by_key_hash`).
         self.characters: list[str] = list(row.get("characters") or [])
-        # Projects other accounts made and listed this one in as a member: it reads what's
-        # filed in them, never changes it.
-        self.projects: list[str] = list(row.get("projects") or [])
         self.allowed_workflows: list[str] | None = row.get("allowed_workflows") or None
         self.max_concurrent_jobs: int | None = row.get("max_concurrent_jobs")
 
@@ -129,17 +126,31 @@ def owner_scope(agent: Agent | None) -> str | None:
     return agent.id
 
 
+def _metadata_dict(metadata: dict | str | None) -> dict:
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
 def owns(agent: Agent | None, metadata: dict | str | None) -> bool:
     """Whether a row with this metadata is visible to the caller."""
     scope = owner_scope(agent)
     if scope is None:
         return True
-    if isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except json.JSONDecodeError:
-            return False
-    return isinstance(metadata, dict) and metadata.get("owner_id") == scope
+    return _metadata_dict(metadata).get("owner_id") == scope
+
+
+def shared_with(agent: Agent | None, metadata: dict | str | None) -> bool:
+    """Whether the row's owner shared it with the caller (`share_with` on the job): it reads
+    it, never changes it."""
+    scope = owner_scope(agent)
+    if scope is None:
+        return True
+    share_with = _metadata_dict(metadata).get("share_with")
+    return isinstance(share_with, list) and scope in share_with
 
 
 async def agent_for_key(raw_key: str) -> Agent | None:
@@ -160,38 +171,21 @@ def shared_characters(agent: Agent | None) -> list[str]:
     return list(agent.characters)
 
 
-def shared_projects(agent: Agent | None) -> list[str]:
-    """Projects whose files a scoped caller reads besides its own: those it's a member of."""
-    if owner_scope(agent) is None:
-        return []
-    return list(agent.projects)
-
-
-def in_shared_project(agent: Agent | None, metadata: dict | str | None) -> bool:
-    """Whether a row with this metadata is filed in a project the caller is a member of."""
-    if isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except json.JSONDecodeError:
-            return False
-    return isinstance(metadata, dict) and metadata.get("project_id") in shared_projects(agent)
-
-
-def media_viewer(agent: Agent | None) -> tuple[str, list[str], list[str]] | None:
+def media_viewer(agent: Agent | None) -> tuple[str, list[str]] | None:
     """The media a caller may list, as `db._media_where` takes it; None sees everything."""
     scope = owner_scope(agent)
-    return None if scope is None else (scope, shared_characters(agent), shared_projects(agent))
+    return None if scope is None else (scope, shared_characters(agent))
 
 
 async def can_read_file(agent: Agent | None, filename: str) -> bool:
     """Whether the caller may read or reference an output file by its relative path:
-    one it made, or one bound to a character it owns."""
+    one it made, one shared with it, or one bound to a character it owns."""
     if owner_scope(agent) is None:
         return True
     row = await db.get_media_by_filename(filename.lstrip("/"))
     if row is None:
         return False
-    if owns(agent, row.get("metadata")) or in_shared_project(agent, row.get("metadata")):
+    if owns(agent, row.get("metadata")) or shared_with(agent, row.get("metadata")):
         return True
     return bool(set(row.get("character_ids") or []) & set(shared_characters(agent)))
 
@@ -246,13 +240,13 @@ async def authorize(
         agent.require_characters([params["character_id"]])
     if "project_id" in params:
         project = await db.get_project(params["project_id"])
-        member_read = request.method == "GET" and params["project_id"] in agent.projects
-        if project is None or not (owns(agent, project.get("metadata")) or member_read):
+        if project is None or not owns(agent, project.get("metadata")):
             raise HTTPException(status_code=404, detail="Project not found")
     if "prompt_id" in params:
         job = await db.get_job(params["prompt_id"])
-        member_read = request.method == "GET" and job is not None and job.get("project_id") in agent.projects
-        if job is None or not (job.get("owner_id") == agent.id or member_read):
+        # Shared with the caller: it reads the job and its outputs, never changes it.
+        shared_read = request.method == "GET" and job is not None and shared_with(agent, job.get("metadata"))
+        if job is None or not (job.get("owner_id") == agent.id or shared_read):
             raise HTTPException(status_code=404, detail="Job not found")
     if path.startswith(("/media/", "/api/thumb/")) and not await can_read_file(agent, params.get("path", "")):
         raise HTTPException(status_code=404, detail="Not found")
