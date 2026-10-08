@@ -2756,6 +2756,12 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                     # returns .mp4 under the "images" slot).
                     output_type = _media_type_from_path(Path(filename))
                     subfolder = item.get("subfolder", "")
+                    # Some save nodes (Save3DAdvanced) fold the subfolder into the
+                    # filename and leave `subfolder` empty; the node's /view only finds
+                    # the file when the two are passed apart.
+                    if "/" in filename:
+                        folded, filename = filename.rsplit("/", 1)
+                        subfolder = f"{subfolder.strip('/')}/{folded}" if subfolder else folded
                     folder_type = item.get("type", "output")
                     output = JobOutput(
                         type=output_type,
