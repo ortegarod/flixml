@@ -39,8 +39,8 @@ _model_lock = asyncio.Lock()
 
 
 def _model_dir() -> Path:
-    configured = get_settings().face_model_dir
-    return Path(configured).expanduser() if configured else Path.home() / ".insightface" / "models" / "buffalo_l"
+    # InsightFace's own default location for the buffalo_l pack.
+    return Path.home() / ".insightface" / "models" / "buffalo_l"
 
 
 def unavailable_reason() -> str | None:

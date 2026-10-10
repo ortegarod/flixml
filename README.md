@@ -189,7 +189,7 @@ It needs two things Studio doesn't install for you:
 pip install -r requirements-face.txt
 ```
 
-and an [InsightFace](https://github.com/deepinsight/insightface) model pack: a folder holding a face detection and a face recognition `.onnx`, by default `~/.insightface/models/buffalo_l`, or wherever `FLIXML_FACE_MODEL_DIR` points. Studio never downloads the models. InsightFace's code is MIT, but its pretrained models are licensed for non-commercial research only, so whether you can use them is your call. Without the packages or the models, Studio runs exactly as before and images carry no score. Loaded, the models take about half a gigabyte of RAM.
+and an [InsightFace](https://github.com/deepinsight/insightface) model pack: a folder holding a face detection and a face recognition `.onnx`, in `~/.insightface/models/buffalo_l`. Studio never downloads the models. InsightFace's code is MIT, but its pretrained models are licensed for non-commercial research only, so whether you can use them is your call. Without the packages or the models, Studio runs exactly as before and images carry no score. Loaded, the models take about half a gigabyte of RAM.
 
 Scores are cosine similarity, higher is closer. Faces narrower than 150 px score less reliably and show dimmed. A character needs 5 images with a clear face before its images get a score.
 
