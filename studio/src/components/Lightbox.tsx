@@ -187,12 +187,8 @@ function ownerLabel(id: string): string {
 // with four LoRAs still spends one row on them rather than four.
 // Fields the submitted graph reports, so the call is never asked about them. Deleted
 // from the metadata blob before the groups below are built — one row per fact, and the
-// graph is the one that saw what happened.
-//
-// Measured over 600 assets on 2026-09-21: requested and actual disagreed zero times on
-// every one of these, and the graph knew the value far more often than the call did —
-// steps on 464 assets the call never mentioned, sampler on 466, checkpoint on 411. The
-// only thing a second "as requested" column ever added was a `none` next to a fact.
+// graph is the one that saw what happened, and it knows these values even when the
+// call left them at a default.
 const GRAPH_COVERED = ["checkpoint", "seed", "steps", "cfg", "sampler", "scheduler", "fps", "loras"];
 
 // What made this asset. The graph first; the call fills a row only where the graph is
@@ -227,9 +223,8 @@ function settingsRows(
   ];
 }
 
-// Every field the record can carry, grouped in reading order. This is the union of
-// every key present across the whole library — metadata and workflow_params both,
-// surveyed 2026-09-21 over all 1,284 assets — so the same rows appear on every
+// Every field the record can carry, grouped in reading order, from metadata and
+// workflow_params both, so the same rows appear on every
 // asset and two panels can be read side by side. A field with nothing in it still
 // gets a row saying `none`: that proves it was read and empty, where a missing row
 // proves nothing at all, and a list whose length changes per asset can't be compared.

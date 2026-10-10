@@ -2770,9 +2770,9 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                         folder_type=folder_type,
                         url="",
                     )
-                    # The url is Studio's own /media path, behind the caller's key. The node's
-                    # /view url went out here until 2026-10-03: it handed every key holder the
-                    # node's address, and ComfyUI has no auth of its own.
+                    # The url is Studio's own /media path, behind the caller's key, never the
+                    # node's /view url: that would hand out the node's address, and ComfyUI has
+                    # no auth of its own.
                     rel = _relative_output_path(output)
                     # ComfyUI's job API can name one file twice (HYMotionRetargetFBX's
                     # `fbx` entry and its `fbx_url` echo, with the subfolder folded into
@@ -2806,9 +2806,8 @@ async def _download_output_if_missing(output: JobOutput, node: ComfyClient) -> P
         return target
     target.parent.mkdir(parents=True, exist_ok=True)
     # Every poll of /api/jobs/{id} runs this, so two polls can overlap on one output.
-    # The tmp name is per-attempt: a shared one let the loser's replace() land on a
-    # file the winner had already renamed away, and the failure path then deleted the
-    # good download (2026-09-21, images/cb8e43bb_00001_.png). The target is never
+    # The tmp name is per-attempt, so one attempt's replace() or cleanup never touches
+    # a file another attempt already renamed into place. The target is never
     # unlinked on failure either — it is either ours and incomplete (still under tmp)
     # or someone else's and finished.
     tmp = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
