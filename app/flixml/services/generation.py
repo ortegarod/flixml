@@ -52,7 +52,7 @@ class WorkflowNotFoundError(GenerationError):
 
 
 class MissingParamsError(GenerationError):
-    """A param the workflow marks required was not supplied."""
+    """A param the workflow marks required was not supplied, or one is outside its allowed values."""
     pass
 
 
@@ -265,7 +265,8 @@ class GenerationService:
             template_params["total_steps"] = template_params["steps_high"] + template_params["steps_low"]
         
         # A required param left out would ship to the node as a literal "{{name}}"
-        # and fail there. Checked here, after every param source is merged.
+        # and fail there, and a value outside a param's enum fails the same way.
+        # Checked here, after every param source is merged.
         missing = registry.validate_params(workflow, template_params)
         if missing:
             raise MissingParamsError("; ".join(missing))

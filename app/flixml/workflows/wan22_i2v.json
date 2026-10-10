@@ -56,7 +56,7 @@
   "94": {
     "class_type": "ComfyMathExpression",
     "inputs": {
-      "expression": "floor(sqrt(921600 * a / b) / 16) * 16",
+      "expression": "floor(sqrt({{size}} * a / b) / 16) * 16",
       "values.a": ["93", 0],
       "values.b": ["93", 1]
     }
@@ -64,7 +64,7 @@
   "95": {
     "class_type": "ComfyMathExpression",
     "inputs": {
-      "expression": "floor(sqrt(921600 * b / a) / 16) * 16",
+      "expression": "floor(sqrt({{size}} * b / a) / 16) * 16",
       "values.a": ["93", 0],
       "values.b": ["93", 1]
     }

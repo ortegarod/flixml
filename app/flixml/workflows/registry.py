@@ -171,7 +171,8 @@ class WorkflowRegistry:
     def validate_params(self, workflow_id: str, params: dict[str, Any]) -> list[str]:
         """Validate params against workflow's declared interface.
         
-        Returns list of error messages (empty if valid).
+        Checks required params and any declared `enum`. Returns list of error
+        messages (empty if valid).
         """
         errors = []
         metadata = self._workflows.get(workflow_id)
@@ -186,7 +187,10 @@ class WorkflowRegistry:
             
             if required and not has_default and not provided:
                 errors.append(f"Missing required param: {param_name}")
-        
+            allowed = param_schema.get("enum")
+            if allowed and provided and params[param_name] not in allowed:
+                errors.append(f"{param_name} must be one of: {', '.join(map(str, allowed))}")
+
         return errors
     
     def build_workflow(self, workflow_id: str, params: dict[str, Any]) -> dict[str, Any] | None:

@@ -19,7 +19,13 @@
     "image": {
       "type": "str",
       "required": true,
-      "description": "Input image filename. The clip keeps this image's aspect ratio and is rendered at the area of 1280x720, the Wan 2.2 authors' default (wan/image2video.py, max_area=720*1280), in steps of 16."
+      "description": "Input image filename. The clip keeps this image's aspect ratio and is rendered at the area set by size, in steps of 16."
+    },
+    "size": {
+      "type": "str",
+      "default": "1280*720",
+      "enum": ["1280*720", "832*480"],
+      "description": "Render area, as the Wan 2.2 authors' --size flag: 1280*720 (720P, their default and every I2V example) or 832*480 (480P). I2V-A14B supports both (wan/configs/__init__.py SUPPORTED_SIZES). For image-to-video the size is an area, not a box: the clip takes the start image's aspect ratio at that many pixels, rounded down to steps of 16, as wan/image2video.py does with max_area. 832*480 is 43% of the pixels, for faster drafts and motion-capture source clips."
     },
     "negative_prompt": {
       "type": "str",
