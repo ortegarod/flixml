@@ -185,10 +185,6 @@ function ownerLabel(id: string): string {
 // params the caller never passed. Always the same five rows in the same order so
 // two assets line up: a one-pass image reads `none` under Pass (low), and an asset
 // with four LoRAs still spends one row on them rather than four.
-// Fields the submitted graph reports, so the call is never asked about them. Deleted
-// from the metadata blob before the groups below are built — one row per fact, and the
-// graph is the one that saw what happened, and it knows these values even when the
-// call left them at a default.
 const GRAPH_COVERED = ["checkpoint", "seed", "steps", "cfg", "sampler", "scheduler", "fps", "loras"];
 
 // What made this asset. The graph first; the call fills a row only where the graph is
@@ -223,15 +219,6 @@ function settingsRows(
   ];
 }
 
-// Every field the record can carry, grouped in reading order, from metadata and
-// workflow_params both, so the same rows appear on every
-// asset and two panels can be read side by side. A field with nothing in it still
-// gets a row saying `none`: that proves it was read and empty, where a missing row
-// proves nothing at all, and a list whose length changes per asset can't be compared.
-//
-// Adding a param to a workflow means adding its key here. Anything missed still
-// shows up, under Other at the bottom — that section being non-empty is the signal
-// this list has fallen behind.
 const RECORD_GROUPS: Array<{ title: string; keys: string[] }> = [
   // Everything GRAPH_COVERED names is gone from these lists — it is already answered
   // once, above, by the graph. What is left is what the graph cannot see: where the job

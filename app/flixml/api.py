@@ -2770,9 +2770,6 @@ def _extract_outputs(history: dict[str, Any]) -> list[JobOutput]:
                         folder_type=folder_type,
                         url="",
                     )
-                    # The url is Studio's own /media path, behind the caller's key, never the
-                    # node's /view url: that would hand out the node's address, and ComfyUI has
-                    # no auth of its own.
                     rel = _relative_output_path(output)
                     # ComfyUI's job API can name one file twice (HYMotionRetargetFBX's
                     # `fbx` entry and its `fbx_url` echo, with the subfolder folded into
@@ -2805,11 +2802,6 @@ async def _download_output_if_missing(output: JobOutput, node: ComfyClient) -> P
     if target.is_file():
         return target
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Every poll of /api/jobs/{id} runs this, so two polls can overlap on one output.
-    # The tmp name is per-attempt, so one attempt's replace() or cleanup never touches
-    # a file another attempt already renamed into place. The target is never
-    # unlinked on failure either — it is either ours and incomplete (still under tmp)
-    # or someone else's and finished.
     tmp = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
     try:
         async with httpx.AsyncClient(timeout=get_settings().request_timeout_seconds) as client:
