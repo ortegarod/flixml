@@ -62,7 +62,9 @@ export function MediaTile({ item, onOpen, onDelete, onRemoveFromDataset, selecti
         type={item.type}
         url={item.url}
         thumb={item.thumb}
-        alt={item.name || ""}
+        alt={item.description || item.name || ""}
+        text={item.prompt}
+        detail={item.metadata?.workflow_params?.instruction}
         className={item.type === "video"
           ? "w-full h-full object-cover"
           : "w-full h-full object-cover group-hover:scale-105 transition duration-500"}

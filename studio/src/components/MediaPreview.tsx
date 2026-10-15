@@ -28,11 +28,23 @@ export function MediaPreview({ type, url, thumb, alt, className = "", text, deta
   const videoRef = usePlayWhileVisible(isVideo);
 
   if (type === "audio") {
+    // Composed like a poster: the waveform mark is the centrepiece, the line hangs under
+    // it as the caption, the direction is a quiet footnote. Neutrals only — the card is
+    // chrome, and the gallery's colour belongs to the media.
     return (
-      <div className={`flex flex-col gap-3 overflow-hidden bg-gray-900 p-5 ${className}`}>
-        <AudioLines className="h-5 w-5 shrink-0 text-gray-500" />
-        <p className="line-clamp-[9] text-lg leading-snug text-gray-100 [overflow-wrap:anywhere]">{text || alt}</p>
-        {detail && <p className="line-clamp-5 text-sm italic leading-snug text-gray-500">{detail}</p>}
+      <div className={`relative flex flex-col items-center justify-center gap-5 overflow-hidden bg-gray-900 px-6 py-8 text-center ${className}`}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_38%,rgba(255,255,255,0.07),transparent_65%)]" />
+        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10">
+          <AudioLines className="h-7 w-7 text-gray-300" />
+        </div>
+        {(text || alt) && (
+          <p className="relative line-clamp-4 max-w-[30ch] text-[15px] font-medium leading-snug text-gray-100 [overflow-wrap:anywhere]">
+            {text ? `“${text}”` : alt}
+          </p>
+        )}
+        {detail && (
+          <p className="relative line-clamp-2 max-w-[34ch] text-xs leading-relaxed text-gray-500">{detail}</p>
+        )}
       </div>
     );
   }
