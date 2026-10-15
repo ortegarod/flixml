@@ -1,0 +1,49 @@
+{
+  "id": "breeze_tts2_direction",
+  "name": "Breeze TTS 2 Voice Direction",
+  "description": "Speaks a line in a voice cloned from a short reference clip, directed in plain English: tone, emotion, pace and delivery. Breeze TTS 2 (3.5B, bf16 weights) via the ComfyUI-Breeze-TTS-2 custom nodes (https://github.com/saganaki22/ComfyUI-Breeze-TTS-2); weights download on first run. Writes a 24 kHz mono FLAC. Model weights and self-hosted outputs are for research and non-commercial use only: https://huggingface.co/BreezeBlue/Breeze-TTS-2/blob/main/LICENSE",
+  "task": "text-to-speech",
+  "output_type": "audio",
+  "requirements": {
+    "vram_gb": 12,
+    "model_files_gb": 7.1,
+    "workflow_type": "breeze_tts2",
+    "supports_lora": false,
+    "requires_audio": true
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "description": "The line to speak. Sounds go inline in parentheses, e.g. (laugh), (sigh), (cough), (clears throat). How it should sound goes in `instruction`, not here."
+    },
+    "audio": {
+      "type": "str",
+      "required": true,
+      "description": "Reference clip of the voice to clone, staged to the run node."
+    },
+    "reference_text": {
+      "type": "str",
+      "required": true,
+      "description": "The exact transcript of the reference clip, word for word."
+    },
+    "instruction": {
+      "type": "str",
+      "required": true,
+      "description": "How to deliver the line, in plain English: tone, emotion, pace and delivery, e.g. \"Speak slowly with a restrained, serious tone.\""
+    },
+    "cfg": {
+      "type": "float",
+      "default": 4.0,
+      "description": "How strongly the instruction steers delivery. 4 is the author's setting for Voice Direction."
+    },
+    "seed": {
+      "type": "int",
+      "required": false,
+      "description": "Optional. Leave it out and every run is a new random take. Send a seed only to remake a take exactly: the seed a job used is in its record."
+    }
+  }
+}

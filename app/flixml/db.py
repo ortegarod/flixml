@@ -1217,9 +1217,8 @@ def _media_where(
     clauses = [
         "workflow_type IS DISTINCT FROM 'project_render'",
         "NOT (filename LIKE 'projects/%' AND filename LIKE '%render-%')",
-        # TTS lines are catalogued so their owner can reference them, not to be shown;
-        # a file a workflow wrote (FBX, GLB) is downloaded from its job, not shown either.
-        "type NOT IN ('audio', 'file')",
+        # A file a workflow wrote (FBX, GLB) is downloaded from its job, not shown.
+        "type <> 'file'",
     ]
     params: list[Any] = []
 
@@ -1229,7 +1228,9 @@ def _media_where(
     if type_filter == "video":
         clauses.append(_VIDEO_PREDICATE)
     elif type_filter == "image":
-        clauses.append(f"NOT {_VIDEO_PREDICATE}")
+        clauses.append(f"NOT {_VIDEO_PREDICATE} AND type <> 'audio'")
+    elif type_filter == "audio":
+        clauses.append("type = 'audio'")
 
     if search:
         token = _next()

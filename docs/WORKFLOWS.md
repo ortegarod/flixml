@@ -6,7 +6,7 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**15 workflows** across 5 task types.
+**16 workflows** across 6 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -25,6 +25,7 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `wan22_i2v` | Image → Video | Image-to-video with Wan 2.2 — animate a still into a clip, with a motion prompt driving the movement |
 | `infinitetalk_v2v` | Video → Video | Audio-driven lip-sync applied on top of a driving motion clip |
 | `sam3_video_mask` | Video → Video | Cuts one subject out of a video as a mask: the subject white, everything else black, same frame count and frame rate as the clip |
+| `breeze_tts2_direction` | Text → Speech | Speaks a line in a voice cloned from a short reference clip, directed in plain English: tone, emotion, pace and delivery |
 
 ## Text → Image
 
@@ -390,4 +391,21 @@ Cuts one subject out of a video as a mask: the subject white, everything else bl
   - `max_objects` · _int_ · default `1` — Most matches SAM 3 tracks. 1 keeps only the best match for the prompt.
   - `sam3_model` · _str_ · default `sam3.1_multiplex_fp16.safetensors` — models/checkpoints. https://huggingface.co/Comfy-Org/sam3.1
   - `filename_prefix` · _str_ · default `videos/sam3_video_mask`
+
+## Text → Speech
+
+### `breeze_tts2_direction` — Breeze TTS 2 Voice Direction
+
+Speaks a line in a voice cloned from a short reference clip, directed in plain English: tone, emotion, pace and delivery. Breeze TTS 2 (3.5B, bf16 weights) via the ComfyUI-Breeze-TTS-2 custom nodes (https://github.com/saganaki22/ComfyUI-Breeze-TTS-2); weights download on first run. Writes a 24 kHz mono FLAC. Model weights and self-hosted outputs are for research and non-commercial use only: https://huggingface.co/BreezeBlue/Breeze-TTS-2/blob/main/LICENSE
+
+- **Output:** audio
+- **Requirements:** needs audio, ~12 GB VRAM, loads ~7.1 GB of model files (VRAM + system RAM)
+- **Providers:** local
+- **Params:**
+  - `prompt` · _str_ · **required** — The line to speak. Sounds go inline in parentheses, e.g. (laugh), (sigh), (cough), (clears throat). How it should sound goes in `instruction`, not here.
+  - `audio` · _str_ · **required** — Reference clip of the voice to clone, staged to the run node.
+  - `reference_text` · _str_ · **required** — The exact transcript of the reference clip, word for word.
+  - `instruction` · _str_ · **required** — How to deliver the line, in plain English: tone, emotion, pace and delivery, e.g. "Speak slowly with a restrained, serious tone."
+  - `cfg` · _float_ · default `4.0` — How strongly the instruction steers delivery. 4 is the author's setting for Voice Direction.
+  - `seed` · _int_ — Optional. Leave it out and every run is a new random take. Send a seed only to remake a take exactly: the seed a job used is in its record.
 

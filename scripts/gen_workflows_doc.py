@@ -32,6 +32,7 @@ TASK_ORDER = [
     "image-to-video",
     "first-last-frame-to-video",
     "video-to-video",
+    "text-to-speech",
 ]
 
 TASK_LABELS = {
@@ -42,6 +43,7 @@ TASK_LABELS = {
     "image-to-video": "Image → Video",
     "first-last-frame-to-video": "First/Last frame → Video",
     "video-to-video": "Video → Video",
+    "text-to-speech": "Text → Speech",
 }
 
 

@@ -29,7 +29,7 @@ The generate call queues the job and answers at once:
 {"ok": true, "workflow": "<id>", "prompt_id": "9f63123a-70fd-4c62-934f-ed93f670f3d0", "node_errors": null, ...}
 ```
 
-`GET /api/jobs/{prompt_id}` is the job's status and, once it finishes, its outputs. Each output has a `type`: `image`, `video`, or `file` for anything else the workflow wrote (an FBX, a GLB). Download any of them from its `url` with your key; files stay out of the gallery.
+`GET /api/jobs/{prompt_id}` is the job's status and, once it finishes, its outputs. Each output has a `type`: `image`, `video`, `audio`, or `file` for anything else the workflow wrote (an FBX, a GLB). Download any of them from its `url` with your key; files stay out of the gallery.
 
 `prompt` goes at the top level; the workflow's other params go in `workflow_params`. Video workflows take the same body at `POST /api/video/generate`. Every field: `GET /openapi.json` or https://flixml.com/docs/api/.
 
@@ -60,6 +60,10 @@ Image-to-video animates the pose in the start frame and cannot change it, so cho
 
 One clip holds one action. `POST /api/video/last-frame` returns a finished clip's final frame to start the next shot from, and `POST /api/video/stitch` joins finished clips into one video — both are a *new shot*, not a longer take. For a longer single action, raise `length` instead. Fields and examples: https://flixml.com/docs/api/
 
+### Speech
+
+Text-to-speech workflows clone a voice from a reference clip and take the same body at `POST /api/video/generate`; the line goes in `prompt`. Upload the clip with `POST /api/images/upload` (any audio file) and pass the returned filename as `audio`. The take lands in the gallery as audio.
+
 ### Characters
 
 ```bash
@@ -76,7 +80,7 @@ Binding a character doesn't change the workflow's settings. Its `trigger` is inj
 curl -s -H "$AUTH" "$API/api/listing?view=summary"
 ```
 
-What your key made, plus anything of the characters you own and anything shared with you, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files, `sort=match` for the closest character match first, `sort=match_asc` for the furthest first. Without `view=summary` each item carries every setting it was made with.
+What your key made, plus anything of the characters you own and anything shared with you, newest first, 60 at a time; `total` is the full count. Params: `limit` and `offset` to page, `type=image|video|audio`, `q=<text>` to search, `tag=<tag>`, `character_id=<id>`, `owner=<id>` for one account's files, `sort=match` for the closest character match first, `sort=match_asc` for the furthest first. Without `view=summary` each item carries every setting it was made with.
 
 A human may paste `FlixML asset <id>`, copied from an item in Studio. A UUID there is the job's `prompt_id`: `GET /api/jobs/<id>` reads it and its outputs. Anything else is a filename with no job behind it: `GET /api/listing?q=<filename>`.
 

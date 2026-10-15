@@ -1296,13 +1296,16 @@ def _is_media_file(path: Path) -> bool:
 
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+_AUDIO_SUFFIXES = {".wav", ".flac", ".mp3", ".ogg"}
 
 
 def _media_type_from_path(path: Path) -> str:
-    """video or image by extension; anything else a workflow writes (an FBX, a GLB) is a `file`."""
+    """video, image or audio by extension; anything else a workflow writes (an FBX, a GLB) is a `file`."""
     suffix = path.suffix.lower()
     if suffix in {".mp4", ".webm", ".gif"}:
         return "video"
+    if suffix in _AUDIO_SUFFIXES:
+        return "audio"
     return "image" if suffix in _IMAGE_SUFFIXES else "file"
 
 
@@ -2628,7 +2631,9 @@ async def generate_video(body: VideoGenerateRequest, agent: Agent | None = Depen
     if image:
         image = await _ensure_comfy_input_image(image, body.provider)
 
-    filename_prefix = _resolve_filename_prefix(body.filename_prefix, "videos")
+    filename_prefix = _resolve_filename_prefix(
+        body.filename_prefix, "audio" if meta is not None and meta.output_type == "audio" else "videos"
+    )
 
     if body.mode == "i2v" and not image:
         raise HTTPException(status_code=400, detail="image is required for i2v mode.")
@@ -2846,7 +2851,7 @@ async def _persist_outputs(prompt_id: str, outputs: list[JobOutput], node: Comfy
             width, height = 0, 0
         else:
             first_filename = first_filename or rel
-            width, height = _read_dimensions(target)
+            width, height = (0, 0) if output.type == "audio" else _read_dimensions(target)
         stat = target.stat()
         await upsert_media({
             "filename": rel,
@@ -4311,7 +4316,7 @@ async def listing(
     `?sort=match_asc` for the furthest first; unscored files come last either way.
     """
     type_filter: str | None = None
-    if type in {"image", "video"}:
+    if type in {"image", "video", "audio"}:
         type_filter = type
     search = q.strip() or None
     char_id = character_id.strip() or None

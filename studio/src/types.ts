@@ -6,7 +6,7 @@ export interface CharacterSummary {
 
 export interface MediaItem {
   name: string;
-  type: "image" | "video";
+  type: "image" | "video" | "audio";
   width: number;
   height: number;
   mtime: number;

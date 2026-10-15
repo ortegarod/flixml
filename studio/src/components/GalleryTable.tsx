@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, Copy, Maximize2, Video } from "lucide-react";
+import { AudioLines, Check, ChevronRight, Copy, Maximize2, Video } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { copyText } from "../lib/agentContext";
 import { jobSelection } from "../lib/jobSelection";
@@ -219,7 +219,7 @@ function RowDetail({ row, onOpen, indent }: { row: Row; onOpen: (url: string) =>
               className="inline-flex items-center gap-1.5 rounded-lg bg-gray-800 px-2.5 py-1.5 text-xs text-gray-100 transition hover:bg-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
             >
               <Maximize2 className="h-3.5 w-3.5" />
-              {row.item ? `Open ${row.item.type === "video" ? "video" : "image"}` : "Open details"}
+              {row.item ? `Open ${row.item.type}` : "Open details"}
             </button>
           )}
         </div>
@@ -344,7 +344,9 @@ export function GalleryTable({ entries, onOpen, selectionMode, isSelected, onTog
                         aria-label={`Open ${item.name}`}
                         className="relative block h-12 w-12 overflow-hidden rounded-md bg-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
                       >
-                        <img src={item.thumb || item.url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                        {item.type === "audio"
+                          ? <AudioLines className="m-auto h-5 w-5 text-gray-500" />
+                          : <img src={item.thumb || item.url} alt="" loading="lazy" className="h-full w-full object-cover" />}
                         {item.type === "video" && <Video className="absolute bottom-0.5 right-0.5 h-3 w-3 text-white drop-shadow" />}
                       </button>
                     ) : (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { X, ChevronDown, ChevronLeft, ChevronRight, Trash2, Copy, Check, Download, Plus, Pencil } from "lucide-react";
+import { X, ChevronDown, ChevronLeft, ChevronRight, Trash2, Copy, Check, Download, Plus, Pencil, AudioLines } from "lucide-react";
 import type { GraphSettings, JobItem, MediaItem, MediaMetadataPatch, SamplerPass } from "../types";
 import { assetReference, copyText } from "../lib/agentContext";
 import { DeleteDialog } from "./DeleteDialog";
@@ -391,7 +391,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
   // Read off the playing <video> once its metadata loads; cleared when the asset changes.
   const [videoSeconds, setVideoSeconds] = useState<number | null>(null);
   useEffect(() => setVideoSeconds(null), [selectedUrl]);
-  const onVideoMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+  const onVideoMetadata = (e: React.SyntheticEvent<HTMLMediaElement>) => {
     const d = e.currentTarget.duration;
     setVideoSeconds(Number.isFinite(d) && d > 0 ? d : null);
   };
@@ -559,6 +559,9 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
   const isVideo = pendingId
     ? pendingJob?.output_type === "video"
     : current?.type === "video" || selectedUrl.endsWith(".mp4") || selectedUrl.endsWith(".webm");
+  const isAudio = pendingId ? pendingJob?.output_type === "audio" : current?.type === "audio";
+  const kind = isVideo ? "video" : isAudio ? "audio" : "image";
+  const kindLabel = kind.charAt(0).toUpperCase() + kind.slice(1);
   const shownDetail = pendingId ? pendingDetail : detail;
   const pendingStatus = !pendingJob
     ? null
@@ -646,7 +649,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
   // input, minus any needing more VRAM than the biggest node here has. Each one
   // hands the agent this asset + a plain-English next step — Studio is
   // agent-driven, the frontend never fires a render itself.
-  const eligibleTasks = isVideo ? VIDEO_TASKS : IMAGE_TASKS;
+  const eligibleTasks = isAudio ? [] : isVideo ? VIDEO_TASKS : IMAGE_TASKS;
   const remixActions = !current
     ? []
     : workflows
@@ -655,7 +658,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         .map((w) => ({
           key: w.id,
           label: w.name,
-          instruction: `Use this ${isVideo ? "video" : "image"} as the input to the "${w.name}" workflow (${w.task}). ${REMIX_INTENT[w.task]}`,
+          instruction: `Use this ${kind} as the input to the "${w.name}" workflow (${w.task}). ${REMIX_INTENT[w.task]}`,
         }));
 
   const ownerId: string | null = (shownDetail?.meta?.owner_id as string) || null;
@@ -784,7 +787,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
       {current && (
         <div className="mb-4 space-y-0">
           <Fact label="Workflow" value={(detail?.meta?.workflow as string) || null} />
-          <Fact label="Type" value={isVideo ? "Video" : "Image"} />
+          <Fact label="Type" value={kindLabel} />
           <Fact label="Size" value={sizeLabel(current.settings, current)} />
           <Fact label="Duration" value={durationLabel(current.settings, videoSeconds)} />
           <Fact label="Submitted" value={formatStamp(current.submitted_at)} />
@@ -796,7 +799,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         <div className="mb-4 space-y-0">
           <Fact label="Status" value={pendingStatus} />
           <Fact label="Workflow" value={pendingJob.workflow || pendingJob.job_type || null} />
-          <Fact label="Type" value={isVideo ? "Video" : "Image"} />
+          <Fact label="Type" value={kindLabel} />
           <Fact label="Node" value={pendingJob.provider || null} />
           <Fact label="Submitted" value={formatStamp(pendingJob.created_at)} />
           <Fact label="Started" value={formatStamp(pendingJob.started_at)} />
@@ -983,6 +986,8 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         <div className="w-full bg-black" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {pendingId ? (
             pendingJob && <div className="mx-auto w-full max-w-xs p-4"><PendingMediaTile job={pendingJob} /></div>
+          ) : isAudio ? (
+            !isDesktop && <div className="flex flex-col items-center gap-4 px-4 py-10 text-gray-500"><AudioLines className="h-16 w-16" /><audio src={selectedUrl} controls autoPlay onLoadedMetadata={onVideoMetadata} className="w-full" /></div>
           ) : isVideo ? (
             !isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline onLoadedMetadata={onVideoMetadata} className="w-full max-h-[68vh]" />
           ) : (
@@ -1010,6 +1015,8 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         <div className="flex-1 flex items-center justify-center py-6 min-w-0">
           {pendingId ? (
             pendingJob && <div className="w-80"><PendingMediaTile job={pendingJob} /></div>
+          ) : isAudio ? (
+            isDesktop && <div className="flex w-full max-w-xl flex-col items-center gap-6 text-gray-500"><AudioLines className="h-24 w-24" /><audio src={selectedUrl} controls autoPlay onLoadedMetadata={onVideoMetadata} className="w-full" /></div>
           ) : isVideo ? (
             isDesktop && <video src={selectedUrl} controls autoPlay loop playsInline onLoadedMetadata={onVideoMetadata} className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" />
           ) : (
@@ -1045,7 +1052,7 @@ export function Lightbox({ items, selectedUrl, onClose, onSelect, onUpdateMetada
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         deleting={deleting}
-        title={`Delete this ${isVideo ? "video" : "image"}?`}
+        title={`Delete this ${kind}?`}
         target={displayName || "this file"}
         onConfirm={deleteCurrent}
       />

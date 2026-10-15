@@ -214,13 +214,13 @@ export function StudioView({
   const videoCount = counts.videos;
 
   const isJobVideo = (job: JobItem) =>
-    job.output_type === "video" ||
+    job.output_type !== "audio" && (job.output_type === "video" ||
     (job.job_type ? job.job_type.includes("video") : false) ||
     job.mode === "i2v" ||
     job.mode === "t2v" ||
-    job.mode === "flf2v";
+    job.mode === "flf2v");
 
-  const isJobImage = (job: JobItem) => !isJobVideo(job);
+  const isJobImage = (job: JobItem) => !isJobVideo(job) && job.output_type !== "audio";
 
   const merged = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -1,0 +1,47 @@
+{
+  "1": {
+    "class_type": "BreezeTTS2LoadModel",
+    "inputs": {
+      "model": "bf16 (best quality)",
+      "dtype": "auto",
+      "device": "auto",
+      "attention": "auto",
+      "decode_mode": "eager",
+      "download_if_missing": true
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "{{audio}}"
+    }
+  },
+  "3": {
+    "class_type": "BreezeTTS2VoiceDirection",
+    "inputs": {
+      "breeze_model": ["1", 0],
+      "text": "{{prompt}}",
+      "reference_audio": ["2", 0],
+      "reference_text": "{{reference_text}}",
+      "instruction": "{{instruction}}",
+      "cfg_scale": "{{cfg}}",
+      "stitch_reference": "none",
+      "max_new_tokens": 1500,
+      "temperature": 0.9,
+      "top_k": 50,
+      "top_p": 1.0,
+      "repetition_penalty": 1.1,
+      "depth_temperature": 0.9,
+      "depth_top_k": 50,
+      "depth_top_p": 1.0,
+      "seed": "{{seed}}"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "audio": ["3", 0],
+      "filename_prefix": "{{filename_prefix}}"
+    }
+  }
+}
