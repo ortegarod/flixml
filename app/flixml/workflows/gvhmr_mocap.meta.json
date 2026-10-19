@@ -1,0 +1,48 @@
+{
+  "id": "gvhmr_mocap",
+  "name": "GVHMR Motion Capture",
+  "description": "Pulls one person's body motion out of a video with GVHMR. The pack author's two bundled workflows as shipped: GVHMR.json (clip + mask video of the same clip, person white on black \u2192 GVHMRInference \u2192 SMPLViewer) and smpl_to_bvh_pipeline.json (SMPLtoBVH \u2192 BVHViewer), joined where the author's tooltip says: SMPLtoBVH reads GVHMRInference's npz_path. Writes <filename_prefix>_motion.bvh, a GLB of the motion (the pack's SMPLToGLB) and smpl_params_*.npz to the node's output folder, plus a preview video for the gallery: HY-Motion's HYMotionPreview2D draws the captured skeleton from the front (azimuth 90), at the clip's fps, up to 500 frames. Licence: GVHMR and its SMPL body model are non-commercial, research and education only. Needs the ComfyUI-MotionCapture (github.com/PozzettiAndrea/ComfyUI-MotionCapture) and ComfyUI-HyMotion (github.com/PozzettiAndrea/ComfyUI-HyMotion) node packs.",
+  "task": "video-to-video",
+  "output_type": "video",
+  "requirements": {
+    "vram_gb": 8,
+    "workflow_type": "gvhmr",
+    "supports_lora": false,
+    "requires_video": true
+  },
+  "compatible_providers": [
+    "local"
+  ],
+  "params": {
+    "prompt": {
+      "type": "str",
+      "required": true,
+      "default": "motion capture",
+      "description": "Not used by the graph; Studio's video endpoint requires one. Describe the clip."
+    },
+    "video": {
+      "type": "str",
+      "required": true,
+      "description": "The clip to capture motion from, as a ComfyUI input filename."
+    },
+    "video_mask": {
+      "type": "str",
+      "required": true,
+      "description": "Mask video of the same clip, person white on black, same frame count (author's tooltip: e.g. a SAM3 mask rendered to video). ComfyUI input filename on the node; the pack ships tennis_mask.mp4 for tennis.mp4."
+    },
+    "fps": {
+      "type": "int",
+      "default": 30,
+      "description": "Frame rate of the BVH and the preview video. Set it to the clip's own rate (the pack's tennis.mp4 is 60), or both play at the wrong speed."
+    },
+    "moving_camera": {
+      "type": "bool",
+      "default": false,
+      "description": "True when the camera moves; GVHMR then estimates the camera's motion as well."
+    },
+    "filename_prefix": {
+      "type": "str",
+      "default": "gvhmr_mocap"
+    }
+  }
+}

@@ -6,7 +6,7 @@
 
 The complete catalog of shipped generation workflows, grouped by task. This is generated from each workflow's `.meta.json`, which is also served live at `GET /api/workflows` for the catalog and `GET /api/workflows/{id}` for one workflow's params in full — those endpoints are the source of truth and may include extra per-install workflows kept in `app/flixml/workflows/local/` (not listed here).
 
-**16 workflows** across 6 task types.
+**17 workflows** across 6 task types.
 
 | Workflow | Task | What it does |
 |---|---|---|
@@ -23,6 +23,7 @@ The complete catalog of shipped generation workflows, grouped by task. This is g
 | `wan22_t2v` | Text → Video | Text-to-video with Wan 2.2 — generate a short clip directly from a prompt, no source image |
 | `infinitetalk_i2v` | Image → Video | Audio-driven talking-head |
 | `wan22_i2v` | Image → Video | Image-to-video with Wan 2.2 — animate a still into a clip, with a motion prompt driving the movement |
+| `gvhmr_mocap` | Video → Video | Pulls one person's body motion out of a video with GVHMR |
 | `infinitetalk_v2v` | Video → Video | Audio-driven lip-sync applied on top of a driving motion clip |
 | `sam3_video_mask` | Video → Video | Cuts one subject out of a video as a mask: the subject white, everything else black, same frame count and frame rate as the clip |
 | `breeze_tts2_direction` | Text → Speech | Speaks a line in a voice cloned from a short reference clip, directed in plain English: tone, emotion, pace and delivery |
@@ -345,6 +346,21 @@ Image-to-video with Wan 2.2 — animate a still into a clip, with a motion promp
   - `low_lora_3_strength` · _float_ · default `1.0` — Weight of the third low-noise LoRA. Ignored when low_lora_3 is empty.
 
 ## Video → Video
+
+### `gvhmr_mocap` — GVHMR Motion Capture
+
+Pulls one person's body motion out of a video with GVHMR. The pack author's two bundled workflows as shipped: GVHMR.json (clip + mask video of the same clip, person white on black → GVHMRInference → SMPLViewer) and smpl_to_bvh_pipeline.json (SMPLtoBVH → BVHViewer), joined where the author's tooltip says: SMPLtoBVH reads GVHMRInference's npz_path. Writes <filename_prefix>_motion.bvh, a GLB of the motion (the pack's SMPLToGLB) and smpl_params_*.npz to the node's output folder, plus a preview video for the gallery: HY-Motion's HYMotionPreview2D draws the captured skeleton from the front (azimuth 90), at the clip's fps, up to 500 frames. Licence: GVHMR and its SMPL body model are non-commercial, research and education only. Needs the ComfyUI-MotionCapture (github.com/PozzettiAndrea/ComfyUI-MotionCapture) and ComfyUI-HyMotion (github.com/PozzettiAndrea/ComfyUI-HyMotion) node packs.
+
+- **Output:** video
+- **Requirements:** needs video, ~8 GB VRAM
+- **Providers:** local
+- **Params:**
+  - `prompt` · _str_ · **required** · default `motion capture` — Not used by the graph; Studio's video endpoint requires one. Describe the clip.
+  - `video` · _str_ · **required** — The clip to capture motion from, as a ComfyUI input filename.
+  - `video_mask` · _str_ · **required** — Mask video of the same clip, person white on black, same frame count (author's tooltip: e.g. a SAM3 mask rendered to video). ComfyUI input filename on the node; the pack ships tennis_mask.mp4 for tennis.mp4.
+  - `fps` · _int_ · default `30` — Frame rate of the BVH and the preview video. Set it to the clip's own rate (the pack's tennis.mp4 is 60), or both play at the wrong speed.
+  - `moving_camera` · _bool_ · default `False` — True when the camera moves; GVHMR then estimates the camera's motion as well.
+  - `filename_prefix` · _str_ · default `gvhmr_mocap`
 
 ### `infinitetalk_v2v` — InfiniteTalk Video-to-Video (motion + lip-sync)
 

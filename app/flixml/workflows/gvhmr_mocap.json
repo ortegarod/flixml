@@ -1,0 +1,153 @@
+{
+  "14": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "{{video}}"
+    }
+  },
+  "15": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "{{video_mask}}"
+    }
+  },
+  "2": {
+    "class_type": "LoadGVHMRModels",
+    "inputs": {
+      "model_path_override": "",
+      "precision": "auto",
+      "attention": "auto",
+      "load_dpvo": false
+    }
+  },
+  "16": {
+    "class_type": "GVHMRInference",
+    "inputs": {
+      "video": [
+        "14",
+        0
+      ],
+      "video_mask": [
+        "15",
+        0
+      ],
+      "config": [
+        "2",
+        0
+      ],
+      "moving_camera": "{{moving_camera}}",
+      "focal_length_mm": 0,
+      "bbox_scale": 1.2,
+      "vo_method": "simple_vo",
+      "vo_scale": 0.5,
+      "vo_step": 8,
+      "chunk_size": 32
+    }
+  },
+  "11": {
+    "class_type": "SMPLViewer",
+    "inputs": {
+      "npz_path": [
+        "16",
+        0
+      ],
+      "frame_skip": 1,
+      "mesh_color": "#4a9eff"
+    }
+  },
+  "10": {
+    "class_type": "SMPLtoBVH",
+    "inputs": {
+      "npz_path": [
+        "16",
+        0
+      ],
+      "filename": "{{filename_prefix}}_motion.bvh",
+      "fps": "{{fps}}",
+      "scale": 1
+    }
+  },
+  "3": {
+    "class_type": "BVHViewer",
+    "inputs": {
+      "bvh_data": [
+        "10",
+        0
+      ]
+    }
+  },
+  "20": {
+    "class_type": "HYMotionNPZToSMPLParams",
+    "inputs": {
+      "npz_path": [
+        "16",
+        0
+      ]
+    }
+  },
+  "21": {
+    "class_type": "HYMotionSMPLToData",
+    "inputs": {
+      "smpl_params": [
+        "20",
+        0
+      ],
+      "text": "",
+      "duration": 0
+    }
+  },
+  "22": {
+    "class_type": "HYMotionPreview2D",
+    "inputs": {
+      "motion_data": [
+        "21",
+        0
+      ],
+      "width": 512,
+      "height": 512,
+      "up_axis": "y",
+      "batch_index": 0,
+      "frame_index": 0,
+      "frame_skip": 1,
+      "keep_duration": false,
+      "max_frames": 500,
+      "draw_skeleton": true,
+      "elevation": 20,
+      "azimuth": 90,
+      "scale": 0.5,
+      "force_root": false
+    }
+  },
+  "23": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "22",
+        0
+      ],
+      "fps": "{{fps}}"
+    }
+  },
+  "24": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "23",
+        0
+      ],
+      "filename_prefix": "{{filename_prefix}}",
+      "format": "auto",
+      "codec": "auto"
+    }
+  },
+  "30": {
+    "class_type": "SMPLToGLB",
+    "inputs": {
+      "npz_path": [
+        "16",
+        0
+      ],
+      "fps": "{{fps}}"
+    }
+  }
+}
