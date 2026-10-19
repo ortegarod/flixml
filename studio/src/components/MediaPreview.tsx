@@ -14,9 +14,7 @@ interface MediaPreviewProps {
 }
 
 /**
- * The picture itself, wherever media is shown: a poster-backed video or an image.
- * Audio has no picture, so its card shows its words: the line, then how it was
- * directed. It plays in the lightbox.
+ * The picture itself, wherever media is shown: a poster-backed video, an image, or an audio card.
  *
  * A video plays while it is on screen and pauses when it scrolls away — see
  * `usePlayWhileVisible`. It never preloads, so a page of them fetches only what
@@ -27,8 +25,6 @@ export function MediaPreview({ type, url, thumb, alt, className = "", text, deta
   const videoRef = usePlayWhileVisible(isVideo);
 
   if (type === "audio") {
-    // Two fixed halves: the waveform mark at the foot of the top one, the line and its
-    // direction from the top of the bottom one, clamped.
     return (
       <div className={`relative flex flex-col overflow-hidden bg-gray-900 px-6 text-center ${className}`}>
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,rgba(255,255,255,0.07),transparent_65%)]" />

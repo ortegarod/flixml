@@ -235,7 +235,6 @@ class GenerationService:
         # no seed gets a random one here, and this is the only place it exists — nothing
         # reads it back off the node afterwards. It goes into the job metadata below so a
         # clip your human liked can be rolled again.
-        # Drawn under 2**31: some nodes (Breeze TTS 2) cap their seed input at a signed int32.
         resolved_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
         template_params["seed"] = resolved_seed
         if filename_prefix is not None:
