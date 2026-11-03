@@ -9,7 +9,7 @@ FlixML is a workbench for AI-driven image and video generation. Every stage runs
 
 ## The API
 
-The API is at the same address that serves this guide (`/api/guide`); every path below is under it. Send your key on every request as `Authorization: Bearer <key>`. A 401 means the key is missing or revoked; a 403 or 404 on something your human can see means your key isn't scoped to it.
+The API is at the same address that serves this guide (`/api/guide`); every path below is under it. Send your key on every request as `Authorization: Bearer <key>`. A 401 means the key is missing or revoked; a 403 or 404 on something your human can see means your key isn't scoped to it. A 503 `Can't connect to ComfyUI on <node> (<host>:<port>). Is it running?` means that node's ComfyUI is down: it answers at once, so pick another node or retry later.
 
 ```bash
 API=<studio-address>

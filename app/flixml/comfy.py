@@ -1,28 +1,74 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
+from . import node_events
+
 
 logger = logging.getLogger("flixml.comfy")
+
+CONNECT_TIMEOUT_SECONDS = 5.0
+
+
+class NodeUnreachable(httpx.ConnectError):
+    """A node's ComfyUI could not be reached; the API answers 503 with this message."""
+
+    def __init__(self, node_id: str, base_url: str) -> None:
+        parsed = urlparse(base_url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        self.node_id = node_id
+        super().__init__(f"Can't connect to ComfyUI on {node_id} ({parsed.hostname}:{port}). Is it running?")
+
+
+def request_timeout(read_seconds: float) -> httpx.Timeout:
+    """A long read timeout for slow ComfyUI calls, a short one to find out the node is down."""
+    return httpx.Timeout(read_seconds, connect=min(CONNECT_TIMEOUT_SECONDS, read_seconds))
+
+
+@contextmanager
+def reaching(node_id: str | None, base_url: str) -> Iterator[None]:
+    """Fail at once with NodeUnreachable when the node is known down or refuses a connection."""
+    if node_id and node_events.node_unreachable(node_id):
+        raise NodeUnreachable(node_id, base_url)
+    try:
+        yield
+    except NodeUnreachable:
+        raise
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        logger.warning(
+            "comfy unreachable",
+            extra={"event": "comfy.http.unreachable", "base_url": base_url, "error": str(exc)},
+        )
+        raise NodeUnreachable(node_id or urlparse(base_url).hostname or "node", base_url) from exc
 
 
 class ComfyClient:
     """Small typed wrapper around ComfyUI's native HTTP API."""
 
-    def __init__(self, base_url: str, timeout: float = 120.0) -> None:
+    def __init__(self, base_url: str, timeout: float = 120.0, node_id: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.node_id = node_id
+
+    def _reach(self):
+        return reaching(self.node_id, self.base_url)
 
     async def get(self, path: str) -> Any:
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(f"{self.base_url}{path}")
-                response.raise_for_status()
-                return response.json()
+            with self._reach():
+                async with httpx.AsyncClient(timeout=request_timeout(self.timeout)) as client:
+                    response = await client.get(f"{self.base_url}{path}")
+                    response.raise_for_status()
+                    return response.json()
+        except NodeUnreachable:
+            raise
         except httpx.HTTPError:
             logger.exception(
                 "comfy get failed",
@@ -42,21 +88,25 @@ class ComfyClient:
         record of one replies 404 — that is information, not an error, and logging it
         as an exception buried the real failures in stack traces.
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(f"{self.base_url}{path}")
-            if response.status_code == 404:
-                return None
-            response.raise_for_status()
-            return response.json()
+        with self._reach():
+            async with httpx.AsyncClient(timeout=request_timeout(self.timeout)) as client:
+                response = await client.get(f"{self.base_url}{path}")
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
 
     async def post(self, path: str, payload: dict[str, Any] | None = None) -> Any:
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(f"{self.base_url}{path}", json=payload or {})
-                response.raise_for_status()
-                if not response.content:
-                    return None
-                return response.json()
+            with self._reach():
+                async with httpx.AsyncClient(timeout=request_timeout(self.timeout)) as client:
+                    response = await client.post(f"{self.base_url}{path}", json=payload or {})
+                    response.raise_for_status()
+                    if not response.content:
+                        return None
+                    return response.json()
+        except NodeUnreachable:
+            raise
         except httpx.HTTPError:
             logger.exception(
                 "comfy post failed",
@@ -74,10 +124,13 @@ class ComfyClient:
         if client_id:
             payload["client_id"] = client_id
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(f"{self.base_url}/prompt", json=payload)
-                response.raise_for_status()
-                return response.json()
+            with self._reach():
+                async with httpx.AsyncClient(timeout=request_timeout(self.timeout)) as client:
+                    response = await client.post(f"{self.base_url}/prompt", json=payload)
+                    response.raise_for_status()
+                    return response.json()
+        except NodeUnreachable:
+            raise
         except httpx.HTTPError:
             logger.exception(
                 "comfy queue_prompt failed",
@@ -96,10 +149,11 @@ class ComfyClient:
         try:
             with path.open("rb") as fh:
                 files = {"image": (path.name, fh, "application/octet-stream")}
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(f"{self.base_url}/upload/image", data=data, files=files)
-                    response.raise_for_status()
-                    result = response.json()
+                with self._reach():
+                    async with httpx.AsyncClient(timeout=request_timeout(self.timeout)) as client:
+                        response = await client.post(f"{self.base_url}/upload/image", data=data, files=files)
+                        response.raise_for_status()
+                        result = response.json()
             logger.info(
                 "comfy upload_image ok",
                 extra={
@@ -110,6 +164,8 @@ class ComfyClient:
                 },
             )
             return result
+        except NodeUnreachable:
+            raise
         except httpx.HTTPError:
             logger.exception(
                 "comfy upload_image failed",
@@ -132,10 +188,11 @@ class ComfyClient:
         try:
             with path.open("rb") as fh:
                 files = {"image": (path.name, fh, "application/octet-stream")}
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(f"{self.base_url}/upload/image", data=data, files=files)
-                    response.raise_for_status()
-                    result = response.json()
+                with self._reach():
+                    async with httpx.AsyncClient(timeout=request_timeout(self.timeout)) as client:
+                        response = await client.post(f"{self.base_url}/upload/image", data=data, files=files)
+                        response.raise_for_status()
+                        result = response.json()
             logger.info(
                 "comfy upload_input_file ok",
                 extra={
@@ -146,6 +203,8 @@ class ComfyClient:
                 },
             )
             return result
+        except NodeUnreachable:
+            raise
         except httpx.HTTPError:
             logger.exception(
                 "comfy upload_input_file failed",

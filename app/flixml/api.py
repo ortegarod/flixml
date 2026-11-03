@@ -20,12 +20,12 @@ import httpx
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi import Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import SESSION_COOKIE, Agent, agent_for_key, authorize, can_change_file, can_read_file, current_agent, generate_key, hash_key, media_viewer, owner_scope, owns, set_session_cookie
 from . import events, facematch, node_events
-from .comfy import ComfyClient
+from .comfy import ComfyClient, NodeUnreachable
 from .config import ComfyNode, get_settings
 from . import db
 from .db import close_db, delete_character, delete_media_rows, delete_project, delete_project_render_row, delete_project_scene, delete_project_shot, delete_project_shot_versions_by_files, get_character, get_job, get_latest_training_job, get_project, get_project_render, get_project_scene, get_project_shot, get_project_shot_version, get_project_shot_version_by_prompt, get_training_job, init_db, list_active_jobs, list_characters, list_datasets, list_jobs, list_jobs_by_character, list_media, list_project_renders, list_project_scenes, list_project_shot_versions, list_project_shots, list_projects, list_training_jobs, media_catalog_fingerprints, media_count, next_render_number, next_shot_version_number, save_job, save_training_job, update_job_run_times, update_job_status, update_training_job_status, upsert_character, upsert_dataset, upsert_media, upsert_project, upsert_project_render, upsert_project_scene, upsert_project_shot, upsert_project_shot_version, utc_from_timestamp, workflow_run_times
@@ -169,6 +169,11 @@ app = FastAPI(
     version="0.1.0",
     dependencies=[Depends(authorize)],
 )
+
+
+@app.exception_handler(NodeUnreachable)
+async def _node_unreachable(request: Request, exc: NodeUnreachable) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
 class SessionRequest(BaseModel):
@@ -954,13 +959,13 @@ class LoraTrainingStartResponse(BaseModel):
 def comfy(node: ComfyNode | None = None) -> ComfyClient:
     settings = get_settings()
     target = node or settings.comfy_node_for_role("default")
-    return ComfyClient(target.comfyui.normalized_url, settings.request_timeout_seconds)
+    return ComfyClient(target.comfyui.normalized_url, settings.request_timeout_seconds, target.id)
 
 
 def comfy_for_role(role: str) -> tuple[ComfyClient, ComfyNode]:
     settings = get_settings()
     node = settings.comfy_node_for_role(role)  # type: ignore[arg-type]
-    return ComfyClient(node.comfyui.normalized_url, settings.request_timeout_seconds), node
+    return ComfyClient(node.comfyui.normalized_url, settings.request_timeout_seconds, node.id), node
 
 
 def comfy_node_for_provider(provider: str | None) -> ComfyNode | None:

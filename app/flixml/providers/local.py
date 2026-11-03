@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import httpx
 
+from ..comfy import NodeUnreachable, reaching, request_timeout
 from ..config import GpuNode, get_settings
 
 
@@ -95,7 +96,7 @@ class LocalComfyUIProvider(GPUProvider):
     async def initialize(self) -> None:
         """Initialize HTTP client."""
         self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(self.timeout_sec),
+            timeout=request_timeout(self.timeout_sec),
             headers={"Content-Type": "application/json"},
         )
     
@@ -135,7 +136,8 @@ class LocalComfyUIProvider(GPUProvider):
                 "client_id": self.client_id,
             }
             started = time.perf_counter()
-            resp = await client.post(f"{self.base_url}/prompt", json=payload)
+            with reaching(self.node_id, self.base_url):
+                resp = await client.post(f"{self.base_url}/prompt", json=payload)
             resp.raise_for_status()
             data = resp.json()
 
@@ -171,6 +173,8 @@ class LocalComfyUIProvider(GPUProvider):
                 provider_metadata={"client_id": self.client_id},
             )
 
+        except NodeUnreachable:
+            raise
         except httpx.ConnectError as e:
             logger.error(
                 "comfy unreachable",
