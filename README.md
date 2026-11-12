@@ -123,6 +123,9 @@ Keys protect Studio, not your ComfyUI nodes. ComfyUI has no authentication of it
 | `FLIXML_COMFY_LORA_DIR` | Required. ComfyUI `models/loras` folder trained LoRAs are copied to |
 | `ELEVENLABS_API_KEY` | Optional. Lists ElevenLabs voices at `/api/tts/voices` and speaks lines at `/api/tts/generate`. |
 | `ELEVENLABS_VOICE_ID` | Optional. Default voice for `/api/tts/generate` when the request names none. |
+| `RUNPOD_API_KEY` | Optional. With `RUNPOD_ENDPOINT_ID`, registers a RunPod serverless provider. |
+| `RUNPOD_ENDPOINT_ID` | Optional. Your RunPod serverless endpoint ID. |
+| `RUNPOD_GPU_TYPE` | Optional. The GPU it asks RunPod for, and the basis of its cost estimate. Default `RTX4090`. |
 | `LOG_LEVEL` | Optional. `DEBUG`, `INFO` (default), `WARNING` or `ERROR`. |
 
 ### Logs
